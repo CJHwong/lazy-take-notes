@@ -1,0 +1,65 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+wheels/
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Install / editable installs
+*.egg-link
+pip-wheel-metadata/
+
+# Unit test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# mypy
+.mypy_cache/
+
+# ruff
+.ruff_cache/
+
+# import-linter
+.import_linter_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.*
+
+# Logs
+*.log
+
+# Model files (large binaries)
+*.bin
+*.onnx
+
+# Procject-specific
+output/
