@@ -256,9 +256,15 @@ class App(TextualApp):
             self._update_hints('recording')
         elif message.status == 'stopped':
             bar.recording = False
-            if self._audio_stopped and self._controller.digest_state.buffer:
-                self._run_digest_worker(is_final=False)
             self._update_hints('stopped')
+            if self._pending_quit:
+                # Quit was triggered while audio was running; flush is now complete.
+                if self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0:
+                    self._run_final_digest()
+                else:
+                    self.exit()
+            elif self._audio_stopped and self._controller.digest_state.buffer:
+                self._run_digest_worker(is_final=False)
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._update_hints('error')
@@ -452,6 +458,7 @@ class App(TextualApp):
 
         self._cancel_audio_workers()
 
+        was_already_stopped = self._audio_stopped
         if not self._audio_stopped:
             self._audio_stopped = True
             bar = self.query_one('#status-bar', StatusBar)
@@ -460,6 +467,13 @@ class App(TextualApp):
             bar.stopped = True
             self._update_hints('stopped')
 
+        if not was_already_stopped:
+            # Audio worker is still flushing — defer final digest/exit until
+            # AudioWorkerStatus(stopped) confirms the flush is complete.
+            self._pending_quit = True
+            return
+
+        # Audio was already stopped — flush already happened, buffer is up to date.
         if self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0:
             self._pending_quit = True
             self._run_final_digest()

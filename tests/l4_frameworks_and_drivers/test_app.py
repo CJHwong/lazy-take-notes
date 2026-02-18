@@ -466,12 +466,18 @@ class TestQuitWithFinalDigest:
                     assert app._audio_stopped is True
 
     @pytest.mark.asyncio
-    async def test_quit_no_data_exits_immediately(self, tmp_path):
+    async def test_quit_no_data_exits_after_audio_stops(self, tmp_path):
         app = make_app(tmp_path)
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 with patch.object(app, 'exit') as mock_exit:
                     await pilot.press('q')
+                    await pilot.pause()
+                    # 'q' defers exit until the audio worker confirms its flush is done
+                    assert app._pending_quit is True
+                    mock_exit.assert_not_called()
+
+                    app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
                     mock_exit.assert_called_once()
 
