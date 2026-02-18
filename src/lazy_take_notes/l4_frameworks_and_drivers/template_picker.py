@@ -7,6 +7,7 @@ from collections import defaultdict
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.events import Key
 from textual.widgets import Input, ListItem, ListView, Markdown, Static
 
 from lazy_take_notes.l1_entities.template import SessionTemplate
@@ -40,6 +41,21 @@ class TemplateItem(ListItem):
 
     def compose(self) -> ComposeResult:
         yield Static(self._label_text, markup=True)
+
+
+class _TemplateListView(ListView):
+    """ListView that pops focus back to the filter input when up is pressed on the first item."""
+
+    def on_key(self, event: Key) -> None:
+        if event.key != 'up':
+            return
+        first_selectable = next(
+            (i for i, child in enumerate(self.children) if isinstance(child, TemplateItem)),
+            None,
+        )
+        if first_selectable is not None and self.index == first_selectable:
+            self.app.query_one('#search-input', Input).focus()
+            event.prevent_default()
 
 
 class TemplatePicker(App[str | None]):
@@ -107,7 +123,7 @@ class TemplatePicker(App[str | None]):
         with Horizontal(id='picker-layout'):
             with Vertical(id='list-pane'):
                 yield Input(placeholder='Filter templates...', id='search-input')
-                yield ListView(id='template-list')
+                yield _TemplateListView(id='template-list')
             with VerticalScroll(id='template-preview', can_focus=False):
                 yield Markdown('', id='preview-md')
         yield Static(
@@ -119,12 +135,17 @@ class TemplatePicker(App[str | None]):
         self._rebuild_list()
         self.query_one('#search-input', Input).focus()
 
+    def on_key(self, event: Key) -> None:
+        if event.key == 'down' and self.focused is self.query_one('#search-input', Input):
+            self.query_one('#template-list', _TemplateListView).focus()
+            event.prevent_default()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         self._rebuild_list(event.value.strip().lower())
 
     def _rebuild_list(self, query: str = '') -> None:
         """Rebuild the ListView contents, optionally filtered by *query*."""
-        list_view = self.query_one('#template-list', ListView)
+        list_view = self.query_one('#template-list', _TemplateListView)
         list_view.clear()
 
         # Group templates by locale.
