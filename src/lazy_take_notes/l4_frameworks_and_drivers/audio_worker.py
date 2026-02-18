@@ -17,6 +17,7 @@ from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import (
     TranscribeAudioUseCase,
 )
 from lazy_take_notes.l3_interface_adapters.presenters.messages import (
+    AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,
 )
@@ -115,6 +116,7 @@ def run_audio_worker(
     audio_q: queue.Queue[np.ndarray] = queue.Queue()
     all_segments: list[TranscriptSegment] = []
     session_start = time.monotonic()
+    _last_level_post: float = 0.0
 
     # Start raw audio recorder if requested
     raw_stream = None
@@ -156,6 +158,13 @@ def run_audio_worker(
                 now = time.monotonic() - session_start
                 use_case.set_session_offset(now)
                 use_case.feed_audio(data)
+
+                # Post audio level at ~10 Hz for the wave indicator
+                now_abs = time.monotonic()
+                if now_abs - _last_level_post >= 0.1:
+                    rms = float(np.sqrt(np.mean(data**2)))
+                    post_message(AudioLevel(rms=rms))
+                    _last_level_post = now_abs
 
                 # Drain remaining
                 while not audio_q.empty():

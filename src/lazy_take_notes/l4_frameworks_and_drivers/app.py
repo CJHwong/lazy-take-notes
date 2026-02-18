@@ -15,6 +15,7 @@ from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.presenters.messages import (
+    AudioLevel,
     AudioWorkerStatus,
     DigestError,
     DigestReady,
@@ -83,12 +84,6 @@ class App(TextualApp):
         self._pending_quit = False
         self._download_modal: DownloadModal | None = None
 
-        # Build keybinding hints
-        hints = [r'\[Space]Pause', r'\[s]Stop', r'\[h]Help']
-        hints.extend(rf'\[{qa.key}]{qa.label}' for qa in template.quick_actions)
-        hints.extend([r'\[c]Copy', r'\[q]Quit', r'\[Tab]Panel'])
-        self._keybinding_hints = ' '.join(hints)
-
         # Register dynamic quick action bindings
         for qa in template.quick_actions:
             self._bindings.bind(
@@ -109,12 +104,37 @@ class App(TextualApp):
         with Horizontal(id='main-panels'):
             yield TranscriptPanel(id='transcript-panel')
             yield DigestPanel(id='digest-panel')
-        yield StatusBar(
-            keybinding_hints=self._keybinding_hints,
-            id='status-bar',
-        )
+        yield StatusBar(id='status-bar')
+
+    def _hints_for_state(self, state: str) -> str:
+        qa_hints = '  '.join(rf'\[{qa.key}] {qa.label}' for qa in self._template.quick_actions)
+        if state == 'recording':
+            parts = [r'\[Space] pause', r'\[s] stop']
+            if qa_hints:
+                parts.append(qa_hints)
+            parts.append(r'\[h] help')
+            return '  '.join(parts)
+        if state == 'paused':
+            return r'\[Space] resume  \[s] stop  \[h] help'
+        if state == 'stopped':
+            parts = []
+            if qa_hints:
+                parts.append(qa_hints)
+            parts += [r'\[h] help', r'\[q] quit']
+            return '  '.join(parts)
+        return r'\[h] help  \[q] quit'  # idle / loading / downloading / error
+
+    def _update_hints(self, state: str) -> None:
+        try:
+            bar = self.query_one('#status-bar', StatusBar)
+            bar.keybinding_hints = self._hints_for_state(state)
+        except Exception:  # noqa: S110 — widget may not exist during startup
+            pass
 
     def on_mount(self) -> None:
+        self._update_hints('idle')
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.buf_max = self._config.digest.min_lines
         if self._missing_digest_models:
             panel = self.query_one('#digest-panel', DigestPanel)
             pull_cmds = '\n\n'.join(f'`ollama pull {m}`' for m in self._missing_digest_models)
@@ -197,7 +217,7 @@ class App(TextualApp):
         should_digest = self._controller.on_transcript_segments(message.segments)
 
         bar = self.query_one('#status-bar', StatusBar)
-        bar.segment_count = len(self._controller.all_segments)
+        bar.buf_count = len(self._controller.digest_state.buffer)
 
         if should_digest:
             self._run_digest_worker()
@@ -233,19 +253,26 @@ class App(TextualApp):
             bar.paused = False
             bar.stopped = False
             self.screen.refresh(layout=True)
+            self._update_hints('recording')
         elif message.status == 'stopped':
             bar.recording = False
             if self._audio_stopped and self._controller.digest_state.buffer:
                 self._run_digest_worker(is_final=False)
+            self._update_hints('stopped')
         elif message.status == 'error':
             self._dismiss_download_modal()
+            self._update_hints('error')
+        elif message.status == 'loading_model':
+            self._update_hints('idle')
+        elif message.status == 'model_ready':
+            self._update_hints('idle')
 
     def on_digest_ready(self, message: DigestReady) -> None:
         panel = self.query_one('#digest-panel', DigestPanel)
         panel.update_digest(message.markdown)
 
         bar = self.query_one('#status-bar', StatusBar)
-        bar.digest_count = message.digest_number
+        bar.buf_count = len(self._controller.digest_state.buffer)
         bar.activity = ''
 
     def on_digest_error(self, message: DigestError) -> None:
@@ -261,6 +288,13 @@ class App(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.push_screen(QueryModal(title=message.action_label, body=message.result))
+
+    def on_audio_level(self, message: AudioLevel) -> None:
+        try:
+            bar = self.query_one('#status-bar', StatusBar)
+            bar.audio_level = message.rms
+        except Exception:  # noqa: S110 — widget may not exist during startup
+            pass
 
     # --- Workers ---
 
@@ -320,11 +354,13 @@ class App(TextualApp):
             bar.paused = False
             bar.recording = True
             self.notify('Recording resumed', timeout=2)
+            self._update_hints('recording')
         else:
             self._audio_paused.set()
             bar.paused = True
             bar.recording = False
             self.notify('Recording paused', timeout=2)
+            self._update_hints('paused')
 
     def action_stop_recording(self) -> None:
         if self._audio_stopped:
@@ -337,6 +373,7 @@ class App(TextualApp):
         bar.recording = False
         bar.paused = False
         bar.stopped = True
+        self._update_hints('stopped')
 
         self.notify('Recording stopped. You can still browse and run quick actions.', timeout=5)
 
@@ -368,6 +405,22 @@ class App(TextualApp):
                 desc = f' - {qa.description}' if qa.description else ''
                 lines.append(f'- `{qa.key}` **{qa.label}**{desc}')
             lines.append('')
+
+        # Status bar
+        min_lines = self._config.digest.min_lines
+        lines.extend(
+            [
+                '### Status Bar',
+                '| Indicator | Meaning |',
+                '|-----------|---------|',
+                '| `● Rec` `❚❚ Paused` `■ Stopped` `○ Idle` | Recording state |',
+                f'| `buf N/{min_lines}` | Lines buffered toward next digest (fires at {min_lines}) |',
+                '| `00:00:00` | Recording time, pauses excluded |',
+                '| `▁▂▄█▄▂` | Mic input level — flat means silence detected |',
+                '| `⟳ Digesting…` | LLM digest cycle in progress |',
+                '',
+            ]
+        )
 
         # Keybindings
         lines.append('### Keybindings')
@@ -405,6 +458,7 @@ class App(TextualApp):
             bar.recording = False
             bar.paused = False
             bar.stopped = True
+            self._update_hints('stopped')
 
         if self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0:
             self._pending_quit = True

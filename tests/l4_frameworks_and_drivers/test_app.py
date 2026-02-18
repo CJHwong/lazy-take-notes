@@ -71,7 +71,7 @@ class TestTranscriptChunkHandling:
                 await pilot.pause()
 
                 bar = app.query_one('#status-bar', StatusBar)
-                assert bar.segment_count == 2
+                assert bar.buf_count == 2
 
 
 class TestAudioWorkerStatusHandling:
@@ -100,7 +100,7 @@ class TestDigestReadyHandling:
                 await pilot.pause()
 
                 bar = app.query_one('#status-bar', StatusBar)
-                assert bar.digest_count == 1
+                assert bar.activity == ''
 
 
 class TestPauseResume:
@@ -397,6 +397,53 @@ class TestMissingModels:
                 panel = app.query_one('#digest-panel', DigestPanel)
                 assert 'llama3.2' in panel._current_markdown
                 assert 'qwen2.5:0.5b' in panel._current_markdown
+
+
+class TestStatusBarHints:
+    @pytest.mark.asyncio
+    async def test_hints_on_mount(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                bar = app.query_one('#status-bar', StatusBar)
+                assert 'help' in bar.keybinding_hints
+                assert 'quit' in bar.keybinding_hints
+
+    @pytest.mark.asyncio
+    async def test_hints_when_recording(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+                bar = app.query_one('#status-bar', StatusBar)
+                assert 'pause' in bar.keybinding_hints
+                assert 'stop' in bar.keybinding_hints
+
+    @pytest.mark.asyncio
+    async def test_hints_when_paused(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+                await pilot.press('space')
+                await pilot.pause()
+                bar = app.query_one('#status-bar', StatusBar)
+                assert 'resume' in bar.keybinding_hints
+
+    @pytest.mark.asyncio
+    async def test_hints_when_stopped(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+                await pilot.press('s')
+                await pilot.pause()
+                bar = app.query_one('#status-bar', StatusBar)
+                assert 'quit' in bar.keybinding_hints
 
 
 class TestQuitWithFinalDigest:

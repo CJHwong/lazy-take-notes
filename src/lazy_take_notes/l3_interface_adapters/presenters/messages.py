@@ -59,3 +59,11 @@ class QueryResult(Message):
         super().__init__()
         self.result = result
         self.action_label = action_label
+
+
+class AudioLevel(Message):
+    """Posted by audio worker with current mic RMS level (~10 Hz during recording)."""
+
+    def __init__(self, rms: float) -> None:
+        super().__init__()
+        self.rms = rms
