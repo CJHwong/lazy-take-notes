@@ -1,0 +1,24 @@
+/* lazy-take-notes TUI layout */
+
+#header {
+    dock: top;
+    height: 1;
+    background: $primary;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#main-panels {
+    layout: horizontal;
+    height: 1fr;
+}
+
+#transcript-panel {
+    width: 1fr;
+}
+
+#digest-panel {
+    width: 1fr;
+}
