@@ -120,7 +120,7 @@ def cli(config_path, template_ref, output_dir, label, show_templates):
     base_dir = Path(output_dir or config.output.directory)
     out_dir = _make_session_dir(base_dir, label)
 
-    missing_models = _preflight_ollama(infra, config)
+    missing_digest, missing_interactive = _preflight_ollama(infra, config)
     _preflight_microphone()
 
     from lazy_take_notes.l4_frameworks_and_drivers.app import App
@@ -132,12 +132,13 @@ def cli(config_path, template_ref, output_dir, label, show_templates):
         template=template,
         output_dir=out_dir,
         controller=container.controller,
-        missing_models=missing_models,
+        missing_digest_models=missing_digest,
+        missing_interactive_models=missing_interactive,
     )
     app.run()
 
 
-def _preflight_ollama(infra, config) -> list[str]:
+def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
     from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (
         OllamaLLMClient,
     )
@@ -147,10 +148,13 @@ def _preflight_ollama(infra, config) -> list[str]:
     if not ok:
         click.echo(f'Warning: Ollama not reachable ({err}). Digests will fail.', err=True)
         click.echo('Transcript-only mode: audio capture will still work.', err=True)
-        return []
+        return [], []
 
-    models = list(dict.fromkeys([config.digest.model, config.interactive.model]))
-    return client.check_models(models)
+    unique_models = list(dict.fromkeys([config.digest.model, config.interactive.model]))
+    missing = set(client.check_models(unique_models))
+    missing_digest = [config.digest.model] if config.digest.model in missing else []
+    missing_interactive = [config.interactive.model] if config.interactive.model in missing else []
+    return missing_digest, missing_interactive
 
 
 def _preflight_microphone() -> None:

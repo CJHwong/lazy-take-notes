@@ -50,7 +50,8 @@ class App(TextualApp):
         template: SessionTemplate,
         output_dir: Path,
         controller: SessionController | None = None,
-        missing_models: list[str] | None = None,
+        missing_digest_models: list[str] | None = None,
+        missing_interactive_models: list[str] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -72,7 +73,8 @@ class App(TextualApp):
             container = DependencyContainer(config, template, output_dir)
             self._controller = container.controller
 
-        self._missing_models: list[str] = missing_models or []
+        self._missing_digest_models: list[str] = missing_digest_models or []
+        self._missing_interactive_models: list[str] = missing_interactive_models or []
 
         # Audio control state
         self._audio_paused = threading.Event()
@@ -113,11 +115,18 @@ class App(TextualApp):
         )
 
     def on_mount(self) -> None:
-        if self._missing_models:
+        if self._missing_digest_models:
             panel = self.query_one('#digest-panel', DigestPanel)
-            pull_cmds = '\n\n'.join(f'`ollama pull {m}`' for m in self._missing_models)
+            pull_cmds = '\n\n'.join(f'`ollama pull {m}`' for m in self._missing_digest_models)
             panel.update_digest(
                 f'**LLM model unavailable**\n\nDigests are disabled. To enable:\n\n{pull_cmds}\n\nThen restart.'
+            )
+        if self._missing_interactive_models:
+            models_str = ', '.join(self._missing_interactive_models)
+            self.notify(
+                f'Quick actions disabled: model {models_str} not found. Run: ollama pull {models_str}',
+                severity='warning',
+                timeout=10,
             )
         self._start_audio_worker()
         self.set_interval(1.0, self._refresh_status_bar)

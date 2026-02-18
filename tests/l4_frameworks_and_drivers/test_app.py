@@ -19,7 +19,11 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import T
 from tests.conftest import FakeLLMClient, FakePersistence
 
 
-def make_app(tmp_path: Path, missing_models: list[str] | None = None) -> App:
+def make_app(
+    tmp_path: Path,
+    missing_digest_models: list[str] | None = None,
+    missing_interactive_models: list[str] | None = None,
+) -> App:
     config = build_app_config({})
     template = YamlTemplateLoader().load('default_zh_tw')
     output_dir = tmp_path / 'output'
@@ -33,7 +37,12 @@ def make_app(tmp_path: Path, missing_models: list[str] | None = None) -> App:
         persistence=fake_persist,
     )
     return App(
-        config=config, template=template, output_dir=output_dir, controller=controller, missing_models=missing_models
+        config=config,
+        template=template,
+        output_dir=output_dir,
+        controller=controller,
+        missing_digest_models=missing_digest_models,
+        missing_interactive_models=missing_interactive_models,
     )
 
 
@@ -352,8 +361,8 @@ class TestTimerFreeze:
 
 class TestMissingModels:
     @pytest.mark.asyncio
-    async def test_digest_panel_shows_warning_when_models_missing(self, tmp_path):
-        app = make_app(tmp_path, missing_models=['llama3.2'])
+    async def test_digest_panel_shows_warning_when_digest_model_missing(self, tmp_path):
+        app = make_app(tmp_path, missing_digest_models=['llama3.2'])
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 await pilot.pause()
@@ -371,8 +380,17 @@ class TestMissingModels:
                 assert panel._current_markdown == ''
 
     @pytest.mark.asyncio
-    async def test_digest_panel_shows_all_missing_models(self, tmp_path):
-        app = make_app(tmp_path, missing_models=['llama3.2', 'qwen2.5:0.5b'])
+    async def test_digest_panel_empty_when_only_interactive_model_missing(self, tmp_path):
+        app = make_app(tmp_path, missing_interactive_models=['qwen2.5:0.5b'])
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                panel = app.query_one('#digest-panel', DigestPanel)
+                assert panel._current_markdown == ''
+
+    @pytest.mark.asyncio
+    async def test_digest_panel_shows_all_missing_digest_models(self, tmp_path):
+        app = make_app(tmp_path, missing_digest_models=['llama3.2', 'qwen2.5:0.5b'])
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 await pilot.pause()
