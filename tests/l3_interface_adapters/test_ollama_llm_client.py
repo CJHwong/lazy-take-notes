@@ -64,3 +64,38 @@ class TestOllamaLLMClient:
         ok, err = client.check_connectivity()
         assert ok is False
         assert 'Cannot connect' in err
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
+    def test_check_models_all_present(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.show.return_value = MagicMock()
+
+        client = OllamaLLMClient()
+        assert client.check_models(['llama3.2', 'qwen2.5']) == []
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
+    def test_check_models_some_missing(self, mock_client_cls):
+        import ollama as ollama_lib
+
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+
+        def _show(model):
+            if model == 'missing-model':
+                raise ollama_lib.ResponseError('model not found')
+            return MagicMock()
+
+        mock_client.show.side_effect = _show
+
+        client = OllamaLLMClient()
+        assert client.check_models(['llama3.2', 'missing-model']) == ['missing-model']
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
+    def test_check_models_connectivity_failure_returns_empty(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_client_cls.return_value = mock_client
+        mock_client.show.side_effect = ConnectionError('cannot connect')
+
+        client = OllamaLLMClient()
+        assert client.check_models(['llama3.2']) == []

@@ -30,3 +30,7 @@ class LLMClient(Protocol):
     def check_connectivity(self) -> tuple[bool, str]:
         """Pre-flight connectivity check. Returns (ok, error_message)."""
         ...
+
+    def check_models(self, models: list[str]) -> list[str]:
+        """Return model names from the list that are not available locally."""
+        ...

@@ -37,3 +37,17 @@ class OllamaLLMClient:
             return True, ''
         except Exception as e:
             return False, f'Cannot connect to Ollama: {e}'
+
+    def check_models(self, models: list[str]) -> list[str]:
+        """Return model names from the list that are not available locally."""
+        try:
+            client = ollama_sync.Client(host=self._host)
+            missing = []
+            for model in models:
+                try:
+                    client.show(model)
+                except ollama_sync.ResponseError:
+                    missing.append(model)
+            return missing
+        except Exception:
+            return []

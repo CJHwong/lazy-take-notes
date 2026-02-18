@@ -120,18 +120,24 @@ def cli(config_path, template_ref, output_dir, label, show_templates):
     base_dir = Path(output_dir or config.output.directory)
     out_dir = _make_session_dir(base_dir, label)
 
-    _preflight_ollama(infra)
+    missing_models = _preflight_ollama(infra, config)
     _preflight_microphone()
 
     from lazy_take_notes.l4_frameworks_and_drivers.app import App
     from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
 
     container = DependencyContainer(config, template, out_dir, infra=infra)
-    app = App(config=config, template=template, output_dir=out_dir, controller=container.controller)
+    app = App(
+        config=config,
+        template=template,
+        output_dir=out_dir,
+        controller=container.controller,
+        missing_models=missing_models,
+    )
     app.run()
 
 
-def _preflight_ollama(infra) -> None:
+def _preflight_ollama(infra, config) -> list[str]:
     from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (
         OllamaLLMClient,
     )
@@ -141,6 +147,10 @@ def _preflight_ollama(infra) -> None:
     if not ok:
         click.echo(f'Warning: Ollama not reachable ({err}). Digests will fail.', err=True)
         click.echo('Transcript-only mode: audio capture will still work.', err=True)
+        return []
+
+    models = list(dict.fromkeys([config.digest.model, config.interactive.model]))
+    return client.check_models(models)
 
 
 def _preflight_microphone() -> None:

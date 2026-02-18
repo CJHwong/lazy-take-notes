@@ -30,6 +30,7 @@ class FakeLLMClient:
         self.chat_calls: list[tuple[str, list[ChatMessage]]] = []
         self.chat_single_calls: list[tuple[str, str]] = []
         self._connectivity = (True, '')
+        self._missing_models: list[str] = []
 
     async def chat(self, model: str, messages: list[ChatMessage]) -> ChatResponse:
         self.chat_calls.append((model, list(messages)))
@@ -46,8 +47,14 @@ class FakeLLMClient:
         self._response = response
         self._prompt_tokens = prompt_tokens
 
+    def check_models(self, models: list[str]) -> list[str]:
+        return [m for m in models if m in self._missing_models]
+
     def set_connectivity(self, ok: bool, msg: str = '') -> None:
         self._connectivity = (ok, msg)
+
+    def set_missing_models(self, models: list[str]) -> None:
+        self._missing_models = list(models)
 
 
 class FakeTranscriber:
