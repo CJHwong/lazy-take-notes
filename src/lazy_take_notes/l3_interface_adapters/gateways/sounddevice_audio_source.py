@@ -7,7 +7,7 @@ import queue
 import numpy as np
 import sounddevice as sd
 
-SAMPLE_RATE = 16000
+from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 
 
 class SounddeviceAudioSource:

@@ -4,15 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lazy_take_notes.l1_entities.transcript import TranscriptSegment
-
-
-def _format_wall_time(seconds: float) -> str:
-    """Format seconds as HH:MM:SS for wall-clock display."""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    return f'{hours:02d}:{minutes:02d}:{secs:02d}'
+from lazy_take_notes.l1_entities.transcript import TranscriptSegment, format_wall_time
 
 
 class FilePersistenceGateway:
@@ -28,7 +20,7 @@ class FilePersistenceGateway:
 
     def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
         path = self._output_dir / 'transcript_raw.txt'
-        lines = [f'[{_format_wall_time(seg.wall_start)}] {seg.text}' for seg in segments]
+        lines = [f'[{format_wall_time(seg.wall_start)}] {seg.text}' for seg in segments]
         mode = 'a' if append else 'w'
         with path.open(mode, encoding='utf-8') as f:
             for line in lines:

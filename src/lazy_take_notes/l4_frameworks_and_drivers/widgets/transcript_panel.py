@@ -6,8 +6,7 @@ import pyperclip
 from textual.binding import Binding
 from textual.widgets import RichLog
 
-from lazy_take_notes.l1_entities.transcript import TranscriptSegment
-from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import _format_wall_time
+from lazy_take_notes.l1_entities.transcript import TranscriptSegment, format_wall_time
 
 
 class TranscriptPanel(RichLog):
@@ -33,7 +32,7 @@ class TranscriptPanel(RichLog):
     def append_segments(self, segments: list[TranscriptSegment]) -> None:
         """Append new transcript segments to the log."""
         for seg in segments:
-            timestamp = _format_wall_time(seg.wall_start)
+            timestamp = format_wall_time(seg.wall_start)
             self._all_text.append(f'[{timestamp}] {seg.text}')
             self.write(f'[dim]\\[{timestamp}][/dim] {seg.text}')
 

@@ -8,7 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-SAMPLE_RATE = 16000
+from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
+
 _FFMPEG_TIMEOUT = 300  # seconds
 
 

@@ -10,8 +10,9 @@ from pathlib import Path
 
 import numpy as np
 
+from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
+
 _BINARY = Path(__file__).parent.parent.parent / '_native' / 'bin' / 'coreaudio-tap'
-SAMPLE_RATE = 16000
 _BYTES_PER_SAMPLE = 4  # float32
 _CHUNK_FRAMES = SAMPLE_RATE // 10  # 100ms chunks
 

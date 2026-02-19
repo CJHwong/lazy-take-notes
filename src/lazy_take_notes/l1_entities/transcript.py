@@ -5,6 +5,14 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+def format_wall_time(seconds: float) -> str:
+    """Format seconds as HH:MM:SS for wall-clock display."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return f'{hours:02d}:{minutes:02d}:{secs:02d}'
+
+
 class TranscriptSegment(BaseModel):
     """A single transcribed speech segment."""
 

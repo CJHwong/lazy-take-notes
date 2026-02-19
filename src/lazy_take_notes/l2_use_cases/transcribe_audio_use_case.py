@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import numpy as np
 
+from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
-
-SAMPLE_RATE = 16000
 
 
 class TranscribeAudioUseCase:
