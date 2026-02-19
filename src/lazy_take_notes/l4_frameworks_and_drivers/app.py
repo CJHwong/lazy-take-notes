@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from textual.app import App as TextualApp
@@ -295,6 +296,7 @@ class App(TextualApp):
 
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_count = len(self._controller.digest_state.buffer)
+        bar.last_digest_time = time.monotonic()
         bar.activity = ''
 
     def on_digest_error(self, message: DigestError) -> None:
@@ -450,6 +452,7 @@ class App(TextualApp):
                 '| `● Rec` `❚❚ Paused` `■ Stopped` `○ Idle` | Recording state |',
                 f'| `buf N/{min_lines}` | Lines buffered toward next digest (fires at {min_lines}) |',
                 '| `00:00:00` | Recording time, pauses excluded |',
+                '| `last Xs ago` | Time elapsed since the last digest |',
                 '| `▁▂▄█▄▂` | Mic input level — flat means silence detected |',
                 '| `⟳ Digesting…` | LLM digest cycle in progress |',
                 '',

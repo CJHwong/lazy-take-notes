@@ -39,6 +39,7 @@ class StatusBar(Static):
     buf_count: reactive[int] = reactive(0)
     buf_max: reactive[int] = reactive(15)
     audio_level: reactive[float] = reactive(0.0)
+    last_digest_time: reactive[float] = reactive(0.0)
     keybinding_hints: reactive[str] = reactive('')
     _start_time: float = 0.0
     _frozen_elapsed: float | None = None
@@ -65,34 +66,34 @@ class StatusBar(Static):
     def watch_stopped(self, value: bool) -> None:
         """Freeze the elapsed timer (recording time only) when recording stops."""
         if value and self._frozen_elapsed is None:
+            now = time.monotonic()
             paused = self._paused_total
             if self._pause_start is not None:
-                paused += time.monotonic() - self._pause_start
-            self._frozen_elapsed = time.monotonic() - self._start_time - paused
+                paused += now - self._pause_start
+            self._frozen_elapsed = now - self._start_time - paused
 
     def watch_audio_level(self, value: float) -> None:
         """Push new level into rolling history and re-render."""
         self._level_history.append(value)
         self.refresh()
 
-    def _recording_elapsed(self) -> float:
+    def _recording_elapsed(self, now: float) -> float:
         """Elapsed seconds excluding any paused periods."""
         paused = self._paused_total
         if self._pause_start is not None:
-            paused += time.monotonic() - self._pause_start
-        return time.monotonic() - self._start_time - paused
+            paused += now - self._pause_start
+        return now - self._start_time - paused
 
-    def _format_elapsed(self) -> str:
-        if self._frozen_elapsed is not None:
-            elapsed = self._frozen_elapsed
-        else:
-            elapsed = self._recording_elapsed()
+    def _format_elapsed(self, now: float) -> str:
+        elapsed = self._frozen_elapsed if self._frozen_elapsed is not None else self._recording_elapsed(now)
         hours = int(elapsed // 3600)
         minutes = int((elapsed % 3600) // 60)
         secs = int(elapsed % 60)
         return f'{hours:02d}:{minutes:02d}:{secs:02d}'
 
     def render(self) -> str:
+        now = time.monotonic()
+
         if self.stopped:
             status_icon = '■ Stopped'
         elif self.paused:
@@ -108,12 +109,17 @@ class StatusBar(Static):
         else:
             status_icon = '○ Idle'
 
-        elapsed = self._format_elapsed()
         left_parts = [
             status_icon,
             f'buf {self.buf_count}/{self.buf_max}',
-            elapsed,
+            self._format_elapsed(now),
         ]
+        if self.last_digest_time > 0:
+            since = now - self.last_digest_time
+            if since < 60:
+                left_parts.append(f'last {int(since)}s ago')
+            else:
+                left_parts.append(f'last {int(since / 60)}m ago')
         if self.recording:
             wave = ''.join(_rms_to_char(v) for v in self._level_history)
             left_parts.append(wave)

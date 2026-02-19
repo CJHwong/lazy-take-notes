@@ -354,7 +354,8 @@ class TestTimerFreeze:
 
                 frozen_val = bar._frozen_elapsed
                 time.sleep(0.05)
-                assert bar._format_elapsed() == bar._format_elapsed()
+                now = time.monotonic()
+                assert bar._format_elapsed(now) == bar._format_elapsed(now)
                 assert bar._frozen_elapsed == frozen_val
 
 
@@ -532,3 +533,18 @@ class TestForceDigest:
                     await pilot.press('d')
                     await pilot.pause()
                     mock_digest.assert_not_called()
+
+
+class TestStatusBarLastDigestTime:
+    @pytest.mark.asyncio
+    async def test_last_digest_time_set_on_digest_ready(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                bar = app.query_one('#status-bar', StatusBar)
+                assert bar.last_digest_time == 0.0
+
+                app.post_message(DigestReady(markdown='## Topic\n', digest_number=1))
+                await pilot.pause()
+
+                assert bar.last_digest_time > 0.0
