@@ -24,9 +24,8 @@ pip install -e .
 ```bash
 ltn                                                     # start with defaults
 ltn --config ~/.config/lazy-take-notes/config.yaml      # custom config
-ltn --template path/to/template.yaml                    # custom template
 ltn --output-dir ./my_session                           # custom output dir
-ltn --list-templates                                    # show available templates
+ltn --audio-file recording.m4a                          # batch-transcribe a file
 ```
 
 ## Keys
@@ -60,73 +59,16 @@ interactive:
   model: "gemma3:12b"      # fast model for quick actions
 ollama:
   host: "http://localhost:11434"
-template: "default_zh_tw"
+template: "default_zh_tw"   # template file key (see TEMPLATES.md)
 output:
   directory: "./output"
 ```
 
 ## Templates
 
-Templates are YAML files that control prompts, labels, and quick actions. Run `ltn --list-templates` to see what's available.
+Templates control the LLM prompts, labels, and quick-action keys for a session. The template picker launches at startup — built-ins are listed there.
 
-### Creating your own
-
-Drop a YAML file in `~/.config/lazy-take-notes/templates/` and it's auto-discovered by name — no full path needed. User templates override built-ins of the same name.
-
-```yaml
-# ~/.config/lazy-take-notes/templates/ux_interview.yaml
-metadata:
-  name: "ux_interview"
-  description: "User research interview analyzer"
-  locale: "en"
-
-system_prompt: |
-  You are a UX researcher's assistant. You receive transcript segments from a
-  user research interview and extract structured insights. Track the
-  participant's exact words — direct quotes are gold. Distinguish between
-  observed behavior, stated preferences, and emotional reactions.
-  Return Markdown with sections:
-  ## Participant Profile, ## Pain Points, ## Feature Requests,
-  ## Direct Quotes, ## Behavioral Observations.
-
-digest_user_template: |
-  New transcript ({line_count} lines):
-  {new_lines}
-  {user_context}
-  Please update the research notes.
-
-final_user_template: |
-  Interview is over. Final transcript ({line_count} lines):
-  {new_lines}
-  Full transcript:
-  {full_transcript}
-  Produce the final research notes.
-
-quick_actions:
-  - key: "1"
-    label: "Pain Points"
-    description: "List all pain points expressed so far"
-    prompt_template: |
-      Current research notes:
-      {digest_markdown}
-      Recent transcript:
-      {recent_transcript}
-      List every pain point the participant has expressed, with direct quotes.
-  - key: "2"
-    label: "Sentiment"
-    description: "Analyze participant sentiment and engagement"
-    prompt_template: |
-      Current research notes:
-      {digest_markdown}
-      Recent transcript:
-      {recent_transcript}
-      How is the participant feeling about the product? Note shifts in tone.
-```
-
-```bash
-ltn --list-templates            # your template shows up with [user] tag
-ltn --template ux_interview     # use it by name
-```
+To add your own or override a built-in, drop a `.yaml` file in `~/.config/lazy-take-notes/templates/`. See [TEMPLATES.md](TEMPLATES.md) for the full schema and variable reference.
 
 ## Output
 
