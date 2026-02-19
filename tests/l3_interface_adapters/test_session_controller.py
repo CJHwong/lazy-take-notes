@@ -83,6 +83,38 @@ class TestRunDigest:
         _, _, is_final = fake_persist.history_calls[0]
         assert is_final is True
 
+    @pytest.mark.asyncio
+    async def test_final_digest_saves_context_when_set(self, controller):
+        ctrl, _, fake_persist = controller
+        ctrl.digest_state.buffer = ['Line 1']
+        ctrl.digest_state.all_lines = ['Line 1']
+        ctrl.user_context = 'Speaker A = Alice'
+
+        await ctrl.run_digest(is_final=True)
+
+        assert fake_persist.context_calls == ['Speaker A = Alice']
+
+    @pytest.mark.asyncio
+    async def test_final_digest_skips_context_save_when_empty(self, controller):
+        ctrl, _, fake_persist = controller
+        ctrl.digest_state.buffer = ['Line 1']
+        ctrl.digest_state.all_lines = ['Line 1']
+        ctrl.user_context = ''
+
+        await ctrl.run_digest(is_final=True)
+
+        assert fake_persist.context_calls == []
+
+    @pytest.mark.asyncio
+    async def test_non_final_digest_does_not_save_context(self, controller):
+        ctrl, _, fake_persist = controller
+        ctrl.digest_state.buffer = ['Line 1']
+        ctrl.user_context = 'some context'
+
+        await ctrl.run_digest(is_final=False)
+
+        assert fake_persist.context_calls == []
+
 
 class TestRunQuickAction:
     @pytest.mark.asyncio

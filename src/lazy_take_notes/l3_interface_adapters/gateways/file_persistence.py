@@ -33,6 +33,11 @@ class FilePersistenceGateway:
         path.write_text(content, encoding='utf-8')
         return path
 
+    def save_session_context(self, context: str) -> Path:
+        path = self._output_dir / 'session_context.txt'
+        path.write_text(context, encoding='utf-8')
+        return path
+
     def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:
         history_dir = self._output_dir / 'history'
         history_dir.mkdir(parents=True, exist_ok=True)

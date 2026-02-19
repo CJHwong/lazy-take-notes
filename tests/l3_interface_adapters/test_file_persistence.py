@@ -74,6 +74,21 @@ class TestSaveDigestMd:
         assert 'First version' not in content
 
 
+class TestSaveSessionContext:
+    def test_creates_file(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir)
+        path = gw.save_session_context('Speaker A = Alice\nFix: "rec" → "wreck"')
+        assert path.name == 'session_context.txt'
+        assert path.exists()
+        assert 'Speaker A = Alice' in path.read_text(encoding='utf-8')
+
+    def test_overwrites_on_second_call(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir)
+        gw.save_session_context('first')
+        gw.save_session_context('second')
+        assert (tmp_output_dir / 'session_context.txt').read_text(encoding='utf-8') == 'second'
+
+
 class TestSaveHistory:
     def test_creates_numbered_file(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)

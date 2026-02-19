@@ -22,3 +22,7 @@ class PersistenceGateway(Protocol):
     def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:
         """Save numbered history file."""
         ...
+
+    def save_session_context(self, context: str) -> Path:
+        """Save session context to disk."""
+        ...

@@ -44,6 +44,7 @@ class SessionController:
 
         self.all_segments: list[TranscriptSegment] = []
         self.latest_digest: str | None = None
+        self.user_context: str = ''
 
     def on_transcript_segments(self, segments: list[TranscriptSegment]) -> bool:
         """Process new transcript segments. Returns True if digest should trigger."""
@@ -69,6 +70,7 @@ class SessionController:
             template=self._template,
             is_final=is_final,
             full_transcript=full_transcript,
+            user_context=self.user_context,
         )
 
         if result.data is not None:
@@ -79,6 +81,8 @@ class SessionController:
                 self.digest_state.digest_count,
                 is_final=is_final,
             )
+            if is_final and self.user_context.strip():
+                self._persistence.save_session_context(self.user_context)
 
             # Compact if needed
             if self.digest_state.prompt_tokens > self._config.digest.compact_token_threshold:
@@ -98,4 +102,5 @@ class SessionController:
             model=self._config.interactive.model,
             latest_digest=self.latest_digest,
             all_segments=self.all_segments,
+            user_context=self.user_context,
         )

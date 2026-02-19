@@ -118,6 +118,7 @@ class FakePersistence:
         self.transcript_calls: list[tuple[list[TranscriptSegment], bool]] = []
         self.digest_calls: list[tuple[str, int]] = []
         self.history_calls: list[tuple[str, int, bool]] = []
+        self.context_calls: list[str] = []
 
     def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
         self.transcript_calls.append((segments, append))
@@ -130,6 +131,10 @@ class FakePersistence:
     def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:
         self.history_calls.append((markdown, digest_number, is_final))
         return self._output_dir / 'history' / f'digest_{digest_number:03d}.md'
+
+    def save_session_context(self, context: str) -> Path:
+        self.context_calls.append(context)
+        return self._output_dir / 'session_context.txt'
 
 
 # --- Standard Fixtures ---
