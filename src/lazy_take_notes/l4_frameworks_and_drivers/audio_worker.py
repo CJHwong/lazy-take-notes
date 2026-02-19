@@ -11,13 +11,11 @@ from typing import Any
 
 import numpy as np
 
+from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
-from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import (
-    SAMPLE_RATE,
-    TranscribeAudioUseCase,
-)
-from lazy_take_notes.l3_interface_adapters.presenters.messages import (
+from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import TranscribeAudioUseCase
+from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,

@@ -47,14 +47,14 @@ def _load_data(
                 data = yaml.safe_load(default_path.read_text(encoding='utf-8')) or {}
                 break
     if overrides:
-        _deep_merge(data, overrides)
+        deep_merge(data, overrides)
     return data
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     for key, value in override.items():
         if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            _deep_merge(base[key], value)
+            deep_merge(base[key], value)
         else:
             base[key] = value
     return base

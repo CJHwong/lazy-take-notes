@@ -7,6 +7,7 @@ import copy
 from pydantic import BaseModel, Field
 
 from lazy_take_notes.l1_entities.config import AppConfig
+from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import deep_merge
 
 APP_CONFIG_DEFAULTS: dict = {
     'transcription': {
@@ -32,16 +33,6 @@ APP_CONFIG_DEFAULTS: dict = {
         'save_audio': True,
     },
 }
-
-
-def deep_merge(base: dict, override: dict) -> dict:
-    """Recursively merge *override* into *base* (mutates base)."""
-    for key, value in override.items():
-        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
-            deep_merge(base[key], value)
-        else:
-            base[key] = value
-    return base
 
 
 def build_app_config(raw: dict) -> AppConfig:

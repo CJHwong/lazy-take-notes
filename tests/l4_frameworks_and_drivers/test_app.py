@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,9 +11,9 @@ import pytest
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
-from lazy_take_notes.l3_interface_adapters.presenters.messages import AudioWorkerStatus, DigestReady, TranscriptChunk
 from lazy_take_notes.l4_frameworks_and_drivers.app import App
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
+from lazy_take_notes.l4_frameworks_and_drivers.messages import AudioWorkerStatus, DigestReady, TranscriptChunk
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -100,7 +101,7 @@ class TestDigestReadyHandling:
                 await pilot.pause()
 
                 bar = app.query_one('#status-bar', StatusBar)
-                assert bar.activity == ''
+                assert not bar.activity
 
 
 class TestPauseResume:
@@ -343,8 +344,6 @@ class TestTimerFreeze:
 
     @pytest.mark.asyncio
     async def test_frozen_timer_does_not_change(self, tmp_path):
-        import time
-
         app = make_app(tmp_path)
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
@@ -377,7 +376,7 @@ class TestMissingModels:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 panel = app.query_one('#digest-panel', DigestPanel)
-                assert panel._current_markdown == ''
+                assert not panel._current_markdown
 
     @pytest.mark.asyncio
     async def test_digest_panel_empty_when_only_interactive_model_missing(self, tmp_path):
@@ -386,7 +385,7 @@ class TestMissingModels:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 panel = app.query_one('#digest-panel', DigestPanel)
-                assert panel._current_markdown == ''
+                assert not panel._current_markdown
 
     @pytest.mark.asyncio
     async def test_digest_panel_shows_all_missing_digest_models(self, tmp_path):

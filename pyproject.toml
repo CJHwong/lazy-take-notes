@@ -114,3 +114,11 @@ source_modules = ["lazy_take_notes.l3_interface_adapters"]
 forbidden_modules = [
     "lazy_take_notes.l4_frameworks_and_drivers",
 ]
+
+[[tool.importlinter.contracts]]
+name = "L3 adapters must not import textual"
+type = "forbidden"
+source_modules = ["lazy_take_notes.l3_interface_adapters"]
+forbidden_modules = [
+    "textual",
+]
