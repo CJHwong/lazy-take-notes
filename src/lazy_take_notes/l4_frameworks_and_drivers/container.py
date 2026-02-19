@@ -32,7 +32,7 @@ class DependencyContainer:
         template: SessionTemplate,
         output_dir: Path,
         infra: InfraConfig | None = None,
-        audio_mode: AudioMode = AudioMode.MIC_ONLY,
+        audio_mode: AudioMode | None = AudioMode.MIC_ONLY,
     ) -> None:
         self.config = config
         self.template = template
@@ -42,7 +42,7 @@ class DependencyContainer:
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
         self.llm_client: LLMClient = OllamaLLMClient(host=_infra.ollama.host)
         self.transcriber: Transcriber = WhisperTranscriber()
-        self.audio_source: AudioSource = self._build_audio_source(audio_mode)
+        self.audio_source: AudioSource | None = self._build_audio_source(audio_mode) if audio_mode is not None else None
         self.model_resolver: ModelResolver = HfModelResolver()
 
         self.controller = SessionController(

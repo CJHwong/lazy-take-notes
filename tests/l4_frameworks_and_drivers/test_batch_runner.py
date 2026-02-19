@@ -11,6 +11,7 @@ import pytest
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
+from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import run_batch
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import InfraConfig, build_app_config
 
 # 3 seconds of non-silent audio — enough for flush() to fire (min_speech_samples = 2s)
@@ -41,10 +42,8 @@ def _make_run_batch_mocks(
 
     mock_transcriber_instance = MagicMock()
     mock_transcriber_instance.transcribe.return_value = segments
-    mock_transcriber_cls = MagicMock(return_value=mock_transcriber_instance)
 
     mock_llm_instance = MagicMock()
-    mock_llm_cls = MagicMock(return_value=mock_llm_instance)
 
     mock_execute = AsyncMock(return_value=digest_result)
     mock_digest_cls = MagicMock(return_value=MagicMock(execute=mock_execute))
@@ -52,17 +51,22 @@ def _make_run_batch_mocks(
     mock_persistence_instance = MagicMock()
     mock_persistence_instance.save_digest_md.return_value = Path('/out/digest.md')
     mock_persistence_instance.output_dir = Path('/out')
-    mock_persistence_cls = MagicMock(return_value=mock_persistence_instance)
+
+    # Fake container wires the instances together (replaces DependencyContainer)
+    mock_container = MagicMock()
+    mock_container.transcriber = mock_transcriber_instance
+    mock_container.llm_client = mock_llm_instance
+    mock_container.persistence = mock_persistence_instance
+    mock_container_cls = MagicMock(return_value=mock_container)
 
     return {
         'load': mock_load,
         'resolver_cls': mock_resolver_cls,
-        'transcriber_cls': mock_transcriber_cls,
+        'container_cls': mock_container_cls,
         'transcriber_instance': mock_transcriber_instance,
-        'llm_cls': mock_llm_cls,
+        'llm_instance': mock_llm_instance,
         'digest_cls': mock_digest_cls,
         'execute': mock_execute,
-        'persistence_cls': mock_persistence_cls,
         'persistence_instance': mock_persistence_instance,
     }
 
@@ -84,13 +88,9 @@ class TestRunBatch:
         with (
             patch(f'{MODULE}.load_audio_file', mocks['load']),
             patch(f'{MODULE}.HfModelResolver', mocks['resolver_cls']),
-            patch(f'{MODULE}.WhisperTranscriber', mocks['transcriber_cls']),
-            patch(f'{MODULE}.OllamaLLMClient', mocks['llm_cls']),
+            patch(f'{MODULE}.DependencyContainer', mocks['container_cls']),
             patch(f'{MODULE}.RunDigestUseCase', mocks['digest_cls']),
-            patch(f'{MODULE}.FilePersistenceGateway', mocks['persistence_cls']),
         ):
-            from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import run_batch
-
             run_batch(audio_path, config, template, out_dir, infra)
 
     def test_happy_path_transcribes_and_digests(self, tmp_path: Path, capsys) -> None:
@@ -129,7 +129,7 @@ class TestRunBatch:
 
     def test_model_load_failure_exits_1(self, tmp_path: Path) -> None:
         mocks = _make_run_batch_mocks()
-        mocks['transcriber_cls'].return_value.load_model.side_effect = RuntimeError('corrupt model')
+        mocks['transcriber_instance'].load_model.side_effect = RuntimeError('corrupt model')
 
         with pytest.raises(SystemExit) as exc_info:
             self._run(tmp_path, mocks)

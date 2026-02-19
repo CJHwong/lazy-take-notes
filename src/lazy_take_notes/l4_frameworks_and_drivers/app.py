@@ -15,7 +15,8 @@ from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
-from lazy_take_notes.l3_interface_adapters.presenters.messages import (
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
+from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     DigestError,
@@ -24,7 +25,6 @@ from lazy_take_notes.l3_interface_adapters.presenters.messages import (
     QueryResult,
     TranscriptChunk,
 )
-from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import DownloadModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
@@ -156,51 +156,50 @@ class App(TextualApp):
         self.set_interval(1.0, self._refresh_status_bar)
 
     def _start_audio_worker(self) -> None:
+        tc = self._config.transcription
+        locale = self._template.metadata.locale
+        self._audio_model_name = tc.model_for_locale(locale)
+        self._audio_language = locale.split('-')[0].lower()
+        self.run_worker(
+            self._audio_worker_thread,
+            thread=True,
+            group='audio',
+        )
+
+    def _on_model_download_progress(self, percent: int) -> None:
+        self.post_message(ModelDownloadProgress(percent=percent, model_name=self._audio_model_name))
+
+    def _audio_worker_thread(self):
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
+            HfModelResolver,
+        )
         from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
             run_audio_worker,
         )
 
+        # Resolve model in the worker thread so downloads don't block the TUI.
+        try:
+            resolver = HfModelResolver(on_progress=self._on_model_download_progress)
+            model_path = resolver.resolve(self._audio_model_name)
+        except Exception as e:
+            self.post_message(AudioWorkerStatus(status='error', error=str(e)))
+            return []
+
         tc = self._config.transcription
-        locale = self._template.metadata.locale
-        language = locale.split('-')[0].lower()
-        model_name = tc.model_for_locale(locale)
-
-        def _worker():
-            # Resolve model in the worker thread so downloads don't block the TUI.
-            try:
-                from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
-                    HfModelResolver,
-                )
-
-                def _on_progress(percent: int) -> None:
-                    self.post_message(ModelDownloadProgress(percent=percent, model_name=model_name))
-
-                resolver = HfModelResolver(on_progress=_on_progress)
-                model_path = resolver.resolve(model_name)
-            except Exception as e:
-                self.post_message(AudioWorkerStatus(status='error', error=str(e)))
-                return []
-
-            return run_audio_worker(
-                post_message=self.post_message,
-                is_cancelled=lambda: self._audio_shutdown.is_set(),
-                model_path=model_path,
-                language=language,
-                chunk_duration=tc.chunk_duration,
-                overlap=tc.overlap,
-                silence_threshold=tc.silence_threshold,
-                pause_duration=tc.pause_duration,
-                whisper_prompt=self._template.whisper_prompt,
-                pause_event=self._audio_paused,
-                output_dir=self._output_dir,
-                save_audio=self._config.output.save_audio,
-                audio_source=self._audio_source,
-            )
-
-        self.run_worker(
-            _worker,
-            thread=True,
-            group='audio',
+        return run_audio_worker(
+            post_message=self.post_message,
+            is_cancelled=lambda: self._audio_shutdown.is_set(),
+            model_path=model_path,
+            language=self._audio_language,
+            chunk_duration=tc.chunk_duration,
+            overlap=tc.overlap,
+            silence_threshold=tc.silence_threshold,
+            pause_duration=tc.pause_duration,
+            whisper_prompt=self._template.whisper_prompt,
+            pause_event=self._audio_paused,
+            output_dir=self._output_dir,
+            save_audio=self._config.output.save_audio,
+            audio_source=self._audio_source,
         )
 
     def _cancel_audio_workers(self) -> None:
