@@ -91,6 +91,9 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
             click.echo(f'{t.name:<25s} {t.description} [{t.locale}]{tag}')
         return
 
+    from lazy_take_notes.l1_entities.audio_mode import (  # noqa: PLC0415 -- deferred: not needed for --help or --list-templates
+        AudioMode,
+    )
     from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --list-templates
         InfraConfig,
         build_app_config,
@@ -109,15 +112,17 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
 
     if template_ref:
         tmpl_ref = template_ref
+        audio_mode = AudioMode.MIC_ONLY  # default for back-compat
     else:
         from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded when --template flag is given
             TemplatePicker,
         )
 
-        picker = TemplatePicker()
-        tmpl_ref = picker.run()
-        if tmpl_ref is None:
+        picker = TemplatePicker(show_audio_mode=audio_file is None)
+        picker_result = picker.run()
+        if picker_result is None:
             return
+        tmpl_ref, audio_mode = picker_result
 
     try:
         template = template_loader.load(tmpl_ref)
@@ -153,12 +158,13 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
         DependencyContainer,
     )
 
-    container = DependencyContainer(config, template, out_dir, infra=infra)
+    container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=audio_mode)
     app = App(
         config=config,
         template=template,
         output_dir=out_dir,
         controller=container.controller,
+        audio_source=container.audio_source,
         missing_digest_models=missing_digest,
         missing_interactive_models=missing_interactive,
     )

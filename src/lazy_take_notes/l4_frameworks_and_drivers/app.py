@@ -13,6 +13,7 @@ from textual.widgets import Static
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.presenters.messages import (
     AudioLevel,
@@ -51,6 +52,7 @@ class App(TextualApp):
         template: SessionTemplate,
         output_dir: Path,
         controller: SessionController | None = None,
+        audio_source: AudioSource | None = None,
         missing_digest_models: list[str] | None = None,
         missing_interactive_models: list[str] | None = None,
         **kwargs,
@@ -73,6 +75,8 @@ class App(TextualApp):
 
             container = DependencyContainer(config, template, output_dir)
             self._controller = container.controller
+
+        self._audio_source = audio_source
 
         self._missing_digest_models: list[str] = missing_digest_models or []
         self._missing_interactive_models: list[str] = missing_interactive_models or []
@@ -190,6 +194,7 @@ class App(TextualApp):
                 pause_event=self._audio_paused,
                 output_dir=self._output_dir,
                 save_audio=self._config.output.save_audio,
+                audio_source=self._audio_source,
             )
 
         self.run_worker(
@@ -268,6 +273,12 @@ class App(TextualApp):
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._update_hints('error')
+            if message.error:
+                self.notify(
+                    f'Audio error: {message.error}\n(see ltn_debug.log)',
+                    severity='error',
+                    timeout=12,
+                )
         elif message.status == 'loading_model':
             self._update_hints('idle')
         elif message.status == 'model_ready':

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
@@ -31,6 +32,7 @@ class DependencyContainer:
         template: SessionTemplate,
         output_dir: Path,
         infra: InfraConfig | None = None,
+        audio_mode: AudioMode = AudioMode.MIC_ONLY,
     ) -> None:
         self.config = config
         self.template = template
@@ -40,7 +42,7 @@ class DependencyContainer:
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
         self.llm_client: LLMClient = OllamaLLMClient(host=_infra.ollama.host)
         self.transcriber: Transcriber = WhisperTranscriber()
-        self.audio_source: AudioSource = SounddeviceAudioSource()
+        self.audio_source: AudioSource = self._build_audio_source(audio_mode)
         self.model_resolver: ModelResolver = HfModelResolver()
 
         self.controller = SessionController(
@@ -49,6 +51,26 @@ class DependencyContainer:
             llm_client=self.llm_client,
             persistence=self.persistence,
         )
+
+    @staticmethod
+    def _build_audio_source(mode: AudioMode) -> AudioSource:
+        if mode == AudioMode.MIC_ONLY:
+            return SounddeviceAudioSource()
+        if mode == AudioMode.SYSTEM_ONLY:
+            from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import (  # noqa: PLC0415 -- deferred: only on macOS with system audio mode
+                CoreAudioTapSource,
+            )
+
+            return CoreAudioTapSource()
+        # MIX
+        from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import (  # noqa: PLC0415 -- deferred: only on macOS with mix mode
+            CoreAudioTapSource,
+        )
+        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: only on macOS with mix mode
+            MixedAudioSource,
+        )
+
+        return MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())
 
     @staticmethod
     def config_loader() -> YamlConfigLoader:
