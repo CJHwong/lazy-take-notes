@@ -55,6 +55,14 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
     help="Session label appended to the timestamp folder (e.g. 'sprint-review').",
 )
 @click.option(
+    '-f',
+    '--audio-file',
+    'audio_file',
+    default=None,
+    type=click.Path(exists=True, dir_okay=False),
+    help='Transcribe an audio file and generate a single final digest (no TUI).',
+)
+@click.option(
     '--list-templates',
     'show_templates',
     is_flag=True,
@@ -62,7 +70,7 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
     help='List available templates and exit.',
 )
 @click.version_option(version=__version__)
-def cli(config_path, template_ref, output_dir, label, show_templates):
+def cli(config_path, template_ref, output_dir, label, audio_file, show_templates):
     """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (
         YamlConfigLoader,
@@ -121,6 +129,19 @@ def cli(config_path, template_ref, output_dir, label, show_templates):
     out_dir = _make_session_dir(base_dir, label)
 
     missing_digest, missing_interactive = _preflight_ollama(infra, config)
+
+    if audio_file:
+        from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import run_batch
+
+        run_batch(
+            audio_path=Path(audio_file),
+            config=config,
+            template=template,
+            out_dir=out_dir,
+            infra=infra,
+        )
+        return
+
     _preflight_microphone()
 
     from lazy_take_notes.l4_frameworks_and_drivers.app import App
