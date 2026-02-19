@@ -35,6 +35,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lazy_take_notes"]
+artifacts = [
+    "src/lazy_take_notes/_native/bin/coreaudio-tap",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
