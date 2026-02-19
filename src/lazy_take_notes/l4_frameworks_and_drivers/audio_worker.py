@@ -26,6 +26,41 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 log = logging.getLogger('ltn.audio')
 
 
+def _start_processed_recorder(
+    output_dir: Path,
+    sample_rate: int,
+) -> tuple[queue.Queue, threading.Thread]:
+    """Write processed float32 chunks (system/mixed audio) to a WAV file.
+
+    Used for non-mic sources where _start_raw_recorder is not applicable.
+    Send None into the returned queue to signal the writer to flush and close.
+    """
+    wav_path = output_dir / 'recording.wav'
+    rec_q: queue.Queue[np.ndarray | None] = queue.Queue()
+
+    def _writer() -> None:
+        wf = wave.open(str(wav_path), 'wb')
+        wf.setnchannels(1)
+        wf.setsampwidth(2)  # int16
+        wf.setframerate(sample_rate)
+        try:
+            while True:
+                try:
+                    data = rec_q.get(timeout=0.5)
+                    if data is None:
+                        break
+                    pcm = np.clip(data, -1.0, 1.0)
+                    wf.writeframes((pcm * 32767).astype(np.int16).tobytes())
+                except queue.Empty:
+                    pass
+        finally:
+            wf.close()
+
+    writer = threading.Thread(target=_writer, daemon=True)
+    writer.start()
+    return rec_q, writer
+
+
 def _start_raw_recorder(
     output_dir: Path,
     is_cancelled,
@@ -165,11 +200,21 @@ def run_audio_worker(
     raw_stream: Any = None
     raw_writer: threading.Thread | None = None
     raw_q: queue.Queue | None = None
-    if save_audio and output_dir and isinstance(audio_source, SounddeviceAudioSource):
-        try:
-            raw_stream, raw_writer, raw_q = _start_raw_recorder(output_dir, is_cancelled)
-        except Exception:  # noqa: S110 — best-effort; recording continues without raw save
-            pass
+    proc_rec_q: queue.Queue | None = None
+    proc_rec_writer: threading.Thread | None = None
+    if save_audio and output_dir:
+        if isinstance(audio_source, SounddeviceAudioSource):
+            # Mic-only: capture a separate high-quality stream at native sample rate.
+            try:
+                raw_stream, raw_writer, raw_q = _start_raw_recorder(output_dir, is_cancelled)
+            except Exception:  # noqa: S110 — best-effort; recording continues without raw save
+                pass
+        else:
+            # Mixed or system-only: save the processed SAMPLE_RATE audio from read().
+            try:
+                proc_rec_q, proc_rec_writer = _start_processed_recorder(output_dir, SAMPLE_RATE)
+            except Exception:  # noqa: S110 — best-effort; recording continues without raw save
+                pass
 
     # Start recording
     post_message(AudioWorkerStatus(status='recording'))
@@ -188,6 +233,9 @@ def run_audio_worker(
                 data = audio_source.read(timeout=0.1)
                 if data is None:
                     continue
+
+                if proc_rec_q is not None:
+                    proc_rec_q.put(data)
 
                 total_samples_fed += len(data)
                 use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
@@ -225,6 +273,8 @@ def run_audio_worker(
                 data = audio_source.read(timeout=0.1)
                 if data is None:
                     break
+                if proc_rec_q is not None:
+                    proc_rec_q.put(data)
                 total_samples_fed += len(data)
                 use_case.feed_audio(data)
 
@@ -240,7 +290,7 @@ def run_audio_worker(
     except Exception as e:
         post_message(AudioWorkerStatus(status='error', error=str(e)))
 
-    # Stop raw audio recorder
+    # Stop raw audio recorder (mic mode)
     if raw_stream is not None:
         raw_stream.stop()
         raw_stream.close()
@@ -248,6 +298,12 @@ def run_audio_worker(
         raw_q.put(None)
     if raw_writer is not None:
         raw_writer.join(timeout=5)
+
+    # Stop processed audio recorder (mixed / system mode)
+    if proc_rec_q is not None:
+        proc_rec_q.put(None)
+    if proc_rec_writer is not None:
+        proc_rec_writer.join(timeout=5)
 
     _executor.shutdown(wait=True)
 
