@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections import defaultdict
 
 from textual.app import App, ComposeResult
@@ -10,12 +11,24 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widgets import Input, ListItem, ListView, Markdown, Static
 
+from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (
     YamlTemplateLoader,
     all_template_names,
     user_template_names,
 )
+
+_MODE_LABELS = {
+    AudioMode.MIC_ONLY: 'mic only',
+    AudioMode.SYSTEM_ONLY: 'system only',
+    AudioMode.MIX: 'mix [dim]⚠ use headphones[/dim]',
+}
+_MODE_CYCLE = [
+    AudioMode.MIC_ONLY,
+    AudioMode.SYSTEM_ONLY,
+    # AudioMode.MIX,  # Still needs some work to be usable, so leaving it out of the config options for now.
+]
 
 
 class LocaleHeader(ListItem):
@@ -58,7 +71,7 @@ class _TemplateListView(ListView):
             event.prevent_default()
 
 
-class TemplatePicker(App[str | None]):
+class TemplatePicker(App[tuple[str, AudioMode] | None]):
     CSS = """
     #picker-header {
         dock: top;
@@ -110,12 +123,16 @@ class TemplatePicker(App[str | None]):
         Binding('enter', 'select_template', 'Select', priority=True),
     ]
 
-    def __init__(self, **kwargs):
+    def __init__(self, show_audio_mode: bool = True, **kwargs):
         super().__init__(**kwargs)
         loader = YamlTemplateLoader()
         self._user_names = user_template_names()
         self._templates: dict[str, SessionTemplate] = {name: loader.load(name) for name in sorted(all_template_names())}
         self._current_name: str | None = None
+        self._audio_mode: AudioMode = AudioMode.MIC_ONLY
+        # Show audio mode selector only on macOS AND when the caller opts in
+        # (batch/--audio-file mode passes show_audio_mode=False since audio_mode is irrelevant)
+        self._show_audio_mode = sys.platform == 'darwin' and show_audio_mode
 
     def compose(self) -> ComposeResult:
         count = len(self._templates)
@@ -126,16 +143,28 @@ class TemplatePicker(App[str | None]):
                 yield _TemplateListView(id='template-list')
             with VerticalScroll(id='template-preview', can_focus=False):
                 yield Markdown('', id='preview-md')
-        yield Static(
-            r'\[Enter] Select  \[↑/↓] Navigate  \[Esc] Cancel',
-            id='picker-footer',
-        )
+        yield Static(self._footer_text(), id='picker-footer', markup=True)
+
+    def _footer_text(self) -> str:
+        base = r'\[Enter] Select  \[↑/↓] Navigate'
+        if self._show_audio_mode:
+            label = _MODE_LABELS[self._audio_mode]
+            base += rf'  \[d] Audio: {label}'
+        base += r'  \[Esc] Cancel'
+        return base
 
     def on_mount(self) -> None:
         self._rebuild_list()
         self.query_one('#search-input', Input).focus()
 
     def on_key(self, event: Key) -> None:
+        # [d] cycles audio mode only when the list (not the search Input) has focus.
+        # Input swallows printable keys before bindings fire, so we guard here.
+        if event.key == 'd' and self._show_audio_mode:
+            if not isinstance(self.focused, Input):
+                self.action_cycle_audio_mode()
+                event.prevent_default()
+                return
         if event.key == 'down' and self.focused is self.query_one('#search-input', Input):
             self.query_one('#template-list', _TemplateListView).focus()
             event.prevent_default()
@@ -206,8 +235,17 @@ class TemplatePicker(App[str | None]):
 
         self.query_one('#preview-md', Markdown).update('\n'.join(lines))
 
+    def action_cycle_audio_mode(self) -> None:
+        if not self._show_audio_mode:
+            return
+        idx = _MODE_CYCLE.index(self._audio_mode)
+        self._audio_mode = _MODE_CYCLE[(idx + 1) % len(_MODE_CYCLE)]
+        self.query_one('#picker-footer', Static).update(self._footer_text())
+
     def action_select_template(self) -> None:
-        self.exit(self._current_name)
+        if self._current_name is None:
+            return
+        self.exit((self._current_name, self._audio_mode))
 
     def action_cancel(self) -> None:
         self.exit(None)

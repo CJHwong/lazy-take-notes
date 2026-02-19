@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 from textual.widgets import Input, Markdown
 
+import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as yaml_loader_mod
+import lazy_take_notes.l4_frameworks_and_drivers.template_picker as template_picker_mod
+from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import all_template_names
 from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
     TemplatePicker,
@@ -16,9 +19,13 @@ from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
 @pytest.fixture(autouse=True)
 def _isolate_user_templates(monkeypatch):
     """Ensure user templates dir does not exist so only built-ins show."""
-    import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as mod
+    monkeypatch.setattr(yaml_loader_mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
 
-    monkeypatch.setattr(mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
+
+@pytest.fixture(autouse=True)
+def _force_macos(monkeypatch):
+    """Make tests behave as if running on macOS so [d] binding is active."""
+    monkeypatch.setattr(template_picker_mod.sys, 'platform', 'darwin')
 
 
 class TestTemplatePicker:
@@ -50,7 +57,77 @@ class TestTemplatePicker:
             await pilot.press('enter')
             await pilot.pause()
 
-        assert picker.return_value in all_template_names()
+        assert picker.return_value is not None
+        name, mode = picker.return_value
+        assert name in all_template_names()
+        assert isinstance(mode, AudioMode)
+
+    @pytest.mark.asyncio
+    async def test_enter_returns_audio_mode_in_result(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.press('enter')
+            await pilot.pause()
+
+        assert picker.return_value is not None
+        _name, mode = picker.return_value
+        assert mode == AudioMode.MIC_ONLY
+
+    @pytest.mark.asyncio
+    async def test_d_cycles_audio_mode(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            # [d] only fires when the list has focus (not the search Input)
+            await pilot.press('tab')
+            await pilot.pause()
+            assert picker._audio_mode == AudioMode.MIC_ONLY
+            await pilot.press('d')
+            await pilot.pause()
+            assert picker._audio_mode == AudioMode.SYSTEM_ONLY
+            await pilot.press('d')
+            await pilot.pause()
+            # MIX is excluded from _MODE_CYCLE until it is production-ready;
+            # cycle wraps back to MIC_ONLY after SYSTEM_ONLY.
+            assert picker._audio_mode == AudioMode.MIC_ONLY
+
+    @pytest.mark.asyncio
+    async def test_d_cycles_and_result_reflects_mode(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.press('tab')  # move focus to list so [d] fires
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+
+        assert picker.return_value is not None
+        _name, mode = picker.return_value
+        assert mode == AudioMode.SYSTEM_ONLY
+
+    @pytest.mark.asyncio
+    async def test_d_no_op_when_input_focused(self):
+        """[d] must not cycle audio mode when the search Input has focus (to allow typing)."""
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            # Input is focused from on_mount — pressing 'd' types into the search box
+            assert isinstance(picker.focused, Input)
+            await pilot.press('d')
+            await pilot.pause()
+            assert picker._audio_mode == AudioMode.MIC_ONLY  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_d_hidden_on_non_macos(self, monkeypatch):
+        monkeypatch.setattr(template_picker_mod.sys, 'platform', 'linux')
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            # Tab to list so any key handling fires — still no-op on non-macOS
+            await pilot.press('tab')
+            await pilot.pause()
+            before = picker._audio_mode
+            await pilot.press('d')
+            await pilot.pause()
+            assert picker._audio_mode == before
 
     @pytest.mark.asyncio
     async def test_preview_updates_on_highlight(self):
@@ -61,7 +138,7 @@ class TestTemplatePicker:
             await pilot.pause()
             await pilot.press('down')
             await pilot.pause()
-            assert preview._markdown != ''
+            assert preview._markdown
 
     @pytest.mark.asyncio
     async def test_locale_headers_present(self):
@@ -127,4 +204,6 @@ class TestTemplatePicker:
             await pilot.press('enter')
             await pilot.pause()
 
-        assert picker.return_value == 'default_en'
+        assert picker.return_value is not None
+        name, _mode = picker.return_value
+        assert name == 'default_en'
