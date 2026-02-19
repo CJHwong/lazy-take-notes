@@ -19,6 +19,15 @@
     width: 1fr;
 }
 
-#digest-panel {
+#digest-col {
     width: 1fr;
+}
+
+#digest-panel {
+    height: 1fr;
+}
+
+#context-input {
+    height: 6;
+    border: tall $primary;
 }

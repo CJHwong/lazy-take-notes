@@ -9,8 +9,8 @@ from pathlib import Path
 from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.widgets import Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Static, TextArea
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
@@ -113,7 +113,9 @@ class App(TextualApp):
         yield Static(header_text, id='header')
         with Horizontal(id='main-panels'):
             yield TranscriptPanel(id='transcript-panel')
-            yield DigestPanel(id='digest-panel')
+            with Vertical(id='digest-col'):
+                yield DigestPanel(id='digest-panel')
+                yield TextArea(id='context-input')
         yield StatusBar(id='status-bar')
 
     def _hints_for_state(self, state: str) -> str:
@@ -145,6 +147,7 @@ class App(TextualApp):
         self._update_hints('idle')
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_max = self._config.digest.min_lines
+        self.query_one('#context-input', TextArea).border_title = 'Session Context'
         if self._missing_digest_models:
             panel = self.query_one('#digest-panel', DigestPanel)
             pull_cmds = '\n\n'.join(f'`ollama pull {m}`' for m in self._missing_digest_models)
@@ -416,6 +419,10 @@ class App(TextualApp):
             self.notify('Nothing in buffer to digest yet', timeout=3)
             return
         self._run_digest_worker(is_final=False)
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id == 'context-input':
+            self._controller.user_context = event.text_area.text
 
     def action_quick_action(self, key: str) -> None:
         self._run_query_worker(key)

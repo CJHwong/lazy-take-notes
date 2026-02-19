@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from textual.widgets import TextArea
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
@@ -580,3 +581,26 @@ class TestQueryErrorModal:
 
                 assert isinstance(app.screen, QueryModal)
                 assert app.screen._is_error is False
+
+
+class TestContextEdit:
+    @pytest.mark.asyncio
+    async def test_context_input_present_in_layout(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                assert app.query_one('#context-input', TextArea) is not None
+
+    @pytest.mark.asyncio
+    async def test_text_change_updates_controller(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                text_area = app.query_one('#context-input', TextArea)
+                text_area.focus()
+                await pilot.pause()
+
+                text_area.insert('Speaker A = Alice')
+                await pilot.pause()
+
+                assert app._controller.user_context == 'Speaker A = Alice'
