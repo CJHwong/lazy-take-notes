@@ -86,8 +86,9 @@ class TestTemplatePicker:
             assert picker._audio_mode == AudioMode.SYSTEM_ONLY
             await pilot.press('d')
             await pilot.pause()
-            # MIX is excluded from _MODE_CYCLE until it is production-ready;
-            # cycle wraps back to MIC_ONLY after SYSTEM_ONLY.
+            assert picker._audio_mode == AudioMode.MIX
+            await pilot.press('d')
+            await pilot.pause()
             assert picker._audio_mode == AudioMode.MIC_ONLY
 
     @pytest.mark.asyncio
