@@ -35,13 +35,6 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
     help='Path to YAML config file.',
 )
 @click.option(
-    '-t',
-    '--template',
-    'template_ref',
-    default=None,
-    help='Template name or path to YAML template file.',
-)
-@click.option(
     '-o',
     '--output-dir',
     default=None,
@@ -62,42 +55,25 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
     type=click.Path(exists=True, dir_okay=False),
     help='Transcribe an audio file and generate a single final digest (no TUI).',
 )
-@click.option(
-    '--list-templates',
-    'show_templates',
-    is_flag=True,
-    default=False,
-    help='List available templates and exit.',
-)
 @click.version_option(version=__version__)
-def cli(config_path, template_ref, output_dir, label, audio_file, show_templates):
+def cli(config_path, output_dir, label, audio_file):
     """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlConfigLoader,
     )
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlTemplateLoader,
-        user_template_names,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --help
+        InfraConfig,
+        build_app_config,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        TemplatePicker,
     )
 
     config_loader = YamlConfigLoader()
     template_loader = YamlTemplateLoader()
-
-    if show_templates:
-        user_names = user_template_names()
-        templates = template_loader.list_templates()
-        for t in templates:
-            tag = ' [user]' if t.name in user_names else ''
-            click.echo(f'{t.name:<25s} {t.description} [{t.locale}]{tag}')
-        return
-
-    from lazy_take_notes.l1_entities.audio_mode import (  # noqa: PLC0415 -- deferred: not needed for --help or --list-templates
-        AudioMode,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --list-templates
-        InfraConfig,
-        build_app_config,
-    )
 
     try:
         overrides: dict = {}
@@ -110,19 +86,11 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
         click.echo(f'Error: {e}', err=True)
         sys.exit(1)
 
-    if template_ref:
-        tmpl_ref = template_ref
-        audio_mode = AudioMode.MIC_ONLY  # default for back-compat
-    else:
-        from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded when --template flag is given
-            TemplatePicker,
-        )
-
-        picker = TemplatePicker(show_audio_mode=audio_file is None)
-        picker_result = picker.run()
-        if picker_result is None:
-            return
-        tmpl_ref, audio_mode = picker_result
+    picker = TemplatePicker(show_audio_mode=audio_file is None)
+    picker_result = picker.run()
+    if picker_result is None:
+        return
+    tmpl_ref, audio_mode = picker_result
 
     try:
         template = template_loader.load(tmpl_ref)
@@ -207,7 +175,7 @@ def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
 
 def _preflight_microphone() -> None:
     try:
-        import sounddevice as sd  # noqa: PLC0415 -- deferred: not loaded on --help or --list-templates
+        import sounddevice as sd  # noqa: PLC0415 -- deferred: not loaded on --help
 
         devices = sd.query_devices()
         input_devices = [d for d in devices if d['max_input_channels'] > 0]
