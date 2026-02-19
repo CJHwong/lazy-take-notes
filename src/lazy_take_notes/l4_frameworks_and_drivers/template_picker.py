@@ -27,7 +27,7 @@ _MODE_LABELS = {
 _MODE_CYCLE = [
     AudioMode.MIC_ONLY,
     AudioMode.SYSTEM_ONLY,
-    # AudioMode.MIX,  # Still needs some work to be usable, so leaving it out of the config options for now.
+    AudioMode.MIX,
 ]
 
 
