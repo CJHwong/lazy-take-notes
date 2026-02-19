@@ -110,6 +110,53 @@ class TestTranscribeAudioUseCase:
         assert len(segments) == 1
         assert segments[0].text == 'Flush'
 
+    def test_second_chunk_not_dropped_when_segment_starts_before_overlap_threshold(self):
+        """Regression: VAD leaves 1s silence in overlap buffer; next speech starts at ~0.95s.
+
+        Old filter (wall_start >= overlap) would drop a segment whose start falls just
+        below the 1.0s overlap threshold even though it contains entirely new content.
+        Fix: filter on wall_end > overlap instead.
+        """
+        # First chunk: whisper returns one segment at 0.0
+        chunk1_seg = TranscriptSegment(text='First speech', wall_start=0.0, wall_end=3.0)
+        # Second chunk: speech starts slightly before 1.0s (centisecond rounding)
+        chunk2_seg = TranscriptSegment(text='Second speech', wall_start=0.95, wall_end=4.5)
+
+        call_count = 0
+
+        class _TwoPassFake:
+            def load_model(self, model_path: str) -> None:
+                pass
+
+            def transcribe(self, audio, language, initial_prompt=''):
+                nonlocal call_count
+                call_count += 1
+                return [chunk1_seg] if call_count == 1 else [chunk2_seg]
+
+            def close(self) -> None:
+                pass
+
+        uc = TranscribeAudioUseCase(
+            transcriber=_TwoPassFake(),
+            language='en',
+            chunk_duration=1.0,
+            overlap=1.0,
+        )
+
+        audio = np.random.randn(SAMPLE_RATE).astype(np.float32) * 0.1
+        uc.set_session_offset(1.0)
+        uc.feed_audio(audio)
+        first = uc.process_buffer()
+        assert [s.text for s in first] == ['First speech']
+
+        # Feed second chunk; overlap buffer already holds 1s from previous call
+        uc.feed_audio(audio)
+        uc.set_session_offset(2.0)
+        second = uc.process_buffer()
+        assert [s.text for s in second] == ['Second speech'], (
+            'Second speech was silently dropped — wall_start filter bug'
+        )
+
     def test_flush_with_too_little_data(self):
         fake = FakeTranscriber()
         uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=10.0)

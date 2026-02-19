@@ -102,7 +102,7 @@ class TranscribeAudioUseCase:
         last_text = None
 
         for seg in segments:
-            if seg.wall_start >= min_start:
+            if seg.wall_end > min_start:
                 # Adjust wall times to absolute session offset
                 adjusted = TranscriptSegment(
                     text=seg.text,
