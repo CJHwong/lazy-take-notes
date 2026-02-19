@@ -67,3 +67,23 @@ class TestRunQuickAction:
         prompt = fake_llm.chat_single_calls[0][1]
         assert 'Seg 59' in prompt
         assert 'Seg 10' in prompt
+
+    @pytest.mark.asyncio
+    async def test_user_context_included_in_prompt(self):
+        template = YamlTemplateLoader().load('default_zh_tw')
+        fake_llm = FakeLLMClient(response='OK')
+        uc = RunQuickActionUseCase(fake_llm)
+
+        first_key = template.quick_actions[0].key
+        await uc.execute(
+            key=first_key,
+            template=template,
+            model='test-model',
+            latest_digest='digest',
+            all_segments=[],
+            user_context='Speaker A = Alice',
+        )
+
+        assert len(fake_llm.chat_single_calls) == 1
+        prompt = fake_llm.chat_single_calls[0][1]
+        assert 'Speaker A = Alice' in prompt

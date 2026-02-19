@@ -41,6 +41,7 @@ class RunDigestUseCase:
         *,
         is_final: bool = False,
         full_transcript: str = '',
+        user_context: str = '',
     ) -> DigestResult:
         """Execute a digest cycle. Mutates state on success."""
         log.info(
@@ -56,6 +57,7 @@ class RunDigestUseCase:
             state.buffer,
             is_final=is_final,
             full_transcript=full_transcript,
+            user_context=user_context,
         )
         state.messages.append(ChatMessage(role='user', content=prompt))
 

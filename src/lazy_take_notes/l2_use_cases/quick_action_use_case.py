@@ -22,6 +22,8 @@ class RunQuickActionUseCase:
         model: str,
         latest_digest: str | None,
         all_segments: list[TranscriptSegment],
+        *,
+        user_context: str = '',
     ) -> tuple[str, str] | None:
         """Execute a quick action. Returns (result_text, label) or None if key not found."""
         qa = self._find_action(key, template)
@@ -35,6 +37,7 @@ class RunQuickActionUseCase:
             qa.prompt_template,
             latest_digest or '(no digest yet)',
             recent_transcript,
+            user_context=user_context,
         )
 
         result = await self._query.execute(prompt, model)
