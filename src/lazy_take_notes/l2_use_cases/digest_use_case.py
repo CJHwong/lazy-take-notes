@@ -92,3 +92,15 @@ class RunDigestUseCase:
         )
 
         return DigestResult(data=raw.strip())
+
+
+def should_trigger_digest(
+    state: DigestState,
+    min_lines: int,
+    min_interval: float,
+) -> bool:
+    """Check if a digest cycle should trigger based on buffer size and elapsed time."""
+    if len(state.buffer) < min_lines:
+        return False
+    elapsed = time.monotonic() - state.last_digest_time
+    return elapsed >= min_interval

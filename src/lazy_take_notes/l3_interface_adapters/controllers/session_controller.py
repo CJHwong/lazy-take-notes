@@ -3,31 +3,18 @@
 from __future__ import annotations
 
 import logging
-import time
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.digest_state import DigestState
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.compact_messages_use_case import CompactMessagesUseCase
-from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult, RunDigestUseCase
+from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult, RunDigestUseCase, should_trigger_digest
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.persistence import PersistenceGateway
 from lazy_take_notes.l2_use_cases.quick_action_use_case import RunQuickActionUseCase
 
 log = logging.getLogger('ltn.controller')
-
-
-def should_trigger_digest(
-    state: DigestState,
-    min_lines: int,
-    min_interval: float,
-) -> bool:
-    """Check if a digest cycle should trigger based on buffer size and elapsed time."""
-    if len(state.buffer) < min_lines:
-        return False
-    elapsed = time.monotonic() - state.last_digest_time
-    return elapsed >= min_interval
 
 
 class SessionController:
