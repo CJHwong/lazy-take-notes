@@ -332,7 +332,7 @@ class TestStopFlush:
                 with patch.object(app, '_run_digest_worker') as mock_digest:
                     app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
-                    mock_digest.assert_called_once_with(is_final=False)
+                    mock_digest.assert_called_once_with(is_final=True)
 
 
 class TestTimerFreeze:

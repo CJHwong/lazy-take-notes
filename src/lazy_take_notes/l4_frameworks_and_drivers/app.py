@@ -93,6 +93,8 @@ class App(TextualApp):
         self._pending_quit = False
         self._download_modal: DownloadModal | None = None
         self._digest_running = False
+        self._query_running = False
+        self._final_digest_done = False
 
         # Register dynamic quick action bindings (positional: 1-5)
         for i, qa in enumerate(template.quick_actions):
@@ -121,9 +123,9 @@ class App(TextualApp):
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
-            return r'\[Space] pause  \[s] stop  \[d] digest  \[h] help  \[q] quit'
+            return r'\[Space] pause  \[s] stop  \[d] digest  \[h] help'
         if state == 'paused':
-            return r'\[Space] resume  \[s] stop  \[h] help  \[q] quit'
+            return r'\[Space] resume  \[s] stop  \[h] help'
         return r'\[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
 
     def _update_hints(self, state: str) -> None:
@@ -265,13 +267,16 @@ class App(TextualApp):
             bar.recording = False
             self._update_hints('stopped')
             if self._pending_quit:
-                # Quit was triggered while audio was running; flush is now complete.
-                if self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0:
+                # Quit was triggered before recording started; flush is now complete.
+                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
+                if has_content and not self._final_digest_done:
                     self._run_final_digest()
                 else:
                     self.exit()
-            elif self._audio_stopped and self._controller.digest_state.buffer:
-                self._run_digest_worker(is_final=False)
+            elif self._audio_stopped:
+                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
+                if has_content and not self._final_digest_done:
+                    self._run_digest_worker(is_final=True)
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._update_hints('error')
@@ -294,6 +299,9 @@ class App(TextualApp):
         bar.buf_count = len(self._controller.digest_state.buffer)
         bar.last_digest_time = time.monotonic()
         bar.activity = ''
+
+        if message.is_final:
+            self._final_digest_done = True
 
     def on_digest_error(self, message: DigestError) -> None:
         bar = self.query_one('#status-bar', StatusBar)
@@ -355,6 +363,7 @@ class App(TextualApp):
                 label = qa.label
                 break
         bar.activity = f'{label}...'
+        self._query_running = True
 
         async def _query_task() -> None:
             try:
@@ -362,6 +371,8 @@ class App(TextualApp):
             except Exception as e:
                 self.post_message(QueryResult(result=f'Error: {e}', action_label=label, is_error=True))
                 return
+            finally:
+                self._query_running = False
             if result is not None:
                 text, action_label = result
                 self.post_message(QueryResult(result=text, action_label=action_label))
@@ -406,7 +417,10 @@ class App(TextualApp):
         self.notify('Recording stopped. You can still browse and run quick actions.', timeout=5)
 
     def action_force_digest(self) -> None:
-        if self._digest_running or self._pending_quit:
+        if self._digest_running:
+            self.notify('Digest already in progress', severity='warning', timeout=3)
+            return
+        if self._pending_quit:
             return
         if not self._controller.digest_state.buffer:
             self.notify('Nothing in buffer to digest yet', timeout=3)
@@ -418,6 +432,12 @@ class App(TextualApp):
             self._controller.user_context = event.text_area.text
 
     def action_quick_action(self, key: str) -> None:
+        if self._digest_running:
+            self.notify('Digest in progress — please wait', severity='warning', timeout=3)
+            return
+        if self._query_running:
+            self.notify('Quick action already running — please wait', severity='warning', timeout=3)
+            return
         self._run_query_worker(key)
 
     def action_show_help(self) -> None:
@@ -488,8 +508,16 @@ class App(TextualApp):
         self.push_screen(HelpModal(body_md='\n'.join(lines)))
 
     def action_quit_app(self) -> None:
+        bar = self.query_one('#status-bar', StatusBar)
+        if bar.recording or bar.paused:
+            return  # q is intentionally disabled while recording/paused; press s first
+
         if self._pending_quit:
             self.exit()
+            return
+
+        if self._digest_running:
+            self.notify('Digest in progress — please wait', severity='warning', timeout=3)
             return
 
         self._cancel_audio_workers()
@@ -510,7 +538,8 @@ class App(TextualApp):
             return
 
         # Audio was already stopped — flush already happened, buffer is up to date.
-        if self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0:
+        has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
+        if has_content and not self._final_digest_done:
             self._pending_quit = True
             self._run_final_digest()
         else:
