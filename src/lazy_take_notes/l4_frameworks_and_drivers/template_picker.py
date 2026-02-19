@@ -45,12 +45,12 @@ class LocaleHeader(ListItem):
 class TemplateItem(ListItem):
     """Selectable row representing a single template."""
 
-    def __init__(self, name: str, locale: str, *, is_user: bool = False) -> None:
+    def __init__(self, name: str, locale: str, display_name: str = '', *, is_user: bool = False) -> None:
         super().__init__()
         self.template_name = name
         badge = '  [dim]\\[user][/dim]' if is_user else ''
-        yield_text = f'{name}  [dim]({locale})[/dim]{badge}'
-        self._label_text = yield_text
+        label = display_name or name
+        self._label_text = f'{label}  [dim]({locale})[/dim]{badge}'
 
     def compose(self) -> ComposeResult:
         yield Static(self._label_text, markup=True)
@@ -185,20 +185,26 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             groups[tmpl.metadata.locale].append(name)
 
         first_item: TemplateItem | None = None
+        first_item_index: int = 0
+        insert_idx: int = 0
         for locale in sorted(groups):
             list_view.append(LocaleHeader(locale))
+            insert_idx += 1
             for name in sorted(groups[locale]):
                 item = TemplateItem(
                     name,
                     locale,
+                    display_name=self._templates[name].metadata.name,
                     is_user=name in self._user_names,
                 )
                 list_view.append(item)
                 if first_item is None:
                     first_item = item
+                    first_item_index = insert_idx
+                insert_idx += 1
 
         if first_item is not None:
-            list_view.index = list_view.children.index(first_item)
+            list_view.index = first_item_index
             self._current_name = first_item.template_name
             self._show_preview(first_item.template_name)
         else:

@@ -9,6 +9,7 @@ class TemplateMetadata(BaseModel):
     name: str = ''
     description: str = ''
     locale: str = ''
+    key: str = ''  # file key (set by loader, not stored in YAML)
 
 
 class QuickAction(BaseModel):

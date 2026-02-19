@@ -62,8 +62,8 @@ select = [
 preview = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S"]
-"test_*" = ["S"]
+"tests/*" = ["S", "PLC0415"]
+"test_*" = ["S", "PLC0415"]
 
 [tool.ruff.format]
 quote-style = "single"

@@ -112,8 +112,8 @@ class TestListTemplates:
         monkeypatch.setattr(mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
         loader = YamlTemplateLoader()
         result = loader.list_templates()
-        names = {t.name for t in result}
-        assert names == builtin_names()
+        keys = {t.key for t in result}
+        assert keys == builtin_names()
 
     def test_sorted_by_name(self, monkeypatch):
         import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as mod
@@ -121,8 +121,8 @@ class TestListTemplates:
         monkeypatch.setattr(mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
         loader = YamlTemplateLoader()
         result = loader.list_templates()
-        names = [t.name for t in result]
-        assert names == sorted(names)
+        keys = [t.key for t in result]
+        assert keys == sorted(keys)
 
     def test_each_has_description(self, monkeypatch):
         import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as mod
@@ -187,9 +187,9 @@ class TestUserTemplates:
         monkeypatch.setattr(mod, 'USER_TEMPLATES_DIR', tmp_path)
         (tmp_path / 'my_custom.yaml').write_text(_USER_TEMPLATE_YAML, encoding='utf-8')
         loader = YamlTemplateLoader()
-        names = {t.name for t in loader.list_templates()}
-        assert 'my_custom' in names
-        assert builtin_names().issubset(names)
+        keys = {t.key for t in loader.list_templates()}
+        assert 'my_custom' in keys
+        assert builtin_names().issubset(keys)
 
     def test_all_template_names_is_union(self, tmp_path: Path, monkeypatch):
         import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as mod

@@ -44,8 +44,16 @@ class YamlTemplateLoader:
         # 3. Built-in template
         if template_ref in builtin_names():
             return _load_builtin(template_ref)
-        available = sorted(all_template_names())
-        raise FileNotFoundError(f"Template not found: '{template_ref}'. Available templates: {', '.join(available)}")
+        # 4. Match by display name (metadata.name) across all templates
+        user_keys = user_template_names()
+        for key in all_template_names():
+            tmpl = _load_user(key) if key in user_keys else _load_builtin(key)
+            if tmpl.metadata.name == template_ref:
+                return tmpl
+        available_keys = sorted(all_template_names())
+        raise FileNotFoundError(
+            f"Template not found: '{template_ref}'. Available templates: {', '.join(available_keys)}"
+        )
 
     def list_templates(self) -> list[TemplateMetadata]:
         loaded: dict[str, TemplateMetadata] = {}
@@ -59,9 +67,13 @@ class YamlTemplateLoader:
 
 def _load_builtin(name: str) -> SessionTemplate:
     template_file = _TEMPLATES_DIR / f'{name}.yaml'
-    return SessionTemplate.model_validate(yaml.safe_load(template_file.read_text(encoding='utf-8')) or {})
+    tmpl = SessionTemplate.model_validate(yaml.safe_load(template_file.read_text(encoding='utf-8')) or {})
+    tmpl.metadata.key = name
+    return tmpl
 
 
 def _load_user(name: str) -> SessionTemplate:
     template_file = USER_TEMPLATES_DIR / f'{name}.yaml'
-    return SessionTemplate.model_validate(yaml.safe_load(template_file.read_text(encoding='utf-8')) or {})
+    tmpl = SessionTemplate.model_validate(yaml.safe_load(template_file.read_text(encoding='utf-8')) or {})
+    tmpl.metadata.key = name
+    return tmpl
