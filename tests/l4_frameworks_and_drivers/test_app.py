@@ -491,3 +491,44 @@ class TestQuitWithFinalDigest:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_called_once()
+
+
+class TestForceDigest:
+    @pytest.mark.asyncio
+    async def test_force_digest_triggers_worker_when_buffer_not_empty(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                segments = [TranscriptSegment(text='Line one', wall_start=0.0, wall_end=1.0)]
+                app.post_message(TranscriptChunk(segments=segments))
+                await pilot.pause()
+
+                with patch.object(app, '_run_digest_worker') as mock_digest:
+                    await pilot.press('d')
+                    await pilot.pause()
+                    mock_digest.assert_called_once_with(is_final=False)
+
+    @pytest.mark.asyncio
+    async def test_force_digest_notifies_when_buffer_empty(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                with patch.object(app, '_run_digest_worker') as mock_digest:
+                    await pilot.press('d')
+                    await pilot.pause()
+                    mock_digest.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_digest_is_noop_when_digest_already_running(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                segments = [TranscriptSegment(text='Line one', wall_start=0.0, wall_end=1.0)]
+                app.post_message(TranscriptChunk(segments=segments))
+                await pilot.pause()
+
+                app._digest_running = True
+                with patch.object(app, '_run_digest_worker') as mock_digest:
+                    await pilot.press('d')
+                    await pilot.pause()
+                    mock_digest.assert_not_called()

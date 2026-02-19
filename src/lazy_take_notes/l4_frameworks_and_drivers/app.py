@@ -43,6 +43,7 @@ class App(TextualApp):
         Binding('q', 'quit_app', 'Quit', priority=True),
         Binding('space', 'toggle_pause', 'Pause/Resume', priority=True),
         Binding('s', 'stop_recording', 'Stop', priority=True),
+        Binding('d', 'force_digest', 'Digest now', show=False),
         Binding('h', 'show_help', 'Help', priority=True),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
     ]
@@ -117,7 +118,7 @@ class App(TextualApp):
     def _hints_for_state(self, state: str) -> str:
         qa_hints = '  '.join(rf'\[{qa.key}] {qa.label}' for qa in self._template.quick_actions)
         if state == 'recording':
-            parts = [r'\[Space] pause', r'\[s] stop']
+            parts = [r'\[Space] pause', r'\[s] stop', r'\[d] digest']
             if qa_hints:
                 parts.append(qa_hints)
             parts.append(r'\[h] help')
@@ -402,6 +403,14 @@ class App(TextualApp):
 
         self.notify('Recording stopped. You can still browse and run quick actions.', timeout=5)
 
+    def action_force_digest(self) -> None:
+        if self._digest_running or self._pending_quit:
+            return
+        if not self._controller.digest_state.buffer:
+            self.notify('Nothing in buffer to digest yet', timeout=3)
+            return
+        self._run_digest_worker(is_final=False)
+
     def action_quick_action(self, key: str) -> None:
         self._run_query_worker(key)
 
@@ -455,6 +464,7 @@ class App(TextualApp):
                 '|-----|--------|',
                 '| `Space` | Pause / Resume |',
                 '| `s` | Stop recording |',
+                '| `d` | Force digest now |',
                 '| `h` | Toggle this help |',
             ]
         )
