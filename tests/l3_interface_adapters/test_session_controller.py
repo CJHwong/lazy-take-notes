@@ -120,8 +120,7 @@ class TestRunQuickAction:
     @pytest.mark.asyncio
     async def test_existing_key(self, controller):
         ctrl, _, _ = controller
-        template = ctrl._template
-        first_key = template.quick_actions[0].key
+        first_key = '1'
 
         result = await ctrl.run_quick_action(first_key)
         assert result is not None

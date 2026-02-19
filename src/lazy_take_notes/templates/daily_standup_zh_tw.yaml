@@ -68,8 +68,7 @@ final_user_template: |
 whisper_prompt: "站會 standup blocker sprint PR deploy 部署 衝刺 迭代 障礙 進度 昨天 今天 明天 code 程式碼 review 合併 測試"
 
 quick_actions:
-  - key: "1"
-    label: "障礙總結"
+  - label: "障礙總結"
     description: "整理目前所有障礙事項"
     prompt_template: |
       以下是目前的站會摘要：
@@ -79,8 +78,7 @@ quick_actions:
       {recent_transcript}
 
       請列出目前所有障礙（blockers），包含提出者、影響範圍和建議處理方式。使用繁體中文。
-  - key: "2"
-    label: "報告追蹤"
+  - label: "報告追蹤"
     description: "追蹤成員報告狀況"
     prompt_template: |
       以下是目前的站會摘要：
@@ -90,8 +88,7 @@ quick_actions:
       {recent_transcript}
 
       請列出已報告和尚未報告的成員清單。使用繁體中文。
-  - key: "3"
-    label: "時間提醒"
+  - label: "時間提醒"
     description: "站會時間管理建議"
     prompt_template: |
       以下是目前的站會摘要：

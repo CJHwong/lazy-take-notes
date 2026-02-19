@@ -59,8 +59,7 @@ final_user_template: |
   3. Similarly review "Suggested Actions": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.
 
 quick_actions:
-  - key: "1"
-    label: "Catch Up"
+  - label: "Catch Up"
     description: "Catch up on meeting progress"
     prompt_template: |
       Here is the current meeting summary:
@@ -70,16 +69,14 @@ quick_actions:
       {recent_transcript}
 
       Please give me 3-5 key points summarizing the current situation.
-  - key: "2"
-    label: "Actions"
+  - label: "Actions"
     description: "List action items so far"
     prompt_template: |
       Here is the current meeting summary:
       {digest_markdown}
 
       Please list all current action items, including the assignee (if known) and rationale.
-  - key: "3"
-    label: "Summary"
+  - label: "Summary"
     description: "Quick summary of the meeting"
     prompt_template: |
       Here is the current meeting summary:

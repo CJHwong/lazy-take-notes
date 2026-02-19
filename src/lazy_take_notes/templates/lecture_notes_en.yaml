@@ -61,8 +61,7 @@ final_user_template: |
   3. Ensure all definitions, examples, and exam hints are captured completely.
 
 quick_actions:
-  - key: "1"
-    label: "Catch Up"
+  - label: "Catch Up"
     description: "Catch up on what was covered"
     prompt_template: |
       Here are the current lecture notes:
@@ -72,16 +71,14 @@ quick_actions:
       {recent_transcript}
 
       Please give me 3-5 key points summarizing what has been covered so far.
-  - key: "2"
-    label: "Definitions"
+  - label: "Definitions"
     description: "List all definitions so far"
     prompt_template: |
       Here are the current lecture notes:
       {digest_markdown}
 
       Please list every definition introduced in this lecture, formatted as a clean glossary.
-  - key: "3"
-    label: "Exam Prep"
+  - label: "Exam Prep"
     description: "Summarize exam-relevant material"
     prompt_template: |
       Here are the current lecture notes:

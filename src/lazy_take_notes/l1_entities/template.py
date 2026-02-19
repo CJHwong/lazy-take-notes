@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class TemplateMetadata(BaseModel):
@@ -13,7 +13,6 @@ class TemplateMetadata(BaseModel):
 
 
 class QuickAction(BaseModel):
-    key: str
     label: str
     description: str = ''
     prompt_template: str
@@ -26,3 +25,9 @@ class SessionTemplate(BaseModel):
     final_user_template: str = ''
     whisper_prompt: str = ''
     quick_actions: list[QuickAction] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def _validate_quick_actions_count(self) -> SessionTemplate:
+        if len(self.quick_actions) > 5:
+            raise ValueError(f'At most 5 quick_actions allowed, got {len(self.quick_actions)}')
+        return self

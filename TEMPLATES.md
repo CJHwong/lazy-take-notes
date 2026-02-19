@@ -1,6 +1,6 @@
 # Templates
 
-Templates are YAML files that control the LLM prompts, display labels, and quick-action keys for a session. Built-in templates ship with the app; you can add your own or override built-ins.
+Templates are YAML files that control the LLM prompts, display labels, and quick actions for a session. Built-in templates ship with the app; you can add your own or override built-ins.
 
 ## User templates
 
@@ -40,9 +40,8 @@ final_user_template: |
 
 whisper_prompt: "optional hint words for the speech recogniser"
 
-quick_actions:
-  - key: "1"                    # single character; see reserved keys below
-    label: "Pain Points"        # shown in the keybinding bar
+quick_actions:                   # up to 5 entries; bound to keys 1–5 by position
+  - label: "Pain Points"        # shown in the keybinding bar
     description: "..."          # shown in the help screen
     prompt_template: |
       # variables: {digest_markdown}, {recent_transcript}
@@ -70,12 +69,6 @@ quick_actions:
 | --------------------- | ---------------------------------------- |
 | `{digest_markdown}`   | Latest digest (Markdown)                 |
 | `{recent_transcript}` | Last ~30 transcript lines                |
-
-### Reserved quick-action keys
-
-The following keys are reserved by the app and cannot be used for quick actions:
-
-`q` `s` `h` `c` `space` `tab` `escape`
 
 ### `whisper_prompt`
 

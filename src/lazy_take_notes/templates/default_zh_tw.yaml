@@ -59,8 +59,7 @@ final_user_template: |
   3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。
 
 quick_actions:
-  - key: "1"
-    label: "掌握現況"
+  - label: "掌握現況"
     description: "快速了解目前會議進度"
     prompt_template: |
       以下是目前的會議摘要：
@@ -70,16 +69,14 @@ quick_actions:
       {recent_transcript}
 
       請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。
-  - key: "2"
-    label: "行動項目"
+  - label: "行動項目"
     description: "列出目前所有行動項目"
     prompt_template: |
       以下是目前的會議摘要：
       {digest_markdown}
 
       請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。
-  - key: "3"
-    label: "總結"
+  - label: "總結"
     description: "一段話總結目前會議進展"
     prompt_template: |
       以下是目前的會議摘要：

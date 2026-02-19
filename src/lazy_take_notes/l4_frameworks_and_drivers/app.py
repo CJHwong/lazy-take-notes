@@ -94,11 +94,12 @@ class App(TextualApp):
         self._download_modal: DownloadModal | None = None
         self._digest_running = False
 
-        # Register dynamic quick action bindings
-        for qa in template.quick_actions:
+        # Register dynamic quick action bindings (positional: 1-5)
+        for i, qa in enumerate(template.quick_actions):
+            num = str(i + 1)
             self._bindings.bind(
-                qa.key,
-                f"quick_action('{qa.key}')",
+                num,
+                f"quick_action('{num}')",
                 description=qa.label,
                 show=False,
             )
@@ -129,7 +130,9 @@ class App(TextualApp):
         try:
             bar = self.query_one('#status-bar', StatusBar)
             bar.keybinding_hints = self._hints_for_state(state)
-            bar.quick_action_hints = '  '.join(rf'\[{qa.key}] {qa.label}' for qa in self._template.quick_actions)
+            bar.quick_action_hints = '  '.join(
+                rf'\[{i + 1}] {qa.label}' for i, qa in enumerate(self._template.quick_actions)
+            )
         except Exception:  # noqa: S110 — widget may not exist during startup
             pass
 
@@ -347,8 +350,8 @@ class App(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         # Find label for the status bar
         label = key
-        for qa in self._template.quick_actions:
-            if qa.key == key:
+        for i, qa in enumerate(self._template.quick_actions):
+            if str(i + 1) == key:
                 label = qa.label
                 break
         bar.activity = f'{label}...'
@@ -438,9 +441,9 @@ class App(TextualApp):
         # Quick actions
         if self._template.quick_actions:
             lines.append('### Quick Actions')
-            for qa in self._template.quick_actions:
+            for i, qa in enumerate(self._template.quick_actions):
                 desc = f' - {qa.description}' if qa.description else ''
-                lines.append(f'- `{qa.key}` **{qa.label}**{desc}')
+                lines.append(f'- `{i + 1}` **{qa.label}**{desc}')
             lines.append('')
 
         # Status bar
@@ -472,8 +475,8 @@ class App(TextualApp):
                 '| `h` | Toggle this help |',
             ]
         )
-        for qa in self._template.quick_actions:
-            lines.append(f'| `{qa.key}` | {qa.label} |')
+        for i, qa in enumerate(self._template.quick_actions):
+            lines.append(f'| `{i + 1}` | {qa.label} |')
         lines.extend(
             [
                 '| `c` | Copy focused panel |',

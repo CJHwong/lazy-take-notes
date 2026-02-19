@@ -15,7 +15,7 @@ class TestRunQuickAction:
         fake_llm = FakeLLMClient(response='Action result')
         uc = RunQuickActionUseCase(fake_llm)
 
-        first_key = template.quick_actions[0].key
+        first_key = '1'
         result = await uc.execute(
             key=first_key,
             template=template,
@@ -53,7 +53,7 @@ class TestRunQuickAction:
 
         segments = [TranscriptSegment(text=f'Seg {i}', wall_start=float(i), wall_end=float(i + 1)) for i in range(60)]
 
-        first_key = template.quick_actions[0].key
+        first_key = '1'
         await uc.execute(
             key=first_key,
             template=template,
@@ -74,7 +74,7 @@ class TestRunQuickAction:
         fake_llm = FakeLLMClient(response='OK')
         uc = RunQuickActionUseCase(fake_llm)
 
-        first_key = template.quick_actions[0].key
+        first_key = '1'
         await uc.execute(
             key=first_key,
             template=template,

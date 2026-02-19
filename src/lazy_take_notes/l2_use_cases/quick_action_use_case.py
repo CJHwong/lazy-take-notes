@@ -45,7 +45,10 @@ class RunQuickActionUseCase:
 
     @staticmethod
     def _find_action(key: str, template: SessionTemplate) -> QuickAction | None:
-        for qa in template.quick_actions:
-            if qa.key == key:
-                return qa
+        try:
+            idx = int(key) - 1
+        except ValueError:
+            return None
+        if 0 <= idx < len(template.quick_actions):
+            return template.quick_actions[idx]
         return None

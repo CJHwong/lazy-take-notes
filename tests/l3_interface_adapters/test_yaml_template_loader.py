@@ -14,8 +14,6 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
     user_template_names,
 )
 
-RESERVED_KEYS = {'q', 's', 'h', 'c', 'space', 'tab', 'escape'}
-
 
 class TestLoadBuiltinTemplate:
     def test_load_default_zh_tw(self, default_template: SessionTemplate):
@@ -26,7 +24,6 @@ class TestLoadBuiltinTemplate:
 
     def test_quick_actions_have_required_fields(self, default_template: SessionTemplate):
         for qa in default_template.quick_actions:
-            assert qa.key
             assert qa.label
             assert qa.prompt_template
 
@@ -48,8 +45,7 @@ system_prompt: "You are a meeting assistant."
 digest_user_template: "New transcript ({line_count} lines):\\n{new_lines}"
 final_user_template: "Meeting ended.\\n{new_lines}\\n{full_transcript}"
 quick_actions:
-  - key: "c"
-    label: "Catch up"
+  - label: "Catch up"
     prompt_template: "Summarize: {digest_markdown}"
 """,
             encoding='utf-8',
@@ -87,17 +83,11 @@ class TestAllBuiltinTemplates:
         assert '{full_transcript}' in tmpl.final_user_template
         assert '{new_lines}' in tmpl.final_user_template
 
-    def test_quick_action_keys_no_reserved_conflict(self, any_builtin_template: SessionTemplate):
-        for qa in any_builtin_template.quick_actions:
-            assert qa.key not in RESERVED_KEYS
-
-    def test_quick_action_keys_unique(self, any_builtin_template: SessionTemplate):
-        keys = [qa.key for qa in any_builtin_template.quick_actions]
-        assert len(keys) == len(set(keys))
+    def test_quick_actions_count_within_limit(self, any_builtin_template: SessionTemplate):
+        assert len(any_builtin_template.quick_actions) <= 5
 
     def test_quick_actions_have_required_fields(self, any_builtin_template: SessionTemplate):
         for qa in any_builtin_template.quick_actions:
-            assert qa.key
             assert qa.label
             assert qa.prompt_template
 

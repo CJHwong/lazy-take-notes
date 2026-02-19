@@ -68,8 +68,7 @@ final_user_template: |
 whisper_prompt: "回顧 retrospective 改善 action item 做得好 待改善 sprint 衝刺 迭代 承諾 負責人 follow-up 跟進 velocity 速度"
 
 quick_actions:
-  - key: "1"
-    label: "主題摘要"
+  - label: "主題摘要"
     description: "摘要目前三大回顧類別"
     prompt_template: |
       以下是目前的回顧摘要：
@@ -79,16 +78,14 @@ quick_actions:
       {recent_transcript}
 
       請用重點摘要目前回顧的三大類別：做得好、待改善、改善行動。使用繁體中文。
-  - key: "2"
-    label: "行動承諾"
+  - label: "行動承諾"
     description: "列出所有改善承諾"
     prompt_template: |
       以下是目前的回顧摘要：
       {digest_markdown}
 
       請列出目前所有的改善承諾（action items），包含負責人（若已知）、具體內容和預期完成時間。使用繁體中文。
-  - key: "3"
-    label: "團隊氛圍"
+  - label: "團隊氛圍"
     description: "評估團隊整體情緒氛圍"
     prompt_template: |
       以下是目前的回顧摘要：

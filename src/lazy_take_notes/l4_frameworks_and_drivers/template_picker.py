@@ -230,8 +230,8 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
 
         if tmpl.quick_actions:
             lines += ['', '### Quick Actions']
-            for qa in tmpl.quick_actions:
-                lines.append(f'- **`{qa.key}`** {qa.label} — {qa.description}')
+            for i, qa in enumerate(tmpl.quick_actions):
+                lines.append(f'- **`{i + 1}`** {qa.label} — {qa.description}')
 
         if tmpl.whisper_prompt:
             lines += ['', f'**Whisper hint:** {tmpl.whisper_prompt}']
