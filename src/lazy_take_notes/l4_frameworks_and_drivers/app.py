@@ -311,7 +311,7 @@ class App(TextualApp):
     def on_query_result(self, message: QueryResult) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
-        self.push_screen(QueryModal(title=message.action_label, body=message.result))
+        self.push_screen(QueryModal(title=message.action_label, body=message.result, is_error=message.is_error))
 
     def on_audio_level(self, message: AudioLevel) -> None:
         try:
@@ -361,7 +361,11 @@ class App(TextualApp):
         bar.activity = f'{label}...'
 
         async def _query_task() -> None:
-            result = await self._controller.run_quick_action(key)
+            try:
+                result = await self._controller.run_quick_action(key)
+            except Exception as e:
+                self.post_message(QueryResult(result=f'Error: {e}', action_label=label, is_error=True))
+                return
             if result is not None:
                 text, action_label = result
                 self.post_message(QueryResult(result=text, action_label=action_label))

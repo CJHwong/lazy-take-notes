@@ -55,10 +55,11 @@ class ModelDownloadProgress(Message):
 class QueryResult(Message):
     """Posted by controller when a quick-action query completes."""
 
-    def __init__(self, result: str, action_label: str) -> None:
+    def __init__(self, result: str, action_label: str, is_error: bool = False) -> None:
         super().__init__()
         self.result = result
         self.action_label = action_label
+        self.is_error = is_error
 
 
 class AudioLevel(Message):

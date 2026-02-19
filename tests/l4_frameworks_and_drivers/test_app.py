@@ -13,8 +13,14 @@ from lazy_take_notes.l3_interface_adapters.controllers.session_controller import
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
 from lazy_take_notes.l4_frameworks_and_drivers.app import App
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
-from lazy_take_notes.l4_frameworks_and_drivers.messages import AudioWorkerStatus, DigestReady, TranscriptChunk
+from lazy_take_notes.l4_frameworks_and_drivers.messages import (
+    AudioWorkerStatus,
+    DigestReady,
+    QueryResult,
+    TranscriptChunk,
+)
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.query_modal import QueryModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
 from tests.conftest import FakeLLMClient, FakePersistence
@@ -548,3 +554,29 @@ class TestStatusBarLastDigestTime:
                 await pilot.pause()
 
                 assert bar.last_digest_time > 0.0
+
+
+class TestQueryErrorModal:
+    @pytest.mark.asyncio
+    async def test_error_result_opens_modal_with_is_error(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(
+                    QueryResult(result='Error: connection refused', action_label='Catch Up', is_error=True)
+                )
+                await pilot.pause()
+
+                assert isinstance(app.screen, QueryModal)
+                assert app.screen._is_error is True
+
+    @pytest.mark.asyncio
+    async def test_success_result_opens_modal_without_error(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(QueryResult(result='Here is your summary', action_label='Summary', is_error=False))
+                await pilot.pause()
+
+                assert isinstance(app.screen, QueryModal)
+                assert app.screen._is_error is False

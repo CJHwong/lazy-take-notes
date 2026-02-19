@@ -26,9 +26,17 @@ class QueryModal(ModalScreen[None]):
         padding: 1 2;
     }
 
+    QueryModal.error > VerticalScroll {
+        border: thick $error;
+    }
+
     QueryModal > VerticalScroll > #query-title {
         text-style: bold;
         margin-bottom: 1;
+    }
+
+    QueryModal.error > VerticalScroll > #query-title {
+        color: $error;
     }
 
     QueryModal > VerticalScroll > #query-body {
@@ -45,10 +53,15 @@ class QueryModal(ModalScreen[None]):
 
     BINDINGS = [('escape', 'dismiss', 'Close')]
 
-    def __init__(self, title: str, body: str, **kwargs) -> None:
+    def __init__(self, title: str, body: str, is_error: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
         self._title = title
         self._body = body
+        self._is_error = is_error
+
+    def on_mount(self) -> None:
+        if self._is_error:
+            self.add_class('error')
 
     def compose(self) -> ComposeResult:
         with VerticalScroll():
