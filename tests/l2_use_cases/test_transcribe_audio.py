@@ -1,6 +1,7 @@
 """Tests for TranscribeAudioUseCase — uses FakeTranscriber, NOT @patch("pywhispercpp...")."""
 
 import numpy as np
+import pytest
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import SAMPLE_RATE, TranscribeAudioUseCase
@@ -156,6 +157,107 @@ class TestTranscribeAudioUseCase:
         assert [s.text for s in second] == ['Second speech'], (
             'Second speech was silently dropped — wall_start filter bug'
         )
+
+    # --- prepare_buffer / apply_result ---
+
+    def test_prepare_buffer_returns_snapshot_and_resets(self):
+        """prepare_buffer() should snapshot the buffer, reset to overlap tail, mark not-first."""
+        fake = FakeTranscriber()
+        overlap_s = 1.0
+        uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=1.0, overlap=overlap_s)
+
+        audio = np.random.randn(SAMPLE_RATE).astype(np.float32) * 0.1
+        uc.set_session_offset(1.0)
+        uc.feed_audio(audio)
+
+        result = uc.prepare_buffer()
+
+        assert result is not None
+        snapshot, prompt, buf_wall_start, is_first = result
+        assert len(snapshot) == SAMPLE_RATE
+        assert is_first is True
+        assert buf_wall_start == pytest.approx(0.0)
+        # Buffer reset to overlap tail
+        assert len(uc._buffer) == int(SAMPLE_RATE * overlap_s)
+        assert uc._is_first_chunk is False
+
+    def test_prepare_buffer_silent_returns_none(self):
+        """Silent buffer should return None (nothing to transcribe)."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=1.0)
+
+        uc.feed_audio(np.zeros(SAMPLE_RATE, dtype=np.float32))
+
+        result = uc.prepare_buffer()
+        assert result is None
+        assert len(fake.transcribe_calls) == 0
+
+    def test_apply_result_filters_overlap_and_adjusts_timestamps(self):
+        """apply_result() should drop overlap region and shift wall times."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=1.0, overlap=1.0)
+
+        segments = [
+            TranscriptSegment(text='in overlap', wall_start=0.0, wall_end=0.5),  # dropped
+            TranscriptSegment(text='kept', wall_start=0.9, wall_end=2.0),  # wall_end > 1.0
+        ]
+        result = uc.apply_result(segments, buffer_wall_start=5.0, is_first_chunk=False)
+
+        assert len(result) == 1
+        assert result[0].text == 'kept'
+        assert result[0].wall_start == pytest.approx(5.0 + 0.9)
+        assert result[0].wall_end == pytest.approx(5.0 + 2.0)
+
+    def test_apply_result_first_chunk_keeps_all_segments(self):
+        """First chunk has no overlap to filter."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(transcriber=fake, language='zh', overlap=1.0)
+
+        segments = [TranscriptSegment(text='early', wall_start=0.0, wall_end=0.5)]
+        result = uc.apply_result(segments, buffer_wall_start=0.0, is_first_chunk=True)
+
+        assert len(result) == 1
+        assert result[0].text == 'early'
+
+    def test_apply_result_updates_prompt_chain(self):
+        """apply_result() should update _current_prompt with the last segment text."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(transcriber=fake, language='zh', overlap=0.0)
+
+        segments = [
+            TranscriptSegment(text='first', wall_start=0.0, wall_end=1.0),
+            TranscriptSegment(text='last', wall_start=1.0, wall_end=2.0),
+        ]
+        uc.apply_result(segments, buffer_wall_start=0.0, is_first_chunk=True)
+
+        assert uc._current_prompt == 'last'
+
+    def test_prepare_then_apply_equivalent_to_process_buffer(self):
+        """prepare_buffer + apply_result should produce same output as process_buffer."""
+        segs = [TranscriptSegment(text='speech', wall_start=0.0, wall_end=2.0)]
+        fake_a = FakeTranscriber(segments=segs)
+        fake_b = FakeTranscriber(segments=segs)
+
+        uc_sync = TranscribeAudioUseCase(transcriber=fake_a, language='zh', chunk_duration=1.0, overlap=0.0)
+        uc_async = TranscribeAudioUseCase(transcriber=fake_b, language='zh', chunk_duration=1.0, overlap=0.0)
+
+        audio = np.random.randn(SAMPLE_RATE).astype(np.float32) * 0.1
+        uc_sync.set_session_offset(1.0)
+        uc_sync.feed_audio(audio)
+        uc_async.set_session_offset(1.0)
+        uc_async.feed_audio(audio)
+
+        sync_result = uc_sync.process_buffer()
+
+        prepared = uc_async.prepare_buffer()
+        assert prepared is not None
+        buf, prompt, buf_wall_start, is_first = prepared
+        raw = fake_b.transcribe(buf, 'zh', prompt)
+        async_result = uc_async.apply_result(raw, buf_wall_start, is_first)
+
+        assert len(sync_result) == len(async_result)
+        assert sync_result[0].text == async_result[0].text
+        assert sync_result[0].wall_start == pytest.approx(async_result[0].wall_start)
 
     def test_flush_with_too_little_data(self):
         fake = FakeTranscriber()

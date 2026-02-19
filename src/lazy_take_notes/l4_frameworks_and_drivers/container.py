@@ -17,7 +17,7 @@ from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import File
 from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
 from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import OllamaLLMClient
 from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
-from lazy_take_notes.l3_interface_adapters.gateways.whisper_transcriber import WhisperTranscriber
+from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import SubprocessWhisperTranscriber
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import InfraConfig
@@ -41,7 +41,7 @@ class DependencyContainer:
         _infra = infra or InfraConfig()
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
         self.llm_client: LLMClient = OllamaLLMClient(host=_infra.ollama.host)
-        self.transcriber: Transcriber = WhisperTranscriber()
+        self.transcriber: Transcriber = SubprocessWhisperTranscriber()
         self.audio_source: AudioSource | None = self._build_audio_source(audio_mode) if audio_mode is not None else None
         self.model_resolver: ModelResolver = HfModelResolver()
 

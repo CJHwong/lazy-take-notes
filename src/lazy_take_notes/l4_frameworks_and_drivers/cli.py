@@ -158,6 +158,20 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
         DependencyContainer,
     )
 
+    # Pre-initialize the resource tracker before Textual replaces sys.stderr.
+    # ctx.Process.start() (spawn context) calls resource_tracker.ensure_running(),
+    # which spawns the tracker subprocess and includes sys.stderr.fileno() in
+    # fds_to_pass. Textual replaces sys.stderr with a stream that returns fileno()
+    # == -1, which causes spawnv_passfds to raise ValueError. Calling
+    # ensure_running() here (while sys.stderr is still the real fd) starts the
+    # tracker once; all subsequent calls inside the TUI are no-ops.
+    try:
+        import multiprocessing.resource_tracker as _rt  # noqa: PLC0415 -- pre-init before Textual
+
+        _rt.ensure_running()
+    except Exception:  # noqa: S110 — best-effort; tracker may not exist on all platforms
+        pass
+
     container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=audio_mode)
     app = App(
         config=config,
@@ -165,6 +179,7 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
         output_dir=out_dir,
         controller=container.controller,
         audio_source=container.audio_source,
+        transcriber=container.transcriber,
         missing_digest_models=missing_digest,
         missing_interactive_models=missing_interactive,
     )

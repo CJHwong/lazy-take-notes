@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import logging
 import queue
 import threading
 import time
@@ -20,6 +22,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     TranscriptChunk,
 )
+
+log = logging.getLogger('ltn.audio')
 
 
 def _start_raw_recorder(
@@ -94,14 +98,17 @@ def run_audio_worker(
     post_message(AudioWorkerStatus(status='loading_model'))
     try:
         if transcriber is None:
-            from lazy_take_notes.l3_interface_adapters.gateways.whisper_transcriber import (  # noqa: PLC0415 -- deferred: whisper.cpp loaded only when worker starts
-                WhisperTranscriber,
+            from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import (  # noqa: PLC0415 -- deferred: subprocess spawned only when worker starts
+                SubprocessWhisperTranscriber,
             )
 
-            transcriber = WhisperTranscriber()
+            transcriber = SubprocessWhisperTranscriber()
         transcriber.load_model(model_path)
     except Exception as e:
+        log.error('Failed to load transcription model: %s', e, exc_info=True)
         post_message(AudioWorkerStatus(status='error', error=f'Failed to load model: {e}'))
+        if transcriber is not None:
+            transcriber.close()  # clean up any partially-started subprocess
         return []
     post_message(AudioWorkerStatus(status='model_ready'))
 
@@ -127,6 +134,29 @@ def run_audio_worker(
     total_samples_fed: int = 0
     _last_level_post: float = 0.0
 
+    # Off-thread transcription: audio reading continues while subprocess infers.
+    _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    _transcript_future: concurrent.futures.Future | None = None
+    _pending_meta: tuple[float, bool] | None = None  # (buffer_wall_start, is_first_chunk)
+
+    def _collect_future() -> None:
+        nonlocal _transcript_future, _pending_meta
+        if _transcript_future is None or not _transcript_future.done():
+            return
+        try:
+            raw_segs = _transcript_future.result()
+            buf_start, was_first = _pending_meta  # type: ignore[misc]
+            new_segs = use_case.apply_result(raw_segs, buf_start, was_first)
+            if new_segs:
+                all_segments.extend(new_segs)
+                post_message(TranscriptChunk(segments=new_segs))
+        except Exception as e:
+            log.error('Transcription failed: %s', e, exc_info=True)
+            post_message(AudioWorkerStatus(status='error', error=str(e)))
+        finally:
+            _transcript_future = None
+            _pending_meta = None
+
     # Raw WAV recorder only makes sense for mic-based sources
     from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when worker starts
         SounddeviceAudioSource,
@@ -149,8 +179,11 @@ def run_audio_worker(
             while not is_cancelled():
                 if pause_event is not None and pause_event.is_set():
                     use_case.reset_buffer()
+                    _collect_future()
                     time.sleep(0.1)
                     continue
+
+                _collect_future()
 
                 data = audio_source.read(timeout=0.1)
                 if data is None:
@@ -166,11 +199,25 @@ def run_audio_worker(
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
 
-                if use_case.should_trigger():
-                    new_segments = use_case.process_buffer()
-                    if new_segments:
-                        all_segments.extend(new_segments)
-                        post_message(TranscriptChunk(segments=new_segments))
+                if use_case.should_trigger() and _transcript_future is None:
+                    prepared = use_case.prepare_buffer()
+                    if prepared is not None:
+                        buf, prompt, buf_wall_start, is_first = prepared
+                        _pending_meta = (buf_wall_start, is_first)
+                        _transcript_future = _executor.submit(
+                            transcriber.transcribe,
+                            buf,
+                            language,
+                            prompt,
+                        )
+
+            # Wait for any in-flight transcription before draining
+            if _transcript_future is not None:
+                try:
+                    _transcript_future.result(timeout=120)
+                    _collect_future()
+                except Exception as e:
+                    log.error('In-flight transcription at shutdown: %s', e, exc_info=True)
 
             # Shutdown drain: read remaining for up to 500ms
             deadline = time.monotonic() + 0.5
@@ -201,6 +248,8 @@ def run_audio_worker(
         raw_q.put(None)
     if raw_writer is not None:
         raw_writer.join(timeout=5)
+
+    _executor.shutdown(wait=True)
 
     # Release transcriber resources (suppresses C-level teardown noise)
     transcriber.close()

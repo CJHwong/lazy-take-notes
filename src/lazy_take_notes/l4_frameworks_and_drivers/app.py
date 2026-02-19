@@ -14,6 +14,7 @@ from textual.widgets import Static
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
+from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
@@ -53,6 +54,7 @@ class App(TextualApp):
         output_dir: Path,
         controller: SessionController | None = None,
         audio_source: AudioSource | None = None,
+        transcriber: Transcriber | None = None,
         missing_digest_models: list[str] | None = None,
         missing_interactive_models: list[str] | None = None,
         **kwargs,
@@ -77,6 +79,7 @@ class App(TextualApp):
             self._controller = container.controller
 
         self._audio_source = audio_source
+        self._transcriber = transcriber
 
         self._missing_digest_models: list[str] = missing_digest_models or []
         self._missing_interactive_models: list[str] = missing_interactive_models or []
@@ -87,6 +90,7 @@ class App(TextualApp):
         self._audio_stopped = False
         self._pending_quit = False
         self._download_modal: DownloadModal | None = None
+        self._digest_running = False
 
         # Register dynamic quick action bindings
         for qa in template.quick_actions:
@@ -153,7 +157,7 @@ class App(TextualApp):
                 timeout=10,
             )
         self._start_audio_worker()
-        self.set_interval(1.0, self._refresh_status_bar)
+        self.set_interval(0.2, self._refresh_status_bar)
 
     def _start_audio_worker(self) -> None:
         tc = self._config.transcription
@@ -199,6 +203,7 @@ class App(TextualApp):
             pause_event=self._audio_paused,
             output_dir=self._output_dir,
             save_audio=self._config.output.save_audio,
+            transcriber=self._transcriber,
             audio_source=self._audio_source,
         )
 
@@ -223,7 +228,7 @@ class App(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_count = len(self._controller.digest_state.buffer)
 
-        if should_digest:
+        if should_digest and not self._digest_running:
             self._run_digest_worker()
 
     def _dismiss_download_modal(self) -> None:
@@ -317,24 +322,28 @@ class App(TextualApp):
     def _run_digest_worker(self, is_final: bool = False) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...' if is_final else 'Digesting...'
+        self._digest_running = True
 
         async def _digest_task() -> None:
-            result = await self._controller.run_digest(is_final=is_final)
-            if result.data is not None:
-                self.post_message(
-                    DigestReady(
-                        markdown=result.data,
-                        digest_number=self._controller.digest_state.digest_count,
-                        is_final=is_final,
+            try:
+                result = await self._controller.run_digest(is_final=is_final)
+                if result.data is not None:
+                    self.post_message(
+                        DigestReady(
+                            markdown=result.data,
+                            digest_number=self._controller.digest_state.digest_count,
+                            is_final=is_final,
+                        )
                     )
-                )
-            else:
-                self.post_message(
-                    DigestError(
-                        error=result.error,
-                        consecutive_failures=self._controller.digest_state.consecutive_failures,
+                else:
+                    self.post_message(
+                        DigestError(
+                            error=result.error,
+                            consecutive_failures=self._controller.digest_state.consecutive_failures,
+                        )
                     )
-                )
+            finally:
+                self._digest_running = False
 
         self.run_worker(_digest_task, exclusive=True, group='digest')
 

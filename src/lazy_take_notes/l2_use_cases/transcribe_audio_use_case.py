@@ -70,6 +70,67 @@ class TranscribeAudioUseCase:
 
         return False
 
+    def prepare_buffer(self) -> tuple[np.ndarray, str, float, bool] | None:
+        """Extract the current buffer for off-thread transcription.
+
+        Returns (audio_snapshot, prompt, buffer_wall_start, is_first_chunk), or None
+        if the buffer is silent (nothing to transcribe).
+
+        Resets the internal buffer to the overlap tail immediately so the caller
+        can continue feeding audio without waiting for transcription to finish.
+        Call apply_result() from the audio loop thread once transcription completes.
+        """
+        buf = self._buffer
+
+        rms = np.sqrt(np.mean(buf**2))
+        if rms < self._silence_threshold:
+            self._buffer = (
+                buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
+            )
+            return None
+
+        snapshot = buf.copy()
+        buffer_wall_start = self._session_offset - len(buf) / SAMPLE_RATE
+        current_prompt = self._current_prompt
+        is_first = self._is_first_chunk
+
+        self._buffer = buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
+        self._is_first_chunk = False
+
+        return snapshot, current_prompt, buffer_wall_start, is_first
+
+    def apply_result(
+        self,
+        segments: list[TranscriptSegment],
+        buffer_wall_start: float,
+        is_first_chunk: bool,
+    ) -> list[TranscriptSegment]:
+        """Filter and adjust segments from an off-thread transcription.
+
+        Deduplicates the overlap region, adjusts wall times to absolute session
+        offsets, and updates the prompt chain.  Must be called from the audio
+        loop thread (single-threaded with feed_audio / prepare_buffer).
+        """
+        min_start = 0.0 if is_first_chunk else self.overlap
+        new_segments: list[TranscriptSegment] = []
+        last_text = None
+
+        for seg in segments:
+            if seg.wall_end > min_start:
+                adjusted = TranscriptSegment(
+                    text=seg.text,
+                    wall_start=buffer_wall_start + seg.wall_start,
+                    wall_end=buffer_wall_start + seg.wall_end,
+                )
+                new_segments.append(adjusted)
+                last_text = seg.text
+
+        if last_text:
+            prefix = f'{self._whisper_prompt} ' if self._whisper_prompt else ''
+            self._current_prompt = f'{prefix}{last_text}'
+
+        return new_segments
+
     def process_buffer(self) -> list[TranscriptSegment]:
         """Transcribe the current buffer and return new segments.
 
