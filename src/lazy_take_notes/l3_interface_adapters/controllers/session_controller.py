@@ -55,7 +55,7 @@ class SessionController:
         self._persistence.save_transcript_lines(segments, append=True)
 
         dc = self._config.digest
-        return should_trigger_digest(self.digest_state, dc.min_lines, dc.min_interval)
+        return should_trigger_digest(self.digest_state, dc.min_lines, dc.min_interval, dc.max_lines)
 
     async def run_digest(self, *, is_final: bool = False) -> DigestResult:
         """Run a digest cycle."""

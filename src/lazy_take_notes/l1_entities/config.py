@@ -29,6 +29,7 @@ class DigestConfig(BaseModel):
     min_lines: int
     min_interval: float
     compact_token_threshold: int
+    max_lines: int | None = None  # force-trigger threshold; None = 2×min_lines
 
 
 class InteractiveConfig(BaseModel):

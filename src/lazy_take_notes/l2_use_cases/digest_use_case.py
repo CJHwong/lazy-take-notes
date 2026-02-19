@@ -98,9 +98,19 @@ def should_trigger_digest(
     state: DigestState,
     min_lines: int,
     min_interval: float,
+    max_lines: int | None = None,
 ) -> bool:
-    """Check if a digest cycle should trigger based on buffer size and elapsed time."""
-    if len(state.buffer) < min_lines:
+    """Check if a digest cycle should trigger based on buffer size and elapsed time.
+
+    Triggers when buffer >= min_lines AND elapsed >= min_interval.
+    Force-triggers when buffer >= max_lines regardless of interval.
+    max_lines defaults to 2×min_lines when None.
+    """
+    buf_size = len(state.buffer)
+    if buf_size < min_lines:
         return False
+    cap = max_lines if max_lines is not None else min_lines * 2
+    if buf_size >= cap:
+        return True
     elapsed = time.monotonic() - state.last_digest_time
     return elapsed >= min_interval
