@@ -84,6 +84,32 @@ class FakeTranscriber:
         self._segments = segments
 
 
+class FakeAudioSource:
+    """Fake audio source for L4 worker tests — implements AudioSource protocol."""
+
+    def __init__(self, chunks: list[np.ndarray] | None = None) -> None:
+        self._chunks = list(chunks or [])
+        self.open_calls: list[tuple[int, int]] = []
+        self.close_calls: int = 0
+        self._idx = 0
+
+    def open(self, sample_rate: int, channels: int) -> None:
+        self.open_calls.append((sample_rate, channels))
+
+    def read(self, timeout: float = 0.1) -> np.ndarray | None:
+        if self._idx >= len(self._chunks):
+            return None
+        chunk = self._chunks[self._idx]
+        self._idx += 1
+        return chunk
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def drain(self) -> np.ndarray | None:
+        return None
+
+
 class FakePersistence:
     """Fake persistence gateway for L2/L3 tests."""
 

@@ -7,11 +7,12 @@ import threading
 import time
 import wave
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-import sounddevice as sd
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
+from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import (
     SAMPLE_RATE,
     TranscribeAudioUseCase,
@@ -26,8 +27,10 @@ from lazy_take_notes.l3_interface_adapters.presenters.messages import (
 def _start_raw_recorder(
     output_dir: Path,
     is_cancelled,
-) -> tuple[sd.InputStream, threading.Thread, queue.Queue]:
+) -> tuple[Any, threading.Thread, queue.Queue]:
     """Start a parallel high-quality audio stream that writes to a WAV file."""
+    import sounddevice as sd  # noqa: PLC0415 -- deferred: only used for raw WAV recording (mic mode)
+
     device_info = sd.query_devices(kind='input')
     native_sr = int(device_info['default_samplerate'])
 
@@ -83,6 +86,7 @@ def run_audio_worker(
     output_dir: Path | None = None,
     save_audio: bool = False,
     transcriber=None,
+    audio_source: AudioSource | None = None,
 ) -> list[TranscriptSegment]:
     """Audio capture and transcription loop.
 
@@ -103,6 +107,14 @@ def run_audio_worker(
         return []
     post_message(AudioWorkerStatus(status='model_ready'))
 
+    # Resolve audio source — default to SounddeviceAudioSource when not injected
+    if audio_source is None:
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when worker starts
+            SounddeviceAudioSource,
+        )
+
+        audio_source = SounddeviceAudioSource()
+
     use_case = TranscribeAudioUseCase(
         transcriber=transcriber,
         language=language,
@@ -113,16 +125,19 @@ def run_audio_worker(
         whisper_prompt=whisper_prompt,
     )
 
-    audio_q: queue.Queue[np.ndarray] = queue.Queue()
     all_segments: list[TranscriptSegment] = []
     session_start = time.monotonic()
     _last_level_post: float = 0.0
 
-    # Start raw audio recorder if requested
-    raw_stream = None
-    raw_writer = None
-    raw_q = None
-    if save_audio and output_dir:
+    # Raw WAV recorder only makes sense for mic-based sources
+    from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when worker starts
+        SounddeviceAudioSource,
+    )
+
+    raw_stream: Any = None
+    raw_writer: threading.Thread | None = None
+    raw_q: queue.Queue | None = None
+    if save_audio and output_dir and isinstance(audio_source, SounddeviceAudioSource):
         try:
             raw_stream, raw_writer, raw_q = _start_raw_recorder(output_dir, is_cancelled)
         except Exception:  # noqa: S110 — best-effort; recording continues without raw save
@@ -131,48 +146,27 @@ def run_audio_worker(
     # Start recording
     post_message(AudioWorkerStatus(status='recording'))
     try:
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype='float32',
-            callback=lambda indata, frames, time_info, status: audio_q.put(indata.copy()),
-        ):
+        audio_source.open(SAMPLE_RATE, 1)
+        try:
             while not is_cancelled():
-                # Check pause state
                 if pause_event is not None and pause_event.is_set():
-                    # Drain queue but discard
-                    while not audio_q.empty():
-                        try:
-                            audio_q.get_nowait()
-                        except queue.Empty:
-                            break
                     use_case.reset_buffer()
                     time.sleep(0.1)
                     continue
 
-                try:
-                    data = audio_q.get(timeout=0.1)
-                except queue.Empty:
+                data = audio_source.read(timeout=0.1)
+                if data is None:
                     continue
 
                 now = time.monotonic() - session_start
                 use_case.set_session_offset(now)
                 use_case.feed_audio(data)
 
-                # Post audio level at ~10 Hz for the wave indicator
                 now_abs = time.monotonic()
                 if now_abs - _last_level_post >= 0.1:
                     rms = float(np.sqrt(np.mean(data**2)))
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
-
-                # Drain remaining
-                while not audio_q.empty():
-                    try:
-                        extra = audio_q.get_nowait()
-                        use_case.feed_audio(extra)
-                    except queue.Empty:
-                        break
 
                 if use_case.should_trigger():
                     new_segments = use_case.process_buffer()
@@ -180,13 +174,13 @@ def run_audio_worker(
                         all_segments.extend(new_segments)
                         post_message(TranscriptChunk(segments=new_segments))
 
-            # Shutdown: drain and flush
-            while not audio_q.empty():
-                try:
-                    extra = audio_q.get_nowait()
-                    use_case.feed_audio(extra)
-                except queue.Empty:
+            # Shutdown drain: read remaining for up to 500ms
+            deadline = time.monotonic() + 0.5
+            while time.monotonic() < deadline:
+                data = audio_source.read(timeout=0.1)
+                if data is None:
                     break
+                use_case.feed_audio(data)
 
             now = time.monotonic() - session_start
             use_case.set_session_offset(now)
@@ -194,6 +188,9 @@ def run_audio_worker(
             if flushed:
                 all_segments.extend(flushed)
                 post_message(TranscriptChunk(segments=flushed))
+
+        finally:
+            audio_source.close()
 
     except Exception as e:
         post_message(AudioWorkerStatus(status='error', error=str(e)))
