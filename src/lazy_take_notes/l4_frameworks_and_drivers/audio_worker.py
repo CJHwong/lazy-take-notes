@@ -92,7 +92,7 @@ def run_audio_worker(
     post_message(AudioWorkerStatus(status='loading_model'))
     try:
         if transcriber is None:
-            from lazy_take_notes.l3_interface_adapters.gateways.whisper_transcriber import (
+            from lazy_take_notes.l3_interface_adapters.gateways.whisper_transcriber import (  # noqa: PLC0415 -- deferred: whisper.cpp loaded only when worker starts
                 WhisperTranscriber,
             )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # noqa: S404 -- intentional: shells out to ffmpeg with a fixed arg list, not shell=True
 from pathlib import Path
 
 import numpy as np

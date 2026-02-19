@@ -67,7 +67,7 @@ class App(TextualApp):
         if controller is not None:
             self._controller = controller
         else:
-            from lazy_take_notes.l4_frameworks_and_drivers.container import (
+            from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: only wired when no controller injected (non-test path)
                 DependencyContainer,
             )
 
@@ -152,7 +152,7 @@ class App(TextualApp):
         self.set_interval(1.0, self._refresh_status_bar)
 
     def _start_audio_worker(self) -> None:
-        from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (
+        from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
             run_audio_worker,
         )
 
@@ -164,7 +164,7 @@ class App(TextualApp):
         def _worker():
             # Resolve model in the worker thread so downloads don't block the TUI.
             try:
-                from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (
+                from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
                     HfModelResolver,
                 )
 

@@ -54,12 +54,13 @@ select = [
     "N",    # pep8-naming
     "UP",   # pyupgrade
     "S",    # flake8-bandit
+    "PLC",  # pylint convention
 ]
+preview = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S"]
 "test_*" = ["S"]
-"run.py" = ["S603", "S607"]
 
 [tool.ruff.format]
 quote-style = "single"

@@ -72,10 +72,10 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
 @click.version_option(version=__version__)
 def cli(config_path, template_ref, output_dir, label, audio_file, show_templates):
     """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
-    from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (
+    from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlConfigLoader,
     )
-    from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (
+    from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlTemplateLoader,
         user_template_names,
     )
@@ -91,7 +91,7 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
             click.echo(f'{t.name:<25s} {t.description} [{t.locale}]{tag}')
         return
 
-    from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (
+    from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --list-templates
         InfraConfig,
         build_app_config,
     )
@@ -110,7 +110,7 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
     if template_ref:
         tmpl_ref = template_ref
     else:
-        from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
+        from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded when --template flag is given
             TemplatePicker,
         )
 
@@ -131,7 +131,9 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
     missing_digest, missing_interactive = _preflight_ollama(infra, config)
 
     if audio_file:
-        from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import run_batch
+        from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import (  # noqa: PLC0415 -- deferred: batch mode only, not loaded for TUI path
+            run_batch,
+        )
 
         run_batch(
             audio_path=Path(audio_file),
@@ -144,8 +146,12 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
 
     _preflight_microphone()
 
-    from lazy_take_notes.l4_frameworks_and_drivers.app import App
-    from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
+    from lazy_take_notes.l4_frameworks_and_drivers.app import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help or --list-templates
+        App,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help or --list-templates
+        DependencyContainer,
+    )
 
     container = DependencyContainer(config, template, out_dir, infra=infra)
     app = App(
@@ -160,7 +166,7 @@ def cli(config_path, template_ref, output_dir, label, audio_file, show_templates
 
 
 def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
-    from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (
+    from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: preflight only runs when starting a session
         OllamaLLMClient,
     )
 
@@ -180,7 +186,7 @@ def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
 
 def _preflight_microphone() -> None:
     try:
-        import sounddevice as sd
+        import sounddevice as sd  # noqa: PLC0415 -- deferred: not loaded on --help or --list-templates
 
         devices = sd.query_devices()
         input_devices = [d for d in devices if d['max_input_channels'] > 0]
