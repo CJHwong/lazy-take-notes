@@ -126,7 +126,7 @@ def run_audio_worker(
     )
 
     all_segments: list[TranscriptSegment] = []
-    session_start = time.monotonic()
+    total_samples_fed: int = 0
     _last_level_post: float = 0.0
 
     # Raw WAV recorder only makes sense for mic-based sources
@@ -158,8 +158,8 @@ def run_audio_worker(
                 if data is None:
                     continue
 
-                now = time.monotonic() - session_start
-                use_case.set_session_offset(now)
+                total_samples_fed += len(data)
+                use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
                 use_case.feed_audio(data)
 
                 now_abs = time.monotonic()
@@ -180,10 +180,10 @@ def run_audio_worker(
                 data = audio_source.read(timeout=0.1)
                 if data is None:
                     break
+                total_samples_fed += len(data)
                 use_case.feed_audio(data)
 
-            now = time.monotonic() - session_start
-            use_case.set_session_offset(now)
+            use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
             flushed = use_case.flush()
             if flushed:
                 all_segments.extend(flushed)
