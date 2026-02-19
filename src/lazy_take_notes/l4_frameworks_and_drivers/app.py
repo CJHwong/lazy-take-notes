@@ -119,27 +119,17 @@ class App(TextualApp):
         yield StatusBar(id='status-bar')
 
     def _hints_for_state(self, state: str) -> str:
-        qa_hints = '  '.join(rf'\[{qa.key}] {qa.label}' for qa in self._template.quick_actions)
         if state == 'recording':
-            parts = [r'\[Space] pause', r'\[s] stop', r'\[d] digest']
-            if qa_hints:
-                parts.append(qa_hints)
-            parts.append(r'\[h] help')
-            return '  '.join(parts)
+            return r'\[Space] pause  \[s] stop  \[d] digest  \[h] help  \[q] quit'
         if state == 'paused':
-            return r'\[Space] resume  \[s] stop  \[h] help'
-        if state == 'stopped':
-            parts = []
-            if qa_hints:
-                parts.append(qa_hints)
-            parts += [r'\[h] help', r'\[q] quit']
-            return '  '.join(parts)
-        return r'\[h] help  \[q] quit'  # idle / loading / downloading / error
+            return r'\[Space] resume  \[s] stop  \[h] help  \[q] quit'
+        return r'\[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
 
     def _update_hints(self, state: str) -> None:
         try:
             bar = self.query_one('#status-bar', StatusBar)
             bar.keybinding_hints = self._hints_for_state(state)
+            bar.quick_action_hints = '  '.join(rf'\[{qa.key}] {qa.label}' for qa in self._template.quick_actions)
         except Exception:  # noqa: S110 — widget may not exist during startup
             pass
 

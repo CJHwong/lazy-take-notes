@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 
+from rich.cells import cell_len
 from textual.reactive import reactive
 from textual.widgets import Static
 
@@ -22,10 +23,11 @@ class StatusBar(Static):
     DEFAULT_CSS = """
     StatusBar {
         dock: bottom;
-        height: 1;
+        height: auto;
         background: $surface;
         color: $text;
         padding: 0 1;
+        overflow: hidden hidden;
     }
     """
 
@@ -41,6 +43,7 @@ class StatusBar(Static):
     audio_level: reactive[float] = reactive(0.0)
     last_digest_time: reactive[float] = reactive(0.0)
     keybinding_hints: reactive[str] = reactive('')
+    quick_action_hints: reactive[str] = reactive('')
     _start_time: float = 0.0
     _frozen_elapsed: float | None = None
     _pause_start: float | None = None
@@ -127,11 +130,19 @@ class StatusBar(Static):
             left_parts.append(f'⟳ {self.activity}')
         left = ' │ '.join(left_parts)
 
-        right = self.keybinding_hints
-        if not right:
-            return left
-
         content_width = (self.size.width or 80) - 2
-        gap = content_width - len(left) - len(right)
-        padding = ' ' * max(gap, 2)
-        return left + padding + right
+
+        hints = self.keybinding_hints
+        if hints:
+            hints_width = cell_len(hints.replace(r'\[', '['))
+            gap = content_width - cell_len(left) - hints_width
+            if gap >= 2:
+                left = left + ' ' * gap + hints
+
+        if self.quick_action_hints:
+            qa = self.quick_action_hints
+            qa_width = cell_len(qa.replace(r'\[', '['))
+            qa_gap = content_width - qa_width
+            qa_line = ' ' * qa_gap + qa if qa_gap >= 0 else qa
+            return qa_line + '\n' + left
+        return left
