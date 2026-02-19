@@ -19,7 +19,7 @@ RESERVED_KEYS = {'q', 's', 'h', 'c', 'space', 'tab', 'escape'}
 
 class TestLoadBuiltinTemplate:
     def test_load_default_zh_tw(self, default_template: SessionTemplate):
-        assert default_template.metadata.name == 'default_zh_tw'
+        assert default_template.metadata.name == '預設'
         assert default_template.metadata.locale == 'zh-TW'
         assert '會議智慧助手' in default_template.system_prompt
         assert len(default_template.quick_actions) >= 1
