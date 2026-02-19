@@ -12,8 +12,5 @@ class RunQueryUseCase:
         self._llm = llm_client
 
     async def execute(self, prompt: str, model: str) -> str:
-        """Execute a single-turn query. Returns the response text."""
-        try:
-            return await self._llm.chat_single(model=model, prompt=prompt)
-        except Exception as e:
-            return f'Error: {e}'
+        """Execute a single-turn query. Returns the response text. Raises on LLM failure."""
+        return await self._llm.chat_single(model=model, prompt=prompt)

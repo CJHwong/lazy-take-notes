@@ -16,7 +16,7 @@ class TestRunQuery:
         assert result == "Here's your summary..."
 
     @pytest.mark.asyncio
-    async def test_error(self):
+    async def test_llm_error_propagates(self):
         fake_llm = FakeLLMClient()
 
         async def _raise(*a, **kw):
@@ -25,5 +25,5 @@ class TestRunQuery:
         fake_llm.chat_single = _raise  # type: ignore[invalid-assignment]
         uc = RunQueryUseCase(fake_llm)
 
-        result = await uc.execute('Summarize', model='test-model')
-        assert 'Error' in result
+        with pytest.raises(ConnectionError, match='down'):
+            await uc.execute('Summarize', model='test-model')
