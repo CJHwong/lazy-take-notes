@@ -9,13 +9,14 @@ system_prompt: |
   Follow these rules:
   1. Use clear, engaging English — match the energy of the podcast without being overly formal.
   2. Track who said what. Attribute opinions, stories, and recommendations to the correct speaker when identifiable.
-  3. Capture notable quotes verbatim when they are pithy, funny, or insightful. Use quotation marks and attribute them.
-  4. Track every resource mentioned: books, articles, tools, websites, people, companies, films, songs, etc.
-  5. Only use information explicitly present in the transcript. Do not add external knowledge or elaborate beyond what was said.
-  6. For unclear speech recognition or ambiguous passages, mark them as "(unclear)" rather than guessing.
-  7. If a "User corrections and additions" block appears, these are errata or additional context (e.g., correct spelling of guest names, URLs). Silently apply corrections throughout the notes — do not mention the corrections themselves.
-  8. Topics Discussed is cumulative: all previously covered topics must be retained, plus any new ones. Never remove a topic just because the current transcript segment does not mention it.
-  9. Resources Mentioned is cumulative: never drop a resource that was mentioned earlier.
+  3. Capture the substance of each topic, not just surface-level summaries. Include key points with speaker attribution, concrete examples or stories used, and any disagreements or contrasting views between speakers. Note the conclusion or resolution if one was reached.
+  4. Capture notable quotes verbatim when they are pithy, funny, or insightful. Use quotation marks and attribute them.
+  5. Track every resource mentioned: books, articles, tools, websites, people, companies, films, songs, etc.
+  6. Only use information explicitly present in the transcript. Do not add external knowledge or elaborate beyond what was said.
+  7. For unclear speech recognition or ambiguous passages, mark them as "(unclear)" rather than guessing.
+  8. If a "User corrections and additions" block appears, these are errata or additional context (e.g., correct spelling of guest names, URLs). Silently apply corrections throughout the notes — do not mention the corrections themselves.
+  9. Topics Discussed is cumulative: all previously covered topics must be retained, plus any new ones. Never remove a topic just because the current transcript segment does not mention it.
+  10. Resources Mentioned is cumulative: never drop a resource that was mentioned earlier.
 
   Return format must be Markdown, using the following structure:
 
@@ -23,7 +24,7 @@ system_prompt: |
   2-3 sentence overview of the episode so far.
 
   ## Topics Discussed
-  Each topic as a ### subheading with key points and speaker attributions.
+  Each topic as a ### subheading with key points and speaker attributions. Include concrete examples or stories, note any disagreements between speakers, and record the conclusion if one was reached.
 
   ## Notable Quotes
   - "Quote text" — Speaker Name
@@ -53,9 +54,11 @@ final_user_template: |
 
   Please produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:
   1. Write a polished Episode Summary that covers the full arc of the conversation.
-  2. Review all Topics Discussed — ensure nothing was lost from earlier segments.
+  2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.
   3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.
   4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.
+
+whisper_prompt: "podcast episode guest host interview discussion topic recommendation book article"
 
 quick_actions:
   - label: "Catch Up"

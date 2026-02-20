@@ -60,6 +60,8 @@ final_user_template: |
   2. Review all "Open Questions": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.
   3. Ensure all definitions, examples, and exam hints are captured completely.
 
+whisper_prompt: "lecture professor theorem proof definition corollary lemma equation formula hypothesis example derivation"
+
 quick_actions:
   - label: "Catch Up"
     description: "Catch up on what was covered"
