@@ -12,7 +12,10 @@ Terminal app for live transcription and note-taking. Records your mic, transcrib
 ## Install
 
 ```bash
-# with uv (recommended)
+# try without installing (uv required)
+uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git ltn
+
+# or clone and install locally
 uv sync
 
 # or pip
@@ -37,7 +40,7 @@ ltn --audio-file recording.m4a                          # batch-transcribe a fil
 | `c`     | Copy focused panel to clipboard |
 | `Tab`   | Switch panel focus              |
 | `h`     | Help                            |
-| `q`     | Quit (runs final digest first)  |
+| `q`     | Quit                            |
 
 Templates can add more keys for quick actions (catch up, action items, etc). Press `h` in the app to see all available bindings.
 
@@ -50,18 +53,22 @@ transcription:
   model: "large-v3-turbo-q8_0"    # default whisper model
   models:                         # per-locale overrides
     zh: "breeze-q8"               # Breeze ASR, optimized for Traditional Chinese
-  chunk_duration: 10.0
+  chunk_duration: 25.0
+  overlap: 1.0
+  silence_threshold: 0.01
+  pause_duration: 1.5
 digest:
-  model: "gemma3:27b"      # heavy model for periodic digests
+  model: "gpt-oss:120b-cloud"     # heavy model for periodic digests
   min_lines: 15
   min_interval: 60
+  compact_token_threshold: 100000
 interactive:
-  model: "gemma3:12b"      # fast model for quick actions
+  model: "gpt-oss:20b-cloud"      # fast model for quick actions
 ollama:
   host: "http://localhost:11434"
-template: "default_zh_tw"   # template file key (see TEMPLATES.md)
 output:
   directory: "./output"
+  save_audio: true                # save recording.wav alongside transcript
 ```
 
 ## Templates
@@ -77,13 +84,32 @@ After a session:
 ```
 output/
 ├── transcript_raw.txt        # timestamped transcript
-├── digest.json               # latest digest (machine-readable)
-├── digest.md                 # latest digest (human-readable)
+├── digest.md                 # latest digest (markdown)
+├── session_context.txt       # user-provided context (if any)
+├── recording.wav             # audio recording (when save_audio: true)
 └── history/
-    ├── digest_001.json
-    ├── digest_002.json
-    └── digest_003_final.json
+    ├── digest_001.md
+    ├── digest_002.md
+    └── digest_003_final.md   # final digest on quit/stop
 ```
+
+## Platform Support
+
+Currently **macOS only**. Mic-only transcription uses cross-platform libraries, but system audio capture relies on a native CoreAudio tap binary.
+
+| Feature                    | macOS | Linux      | Windows    |
+| -------------------------- | ----- | ---------- | ---------- |
+| Mic capture                | ✅     | ❌ untested | ❌ untested |
+| System audio capture       | ✅     | ❌          | ❌          |
+| Mixed audio (mic + system) | ✅     | ❌          | ❌          |
+| Audio file batch mode      | ✅     | ❌ untested | ❌ untested |
+
+### Roadmap
+
+- [ ] Linux support — mic capture + PulseAudio/PipeWire system audio
+- [ ] Windows support — mic capture + WASAPI system audio
+- [ ] Platform-native config paths (`platformdirs`)
+- [ ] PyPI release once cross-platform coverage is sufficient
 
 ## Development
 
