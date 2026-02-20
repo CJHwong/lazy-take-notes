@@ -23,7 +23,6 @@ class TestBuildAppConfig:
         assert cfg.digest.min_interval == 60.0
         assert cfg.digest.compact_token_threshold == 100_000
         assert cfg.interactive.model == 'gpt-oss:20b-cloud'
-        assert cfg.template == 'default_zh_tw'
         assert cfg.output.directory == './output'
         assert cfg.output.save_audio is True
 
@@ -32,7 +31,6 @@ class TestBuildAppConfig:
             {
                 'transcription': {'model': 'custom-model', 'models': {'ja': 'ja-model'}},
                 'digest': {'min_lines': 5},
-                'template': 'default_en',
             }
         )
         assert cfg.transcription.model == 'custom-model'
@@ -40,7 +38,6 @@ class TestBuildAppConfig:
         assert cfg.transcription.chunk_duration == 25.0  # default preserved
         assert cfg.digest.min_lines == 5
         assert cfg.digest.model == 'gpt-oss:120b-cloud'  # default preserved
-        assert cfg.template == 'default_en'
 
     def test_build_does_not_mutate_defaults(self):
         import copy

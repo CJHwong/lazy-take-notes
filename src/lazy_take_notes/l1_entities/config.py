@@ -45,5 +45,4 @@ class AppConfig(BaseModel):
     transcription: TranscriptionConfig
     digest: DigestConfig
     interactive: InteractiveConfig
-    template: str
     output: OutputConfig

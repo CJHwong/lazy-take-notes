@@ -129,14 +129,13 @@ class TestAppConfig:
                 compact_token_threshold=50_000,
             ),
             interactive=InteractiveConfig(model='m'),
-            template='default_en',
             output=OutputConfig(directory='./out', save_audio=True),
         )
-        assert cfg.template == 'default_en'
+        assert cfg.output.save_audio is True
 
     def test_missing_top_level_field_raises(self):
         with pytest.raises(ValidationError):
-            AppConfig(template='x')  # type: ignore[call-arg]
+            AppConfig(output=OutputConfig(directory='./out', save_audio=True))  # type: ignore[call-arg]
 
     def test_no_defaults(self):
         """AppConfig has no defaults — bare construction must fail."""

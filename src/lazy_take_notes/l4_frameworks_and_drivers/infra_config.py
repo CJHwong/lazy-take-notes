@@ -27,7 +27,6 @@ APP_CONFIG_DEFAULTS: dict = {
     'interactive': {
         'model': 'gpt-oss:20b-cloud',
     },
-    'template': 'default_zh_tw',
     'output': {
         'directory': './output',
         'save_audio': True,
