@@ -17,6 +17,7 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.0",
     "sounddevice>=0.5.0",
+    "soundcard>=0.4.0",
     "numpy>=1.24.0",
     "huggingface_hub>=0.20.0",
     "pyperclip>=1.8",
@@ -90,6 +91,7 @@ forbidden_modules = [
     "yaml",
     "click",
     "sounddevice",
+    "soundcard",
 ]
 
 [[tool.importlinter.contracts]]
@@ -105,6 +107,7 @@ forbidden_modules = [
     "yaml",
     "click",
     "sounddevice",
+    "soundcard",
 ]
 
 [[tool.importlinter.contracts]]
