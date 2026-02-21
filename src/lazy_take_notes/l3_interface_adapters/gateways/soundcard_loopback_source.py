@@ -14,6 +14,22 @@ from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 _CHUNK_FRAMES = SAMPLE_RATE // 10  # 100ms chunks — matches CoreAudioTapSource cadence
 
 
+def _win_com_init() -> None:
+    """Initialize COM on the current thread for WASAPI access (Windows-only, no-op elsewhere)."""
+    if sys.platform == 'win32':
+        import ctypes  # noqa: PLC0415 -- Windows-only stdlib import
+
+        ctypes.windll.ole32.CoInitializeEx(None, 0x0)  # COINIT_MULTITHREADED
+
+
+def _win_com_uninit() -> None:
+    """Uninitialize COM on the current thread (Windows-only, no-op elsewhere)."""
+    if sys.platform == 'win32':
+        import ctypes  # noqa: PLC0415 -- Windows-only stdlib import
+
+        ctypes.windll.ole32.CoUninitialize()
+
+
 class SoundCardLoopbackSource:
     """Implements AudioSource using soundcard library loopback capture (Linux/Windows)."""
 
@@ -22,10 +38,14 @@ class SoundCardLoopbackSource:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._recorder = None
+        self._com_owner = False  # tracks whether we initialized COM on the caller thread
 
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform == 'darwin':
             raise RuntimeError('SoundCardLoopbackSource is not supported on macOS — use CoreAudioTapSource')
+
+        _win_com_init()
+        self._com_owner = sys.platform == 'win32'
 
         loopback = self._find_loopback()
         self._stop.clear()
@@ -50,15 +70,19 @@ class SoundCardLoopbackSource:
         )
 
     def _reader(self, recorder, sample_rate: int) -> None:
-        chunk_frames = sample_rate // 10  # 100ms
-        while not self._stop.is_set():
-            data = recorder.record(numframes=chunk_frames)
-            if data is None:
-                continue
-            # soundcard returns (frames, channels) — flatten to mono float32
-            if data.ndim > 1:
-                data = data.mean(axis=1)
-            self._queue.put(data.astype(np.float32))
+        _win_com_init()
+        try:
+            chunk_frames = sample_rate // 10  # 100ms
+            while not self._stop.is_set():
+                data = recorder.record(numframes=chunk_frames)
+                if data is None:
+                    continue
+                # soundcard returns (frames, channels) — flatten to mono float32
+                if data.ndim > 1:
+                    data = data.mean(axis=1)
+                self._queue.put(data.astype(np.float32))
+        finally:
+            _win_com_uninit()
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
         try:
@@ -80,3 +104,6 @@ class SoundCardLoopbackSource:
             except Exception:  # noqa: BLE001, S110
                 pass
             self._recorder = None
+        if self._com_owner:
+            _win_com_uninit()
+            self._com_owner = False
