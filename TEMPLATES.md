@@ -4,10 +4,16 @@ Templates are YAML files that control the LLM prompts, display labels, and quick
 
 ## User templates
 
-Drop a `.yaml` file in `~/.config/lazy-take-notes/templates/`. It's discovered automatically by filename (without the extension). A user template with the same filename as a built-in overrides it.
+Drop a `.yaml` file in the `templates/` subdirectory of your config path. It's discovered automatically by filename (without the extension). A user template with the same filename as a built-in overrides it.
+
+| OS      | Templates path                                             |
+| ------- | ---------------------------------------------------------- |
+| macOS   | `~/Library/Application Support/lazy-take-notes/templates/` |
+| Linux   | `~/.config/lazy-take-notes/templates/`                     |
+| Windows | `C:\Users\<you>\AppData\Local\lazy-take-notes\templates\`  |
 
 ```
-~/.config/lazy-take-notes/templates/
+<config-dir>/templates/
 └── ux_interview.yaml      ← discovered as "ux_interview"
 ```
 
@@ -58,19 +64,19 @@ quick_actions:                  # up to 5 entries; bound to keys 1–5 by positi
 
 **`digest_user_template` and `final_user_template`**
 
-| Variable           | Content                                              |
-| ------------------ | ---------------------------------------------------- |
-| `{line_count}`     | Number of new transcript lines in this batch         |
-| `{new_lines}`      | The new transcript lines                             |
-| `{user_context}`   | User-typed notes (empty string if none)              |
-| `{full_transcript}`| Complete transcript (`final_user_template` only)     |
+| Variable            | Content                                          |
+| ------------------- | ------------------------------------------------ |
+| `{line_count}`      | Number of new transcript lines in this batch     |
+| `{new_lines}`       | The new transcript lines                         |
+| `{user_context}`    | User-typed notes (empty string if none)          |
+| `{full_transcript}` | Complete transcript (`final_user_template` only) |
 
 **`quick_actions[].prompt_template`**
 
-| Variable              | Content                                  |
-| --------------------- | ---------------------------------------- |
-| `{digest_markdown}`   | Latest digest (Markdown)                 |
-| `{recent_transcript}` | Last ~30 transcript lines                |
+| Variable              | Content                   |
+| --------------------- | ------------------------- |
+| `{digest_markdown}`   | Latest digest (Markdown)  |
+| `{recent_transcript}` | Last ~30 transcript lines |
 
 ### `recognition_hints`
 

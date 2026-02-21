@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from platformdirs import user_config_path
 
-CONFIG_DIR = Path('~/.config/lazy-take-notes').expanduser()
+CONFIG_DIR = user_config_path('lazy-take-notes')
 USER_TEMPLATES_DIR = CONFIG_DIR / 'templates'
 
 DEFAULT_CONFIG_PATHS = [

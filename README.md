@@ -26,7 +26,7 @@ pip install -e .
 
 ```bash
 ltn                                                     # start with defaults
-ltn --config ~/.config/lazy-take-notes/config.yaml      # custom config
+ltn --config path/to/config.yaml                        # custom config
 ltn --output-dir ./my_session                           # custom output dir
 ltn --audio-file recording.m4a                          # batch-transcribe a file
 ```
@@ -46,7 +46,15 @@ Templates can add more keys for quick actions (catch up, action items, etc). Pre
 
 ## Config
 
-`~/.config/lazy-take-notes/config.yaml`:
+Config lives in your OS config directory:
+
+| OS      | Path                                             |
+| ------- | ------------------------------------------------ |
+| macOS   | `~/Library/Application Support/lazy-take-notes/` |
+| Linux   | `~/.config/lazy-take-notes/`                     |
+| Windows | `C:\Users\<you>\AppData\Local\lazy-take-notes\`  |
+
+Example `config.yaml`:
 
 ```yaml
 transcription:
@@ -75,7 +83,7 @@ output:
 
 Templates control the LLM prompts, labels, and quick-action keys for a session. The template picker launches at startup — built-ins are listed there.
 
-To add your own or override a built-in, drop a `.yaml` file in `~/.config/lazy-take-notes/templates/`. See [TEMPLATES.md](TEMPLATES.md) for the full schema and variable reference.
+To add your own or override a built-in, drop a `.yaml` file in the `templates/` subdirectory of your config path (see table above). See [TEMPLATES.md](TEMPLATES.md) for the full schema and variable reference.
 
 ## Output
 
@@ -106,9 +114,9 @@ Currently **macOS only**. Mic-only transcription uses cross-platform libraries, 
 
 ### Roadmap
 
-- [ ] Platform-native config paths (`platformdirs`)
 - [x] Linux support — mic capture + PulseAudio/PipeWire system audio
 - [x] Windows support — mic capture + WASAPI system audio
+- [x] Platform-native config paths (`platformdirs`)
 - [ ] PyPI release once cross-platform coverage is sufficient
 
 ## Development
