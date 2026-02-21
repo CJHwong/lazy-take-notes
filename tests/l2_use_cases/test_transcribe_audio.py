@@ -259,6 +259,42 @@ class TestTranscribeAudioUseCase:
         assert sync_result[0].text == async_result[0].text
         assert sync_result[0].wall_start == pytest.approx(async_result[0].wall_start)
 
+    def test_vad_triggers_on_speech_then_silence(self):
+        """Buffer with speech body + silent tail should trigger via VAD pause detection."""
+        fake = FakeTranscriber(segments=[TranscriptSegment(text='Speech', wall_start=0.0, wall_end=2.0)])
+        uc = TranscribeAudioUseCase(
+            transcriber=fake,
+            language='zh',
+            chunk_duration=100.0,  # very large — won't trigger on size
+            overlap=0.0,
+            silence_threshold=0.01,
+            pause_duration=1.5,
+        )
+
+        # Feed 3s of speech (min_speech = 2s) + 1.5s of silence (pause_duration)
+        speech = np.random.randn(SAMPLE_RATE * 3).astype(np.float32) * 0.1
+        silence = np.zeros(int(SAMPLE_RATE * 1.5), dtype=np.float32)
+        uc.feed_audio(np.concatenate([speech, silence]))
+        uc.set_session_offset(4.5)
+
+        assert uc.should_trigger()
+
+    def test_flush_silent_buffer_returns_empty(self):
+        """Flush with a silent buffer should return empty — not waste CPU on transcription."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(
+            transcriber=fake,
+            language='zh',
+            chunk_duration=100.0,
+            overlap=0.0,
+            silence_threshold=0.01,
+        )
+
+        uc.feed_audio(np.zeros(SAMPLE_RATE * 3, dtype=np.float32))
+        segments = uc.flush()
+        assert segments == []
+        assert len(fake.transcribe_calls) == 0
+
     def test_flush_with_too_little_data(self):
         fake = FakeTranscriber()
         uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=10.0)

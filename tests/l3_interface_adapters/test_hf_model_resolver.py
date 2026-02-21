@@ -12,7 +12,7 @@ from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (
     BREEZE_VARIANTS,
     WHISPER_CPP_MODELS,
     HfModelResolver,
-    _make_progress_class,
+    _make_progress_class,  # noqa: PLC2701 -- testing private helper
 )
 
 
@@ -121,3 +121,67 @@ class TestProgressClass:
         reporter = cls(total=50)
         reporter.update(60)  # overshoots
         assert calls[-1] == 100
+
+    def test_set_description_is_noop(self):
+        cls = _make_progress_class(lambda p: None)
+        reporter = cls(total=100)
+        # Should not raise
+        reporter.set_description('downloading')
+
+    def test_set_description_str_is_noop(self):
+        cls = _make_progress_class(lambda p: None)
+        reporter = cls(total=100)
+        reporter.set_description_str('downloading')
+
+    def test_refresh_is_noop(self):
+        cls = _make_progress_class(lambda p: None)
+        reporter = cls(total=100)
+        reporter.refresh()
+
+
+class TestCacheHit:
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_breeze_cache_hit_skips_download(self, mock_download, tmp_path):
+        # Pre-create the model file so the cache check passes
+        cache_dir = tmp_path / 'models' / 'breeze'
+        cache_dir.mkdir(parents=True)
+        (cache_dir / 'ggml-model-q8_0.bin').touch()
+
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver = HfModelResolver()
+            result = resolver.resolve('breeze-q8')
+
+        mock_download.assert_not_called()
+        assert 'ggml-model-q8_0.bin' in result
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_whisper_cpp_cache_hit_skips_download(self, mock_download, tmp_path):
+        cache_dir = tmp_path / 'models' / 'whisper-cpp'
+        cache_dir.mkdir(parents=True)
+        (cache_dir / 'ggml-large-v3-turbo-q8_0.bin').touch()
+
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver = HfModelResolver()
+            result = resolver.resolve('large-v3-turbo-q8_0')
+
+        mock_download.assert_not_called()
+        assert 'ggml-large-v3-turbo-q8_0.bin' in result
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_breeze_with_tqdm_class(self, mock_download, tmp_path):
+        mock_download.return_value = str(tmp_path / 'model.bin')
+        calls = []
+        resolver = HfModelResolver(on_progress=lambda p: calls.append(p))
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver.resolve('breeze-q5')
+        assert mock_download.called
+        assert 'tqdm_class' in mock_download.call_args.kwargs

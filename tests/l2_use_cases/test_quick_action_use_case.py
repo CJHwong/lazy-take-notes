@@ -69,6 +69,22 @@ class TestRunQuickAction:
         assert 'Seg 10' in prompt
 
     @pytest.mark.asyncio
+    async def test_out_of_range_integer_key_returns_none(self):
+        template = YamlTemplateLoader().load('default_zh_tw')
+        fake_llm = FakeLLMClient()
+        uc = RunQuickActionUseCase(fake_llm)
+
+        result = await uc.execute(
+            key='99',
+            template=template,
+            model='test-model',
+            latest_digest=None,
+            all_segments=[],
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
     async def test_user_context_included_in_prompt(self):
         template = YamlTemplateLoader().load('default_zh_tw')
         fake_llm = FakeLLMClient(response='OK')

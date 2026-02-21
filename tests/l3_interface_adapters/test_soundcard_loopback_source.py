@@ -94,3 +94,23 @@ class TestSoundCardLoopbackSource:
             src.close()
 
         mock_recorder.__exit__.assert_called_once()
+
+    def test_close_survives_exit_error(self, monkeypatch):
+        monkeypatch.setattr(sys, 'platform', 'linux')
+
+        loopback_device = MagicMock()
+        loopback_device.isloopback = True
+
+        mock_recorder = MagicMock()
+        mock_recorder.record.side_effect = lambda numframes: time.sleep(10)
+        mock_recorder.__enter__ = MagicMock(return_value=mock_recorder)
+        mock_recorder.__exit__ = MagicMock(side_effect=RuntimeError('PulseAudio teardown fail'))
+        loopback_device.recorder.return_value = mock_recorder
+
+        with patch.object(loopback_mod.sc, 'all_microphones', return_value=[loopback_device]):
+            src = SoundCardLoopbackSource()
+            src.open(16000, 1)
+            # close() must not raise even when __exit__ blows up
+            src.close()
+
+        assert src._recorder is None

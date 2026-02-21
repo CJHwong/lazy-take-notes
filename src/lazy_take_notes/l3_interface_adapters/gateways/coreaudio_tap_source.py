@@ -46,7 +46,7 @@ class CoreAudioTapSource:
     def _reader(self) -> None:
         chunk_bytes = _CHUNK_FRAMES * _BYTES_PER_SAMPLE
         proc = self._proc
-        if proc is None or proc.stdout is None:
+        if proc is None or proc.stdout is None:  # pragma: no cover -- guard for ScreenCaptureKit process state
             return
         while not self._stop.is_set():
             raw = proc.stdout.read(chunk_bytes)

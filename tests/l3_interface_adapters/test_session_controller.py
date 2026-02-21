@@ -116,6 +116,31 @@ class TestRunDigest:
         assert fake_persist.context_calls == []
 
 
+class TestCompaction:
+    @pytest.mark.asyncio
+    async def test_compaction_triggered_when_tokens_exceed_threshold(self):
+        config = build_app_config({'digest': {'compact_token_threshold': 50}})
+        template = YamlTemplateLoader().load('default_zh_tw')
+        # Return high prompt_tokens in the response to trigger compaction
+        fake_llm = FakeLLMClient(response=VALID_DIGEST, prompt_tokens=200)
+        fake_persist = FakePersistence()
+        ctrl = SessionController(
+            config=config,
+            template=template,
+            llm_client=fake_llm,
+            persistence=fake_persist,
+        )
+        ctrl.digest_state.buffer = ['Line 1', 'Line 2']
+        ctrl.digest_state.all_lines = ['Line 1', 'Line 2']
+
+        result = await ctrl.run_digest()
+
+        assert result.ok
+        # After compaction, messages should be exactly 3: system + compact user + assistant
+        assert len(ctrl.digest_state.messages) == 3
+        assert ctrl.digest_state.messages[0].role == 'system'
+
+
 class TestRunQuickAction:
     @pytest.mark.asyncio
     async def test_existing_key(self, controller):

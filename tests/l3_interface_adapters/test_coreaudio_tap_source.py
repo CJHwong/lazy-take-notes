@@ -117,3 +117,47 @@ class TestCoreAudioTapSource:
             src.close()
 
         mock_proc.terminate.assert_called_once()
+
+    def test_stderr_read_exception_still_sets_error(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''  # immediate EOF (crash)
+        mock_proc.poll.return_value = 42
+        mock_proc.wait.return_value = 42
+        mock_proc.stderr.read.side_effect = OSError('broken pipe')
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            with pytest.raises(RuntimeError, match='exited with code 42'):
+                src.read(timeout=0.1)
+            src.close()
+
+    def test_close_kills_on_timeout(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        import subprocess as subprocess_mod
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.side_effect = lambda size: time.sleep(10)
+        mock_proc.stdin = MagicMock()
+        mock_proc.wait.side_effect = subprocess_mod.TimeoutExpired(cmd='coreaudio-tap', timeout=3)
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            src.close()
+
+        mock_proc.terminate.assert_called_once()
+        mock_proc.kill.assert_called_once()

@@ -41,7 +41,7 @@ class SounddeviceAudioSource:
         while not self._queue.empty():
             try:
                 chunks.append(self._queue.get_nowait().flatten())
-            except queue.Empty:
+            except queue.Empty:  # pragma: no cover -- timing-dependent; queue becomes empty mid-iteration
                 break
         return np.concatenate(chunks) if chunks else None
 

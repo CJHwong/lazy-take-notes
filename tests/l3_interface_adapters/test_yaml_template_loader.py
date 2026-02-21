@@ -56,6 +56,12 @@ quick_actions:
         assert tmpl.metadata.locale == 'en-US'
         assert len(tmpl.quick_actions) == 1
 
+    def test_load_by_display_name(self):
+        loader = YamlTemplateLoader()
+        tmpl = loader.load('預設')
+        assert tmpl.metadata.name == '預設'
+        assert tmpl.metadata.locale == 'zh-TW'
+
     def test_load_nonexistent_raises(self):
         loader = YamlTemplateLoader()
         with pytest.raises(FileNotFoundError, match='Template not found'):

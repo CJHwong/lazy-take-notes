@@ -61,7 +61,7 @@ def load_audio_file(path: Path) -> np.ndarray:
         raise RuntimeError(f'ffmpeg produced no audio output for: {path}')
 
     audio = np.frombuffer(result.stdout, dtype=np.float32)
-    if len(audio) == 0:
+    if len(audio) == 0:  # pragma: no cover -- ffmpeg produces stdout but zero float32 samples; degenerate edge case
         raise RuntimeError(f'Audio file appears to be empty: {path}')
 
     return audio
