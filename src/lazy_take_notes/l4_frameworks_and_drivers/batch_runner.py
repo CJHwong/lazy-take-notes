@@ -59,7 +59,7 @@ def run_batch(
     model_name = config.transcription.model_for_locale(locale)
     _err(f'Whisper model: {model_name}')
 
-    def _on_progress(percent: int) -> None:
+    def _on_progress(percent: int) -> None:  # pragma: no cover -- only fires during real model download
         _err(f'  Downloading {model_name}: {percent}%')
 
     try:

@@ -198,6 +198,40 @@ class TestLabelModal:
                 assert isinstance(app.screen, LabelModal)
 
     @pytest.mark.asyncio
+    async def test_enter_submits_text(self, tmp_path):
+        app = _make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                await pilot.press('l')
+                await pilot.pause()
+                assert isinstance(app.screen, LabelModal)
+
+                modal_input = app.screen.query_one('#label-input')
+                modal_input.value = 'my-session'
+                await pilot.press('enter')
+                await pilot.pause()
+                assert not isinstance(app.screen, LabelModal)
+                assert 'my-session' in app._output_dir.name
+
+    @pytest.mark.asyncio
+    async def test_enter_empty_returns_none(self, tmp_path):
+        app = _make_app(tmp_path)
+        original_dir = app._output_dir
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                await pilot.press('l')
+                await pilot.pause()
+                assert isinstance(app.screen, LabelModal)
+
+                modal_input = app.screen.query_one('#label-input')
+                modal_input.value = ''
+                await pilot.press('enter')
+                await pilot.pause()
+                assert not isinstance(app.screen, LabelModal)
+                # Empty text → None → no rename
+                assert app._output_dir == original_dir
+
+    @pytest.mark.asyncio
     async def test_escape_dismisses_without_rename(self, tmp_path):
         app = _make_app(tmp_path)
         original_dir = app._output_dir

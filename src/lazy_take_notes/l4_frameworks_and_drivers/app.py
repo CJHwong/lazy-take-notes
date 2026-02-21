@@ -77,7 +77,7 @@ class App(TextualApp):
         # Controller (injected or created with default wiring)
         if controller is not None:
             self._controller = controller
-        else:
+        else:  # pragma: no cover -- composition-root wiring; controller always injected in tests
             from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: only wired when no controller injected (non-test path)
                 DependencyContainer,
             )
@@ -145,7 +145,7 @@ class App(TextualApp):
             bar.quick_action_hints = '  '.join(
                 rf'\[{i + 1}] {qa.label}' for i, qa in enumerate(self._template.quick_actions)
             )
-        except Exception:  # noqa: S110 — widget may not exist during startup
+        except Exception:  # noqa: S110 -- TUI race guard; widget may not exist during startup  # pragma: no cover
             pass
 
     def on_mount(self) -> None:
@@ -169,7 +169,7 @@ class App(TextualApp):
         self._start_audio_worker()
         self.set_interval(0.2, self._refresh_status_bar)
 
-    def _start_audio_worker(self) -> None:
+    def _start_audio_worker(self) -> None:  # pragma: no cover -- thin thread launcher; patched out in tests
         tc = self._config.transcription
         locale = self._template.metadata.locale
         self._audio_model_name = tc.model_for_locale(locale)
@@ -180,10 +180,12 @@ class App(TextualApp):
             group='audio',
         )
 
-    def _on_model_download_progress(self, percent: int) -> None:
+    def _report_download_progress(self, percent: int) -> None:
         self.post_message(ModelDownloadProgress(percent=percent, model_name=self._audio_model_name))
 
-    def _audio_worker_thread(self):
+    def _audio_worker_thread(
+        self,
+    ):  # pragma: no cover -- thread body; tested independently
         from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
             HfModelResolver,
         )
@@ -193,7 +195,7 @@ class App(TextualApp):
 
         # Resolve model in the worker thread so downloads don't block the TUI.
         try:
-            resolver = HfModelResolver(on_progress=self._on_model_download_progress)
+            resolver = HfModelResolver(on_progress=self._report_download_progress)
             model_path = resolver.resolve(self._audio_model_name)
         except Exception as e:
             self.post_message(AudioWorkerStatus(status='error', error=str(e)))
@@ -224,7 +226,7 @@ class App(TextualApp):
         try:
             bar = self.query_one('#status-bar', StatusBar)
             bar.refresh()
-        except Exception:  # noqa: S110 — widget may not exist during startup
+        except Exception:  # noqa: S110 -- TUI race guard; widget may not exist during startup  # pragma: no cover
             pass
 
     # --- Message Handlers ---
@@ -331,7 +333,7 @@ class App(TextualApp):
         try:
             bar = self.query_one('#status-bar', StatusBar)
             bar.audio_level = message.rms
-        except Exception:  # noqa: S110 — widget may not exist during startup
+        except Exception:  # noqa: S110 -- TUI race guard; widget may not exist during startup  # pragma: no cover
             pass
 
     # --- Workers ---

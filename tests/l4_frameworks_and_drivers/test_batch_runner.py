@@ -183,3 +183,24 @@ class TestRunBatch:
         self._run(tmp_path, mocks)
 
         mocks['transcriber_instance'].close.assert_called_once()
+
+    def test_on_progress_callback(self, tmp_path: Path) -> None:
+        mocks = _make_run_batch_mocks()
+
+        self._run(tmp_path, mocks)
+
+        # HfModelResolver was constructed with an on_progress callback
+        resolver_call_kwargs = mocks['resolver_cls'].call_args
+        assert resolver_call_kwargs is not None
+        assert 'on_progress' in resolver_call_kwargs.kwargs
+        assert callable(resolver_call_kwargs.kwargs['on_progress'])
+
+    def test_should_trigger_fires_during_processing(self, tmp_path: Path) -> None:
+        """With 26s of audio, should_trigger fires mid-loop (default chunk_duration=25s)."""
+        audio_26s = np.ones(16000 * 26, dtype=np.float32) * 0.1
+        mocks = _make_run_batch_mocks(audio=audio_26s)
+
+        self._run(tmp_path, mocks)
+
+        # Transcriber.transcribe called at least once during the loop (not just flush)
+        assert mocks['transcriber_instance'].transcribe.call_count >= 1

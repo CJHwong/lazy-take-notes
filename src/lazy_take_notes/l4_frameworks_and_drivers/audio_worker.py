@@ -51,7 +51,7 @@ def _start_processed_recorder(
                         break
                     pcm = np.clip(data, -1.0, 1.0)
                     wf.writeframes((pcm * 32767).astype(np.int16).tobytes())
-                except queue.Empty:
+                except queue.Empty:  # pragma: no cover -- timing-dependent; queue.get timeout retry
                     pass
         finally:
             wf.close()
@@ -61,7 +61,7 @@ def _start_processed_recorder(
     return rec_q, writer
 
 
-def _start_raw_recorder(
+def _start_raw_recorder(  # pragma: no cover -- requires sounddevice hardware
     output_dir: Path,
     is_cancelled,
 ) -> tuple[Any, threading.Thread, queue.Queue]:
@@ -132,7 +132,7 @@ def run_audio_worker(
     # Load model
     post_message(AudioWorkerStatus(status='loading_model'))
     try:
-        if transcriber is None:
+        if transcriber is None:  # pragma: no cover -- default wiring; transcriber always injected in tests
             from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import (  # noqa: PLC0415 -- deferred: subprocess spawned only when worker starts
                 SubprocessWhisperTranscriber,
             )
@@ -148,7 +148,7 @@ def run_audio_worker(
     post_message(AudioWorkerStatus(status='model_ready'))
 
     # Resolve audio source — default to SounddeviceAudioSource when not injected
-    if audio_source is None:
+    if audio_source is None:  # pragma: no cover -- default wiring; audio_source always injected in tests
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when worker starts
             SounddeviceAudioSource,
         )
@@ -203,7 +203,7 @@ def run_audio_worker(
     proc_rec_q: queue.Queue | None = None
     proc_rec_writer: threading.Thread | None = None
     if save_audio and output_dir:
-        if isinstance(audio_source, SounddeviceAudioSource):
+        if isinstance(audio_source, SounddeviceAudioSource):  # pragma: no cover -- only fires for real mic source
             # Mic-only: capture a separate high-quality stream at native sample rate.
             try:
                 raw_stream, raw_writer, raw_q = _start_raw_recorder(output_dir, is_cancelled)
@@ -213,7 +213,7 @@ def run_audio_worker(
             # Mixed or system-only: save the processed SAMPLE_RATE audio from read().
             try:
                 proc_rec_q, proc_rec_writer = _start_processed_recorder(output_dir, SAMPLE_RATE)
-            except Exception:  # noqa: S110 — best-effort; recording continues without raw save
+            except Exception:  # noqa: S110 -- best-effort; recording continues without raw save  # pragma: no cover
                 pass
 
     # Start recording
@@ -291,12 +291,12 @@ def run_audio_worker(
         post_message(AudioWorkerStatus(status='error', error=str(e)))
 
     # Stop raw audio recorder (mic mode)
-    if raw_stream is not None:
+    if raw_stream is not None:  # pragma: no cover -- only fires for real mic source
         raw_stream.stop()
         raw_stream.close()
-    if raw_q is not None:
+    if raw_q is not None:  # pragma: no cover -- only fires for real mic source
         raw_q.put(None)
-    if raw_writer is not None:
+    if raw_writer is not None:  # pragma: no cover -- only fires for real mic source
         raw_writer.join(timeout=5)
 
     # Stop processed audio recorder (mixed / system mode)
