@@ -83,7 +83,7 @@ def run_batch(
         overlap=tc.overlap,
         silence_threshold=tc.silence_threshold,
         pause_duration=tc.pause_duration,
-        whisper_prompt=template.whisper_prompt,
+        recognition_hints=template.recognition_hints,
     )
     all_segments = []
 

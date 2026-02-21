@@ -58,7 +58,17 @@ final_user_template: |
   3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.
   4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.
 
-whisper_prompt: "podcast episode guest host interview discussion topic recommendation book article"
+recognition_hints:
+  - podcast
+  - episode
+  - guest
+  - host
+  - interview
+  - discussion
+  - topic
+  - recommendation
+  - book
+  - article
 
 quick_actions:
   - label: "Catch Up"

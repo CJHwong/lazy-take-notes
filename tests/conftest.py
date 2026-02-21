@@ -63,7 +63,7 @@ class FakeTranscriber:
     def __init__(self, segments: list[TranscriptSegment] | None = None):
         self._segments = segments or []
         self.load_model_calls: list[str] = []
-        self.transcribe_calls: list[tuple[np.ndarray, str, str]] = []
+        self.transcribe_calls: list[tuple[np.ndarray, str, list[str] | None]] = []
 
     def load_model(self, model_path: str) -> None:
         self.load_model_calls.append(model_path)
@@ -72,9 +72,9 @@ class FakeTranscriber:
         self,
         audio: np.ndarray,
         language: str,
-        initial_prompt: str = '',
+        hints: list[str] | None = None,
     ) -> list[TranscriptSegment]:
-        self.transcribe_calls.append((audio, language, initial_prompt))
+        self.transcribe_calls.append((audio, language, hints))
         return self._segments
 
     def close(self) -> None:

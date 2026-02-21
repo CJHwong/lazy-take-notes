@@ -128,10 +128,10 @@ class TestSubprocessWhisperTranscriberTranscribe:
             t = SubprocessWhisperTranscriber()
             t.load_model('/fake/model.bin')
             audio = np.zeros(16000, dtype=np.float32)
-            segs = t.transcribe(audio, language='zh', initial_prompt='hint')
+            segs = t.transcribe(audio, language='zh', hints=['hint'])
 
         assert segs == [seg]
-        parent_conn.send.assert_any_call({'audio': audio, 'language': 'zh', 'prompt': 'hint'})
+        parent_conn.send.assert_any_call({'audio': audio, 'language': 'zh', 'hints': ['hint']})
 
     def test_transcribe_raises_on_error_response(self):
         ctx, parent_conn, process = _make_ctx(

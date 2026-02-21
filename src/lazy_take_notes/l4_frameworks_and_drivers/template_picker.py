@@ -233,8 +233,8 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             for i, qa in enumerate(tmpl.quick_actions):
                 lines.append(f'- **`{i + 1}`** {qa.label} — {qa.description}')
 
-        if tmpl.whisper_prompt:
-            lines += ['', f'**Whisper hint:** {tmpl.whisper_prompt}']
+        if tmpl.recognition_hints:
+            lines += ['', f'**Recognition hints:** {", ".join(tmpl.recognition_hints)}']
 
         lines += ['', '---', '', '### System Prompt', '']
         lines.append(tmpl.system_prompt)

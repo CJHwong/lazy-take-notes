@@ -199,7 +199,7 @@ class App(TextualApp):
             overlap=tc.overlap,
             silence_threshold=tc.silence_threshold,
             pause_duration=tc.pause_duration,
-            whisper_prompt=self._template.whisper_prompt,
+            recognition_hints=self._template.recognition_hints,
             pause_event=self._audio_paused,
             output_dir=self._output_dir,
             save_audio=self._config.output.save_audio,

@@ -65,7 +65,22 @@ final_user_template: |
   2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。
   3. 檢視「待釐清」，移除已在討論中解決的問題。
 
-whisper_prompt: "回顧 retrospective 改善 action item 做得好 待改善 sprint 衝刺 迭代 承諾 負責人 follow-up 跟進 velocity 速度"
+recognition_hints:
+  - 回顧
+  - retrospective
+  - 改善
+  - action item
+  - 做得好
+  - 待改善
+  - sprint
+  - 衝刺
+  - 迭代
+  - 承諾
+  - 負責人
+  - follow-up
+  - 跟進
+  - velocity
+  - 速度
 
 quick_actions:
   - label: "主題摘要"

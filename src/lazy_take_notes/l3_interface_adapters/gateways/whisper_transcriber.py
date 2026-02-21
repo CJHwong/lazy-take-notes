@@ -55,14 +55,14 @@ class WhisperTranscriber:
         self,
         audio: np.ndarray,
         language: str,
-        initial_prompt: str = '',
+        hints: list[str] | None = None,
     ) -> list[TranscriptSegment]:
         if self._model is None:
             raise RuntimeError('Model not loaded. Call load_model() first.')
 
         kwargs: dict = {'language': language}
-        if initial_prompt:
-            kwargs['initial_prompt'] = initial_prompt
+        if hints:
+            kwargs['initial_prompt'] = ' '.join(hints)
 
         with _suppress_c_stdout():
             raw_segments = self._model.transcribe(audio, **kwargs)

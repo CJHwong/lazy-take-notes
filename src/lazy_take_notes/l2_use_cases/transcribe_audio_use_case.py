@@ -24,12 +24,12 @@ class TranscribeAudioUseCase:
         overlap: float = 1.0,
         silence_threshold: float = 0.01,
         pause_duration: float = 1.5,
-        whisper_prompt: str = '',
+        recognition_hints: list[str] | None = None,
     ) -> None:
         self._transcriber = transcriber
         self._language = language
-        self._whisper_prompt = whisper_prompt
-        self._current_prompt = whisper_prompt
+        self._recognition_hints: list[str] = list(recognition_hints) if recognition_hints else []
+        self._current_hints: list[str] = list(self._recognition_hints)
 
         self._chunk_samples = int(SAMPLE_RATE * chunk_duration)
         self._overlap_samples = int(SAMPLE_RATE * overlap)
@@ -70,10 +70,10 @@ class TranscribeAudioUseCase:
 
         return False
 
-    def prepare_buffer(self) -> tuple[np.ndarray, str, float, bool] | None:
+    def prepare_buffer(self) -> tuple[np.ndarray, list[str], float, bool] | None:
         """Extract the current buffer for off-thread transcription.
 
-        Returns (audio_snapshot, prompt, buffer_wall_start, is_first_chunk), or None
+        Returns (audio_snapshot, hints, buffer_wall_start, is_first_chunk), or None
         if the buffer is silent (nothing to transcribe).
 
         Resets the internal buffer to the overlap tail immediately so the caller
@@ -91,13 +91,13 @@ class TranscribeAudioUseCase:
 
         snapshot = buf.copy()
         buffer_wall_start = self._session_offset - len(buf) / SAMPLE_RATE
-        current_prompt = self._current_prompt
+        current_hints = list(self._current_hints)
         is_first = self._is_first_chunk
 
         self._buffer = buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
         self._is_first_chunk = False
 
-        return snapshot, current_prompt, buffer_wall_start, is_first
+        return snapshot, current_hints, buffer_wall_start, is_first
 
     def apply_result(
         self,
@@ -126,8 +126,7 @@ class TranscribeAudioUseCase:
                 last_text = seg.text
 
         if last_text:
-            prefix = f'{self._whisper_prompt} ' if self._whisper_prompt else ''
-            self._current_prompt = f'{prefix}{last_text}'
+            self._current_hints = list(self._recognition_hints) + [last_text]
 
         return new_segments
 
@@ -153,7 +152,7 @@ class TranscribeAudioUseCase:
         segments = self._transcriber.transcribe(
             audio=buf,
             language=self._language,
-            initial_prompt=self._current_prompt,
+            hints=self._current_hints,
         )
 
         # Filter out overlap region (except for first chunk)
@@ -176,8 +175,7 @@ class TranscribeAudioUseCase:
 
         # Prompt chaining
         if last_text:
-            prefix = f'{self._whisper_prompt} ' if self._whisper_prompt else ''
-            self._current_prompt = f'{prefix}{last_text}'
+            self._current_hints = list(self._recognition_hints) + [last_text]
 
         # Retain overlap tail
         if self._overlap_samples > 0:

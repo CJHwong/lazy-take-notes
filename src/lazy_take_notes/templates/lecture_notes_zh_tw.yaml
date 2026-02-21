@@ -60,7 +60,22 @@ final_user_template: |
   2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。
   3. 確認所有定義、範例和考試重點都已完整擷取。
 
-whisper_prompt: "課堂 教授 定理 證明 定義 推論 引理 方程式 公式 假設 範例 推導 lecture theorem proof"
+recognition_hints:
+  - 課堂
+  - 教授
+  - 定理
+  - 證明
+  - 定義
+  - 推論
+  - 引理
+  - 方程式
+  - 公式
+  - 假設
+  - 範例
+  - 推導
+  - lecture
+  - theorem
+  - proof
 
 quick_actions:
   - label: "掌握進度"

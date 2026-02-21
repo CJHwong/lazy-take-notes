@@ -65,7 +65,21 @@ final_user_template: |
   2. Confirm that all members' updates are recorded under "Reported Members".
   3. Review all "Blockers & Open Items" — check whether any were resolved during the standup.
 
-whisper_prompt: "standup blocker sprint PR deploy iteration velocity progress yesterday today tomorrow code review merge test"
+recognition_hints:
+  - standup
+  - blocker
+  - sprint
+  - PR
+  - deploy
+  - iteration
+  - velocity
+  - progress
+  - yesterday
+  - today
+  - tomorrow
+  - code review
+  - merge
+  - test
 
 quick_actions:
   - label: "Blockers"

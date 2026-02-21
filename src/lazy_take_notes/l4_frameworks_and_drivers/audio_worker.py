@@ -118,7 +118,7 @@ def run_audio_worker(
     overlap: float = 1.0,
     silence_threshold: float = 0.01,
     pause_duration: float = 1.5,
-    whisper_prompt: str = '',
+    recognition_hints: list[str] | None = None,
     pause_event: threading.Event | None = None,
     output_dir: Path | None = None,
     save_audio: bool = False,
@@ -162,7 +162,7 @@ def run_audio_worker(
         overlap=overlap,
         silence_threshold=silence_threshold,
         pause_duration=pause_duration,
-        whisper_prompt=whisper_prompt,
+        recognition_hints=recognition_hints,
     )
 
     all_segments: list[TranscriptSegment] = []
@@ -250,13 +250,13 @@ def run_audio_worker(
                 if use_case.should_trigger() and _transcript_future is None:
                     prepared = use_case.prepare_buffer()
                     if prepared is not None:
-                        buf, prompt, buf_wall_start, is_first = prepared
+                        buf, hints, buf_wall_start, is_first = prepared
                         _pending_meta = (buf_wall_start, is_first)
                         _transcript_future = _executor.submit(
                             transcriber.transcribe,
                             buf,
                             language,
-                            prompt,
+                            hints,
                         )
 
             # Wait for any in-flight transcription before draining

@@ -58,7 +58,20 @@ final_user_template: |
   3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。
   4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。
 
-whisper_prompt: "Podcast 節目 來賓 主持人 訪談 討論 主題 推薦 書籍 文章 podcast episode guest"
+recognition_hints:
+  - Podcast
+  - 節目
+  - 來賓
+  - 主持人
+  - 訪談
+  - 討論
+  - 主題
+  - 推薦
+  - 書籍
+  - 文章
+  - podcast
+  - episode
+  - guest
 
 quick_actions:
   - label: "掌握進度"

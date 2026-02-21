@@ -20,7 +20,7 @@ class Transcriber(Protocol):
         self,
         audio: np.ndarray,
         language: str,
-        initial_prompt: str = '',
+        hints: list[str] | None = None,
     ) -> list[TranscriptSegment]:
         """Transcribe audio buffer into transcript segments."""
         ...

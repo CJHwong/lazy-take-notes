@@ -65,7 +65,19 @@ final_user_template: |
   2. Confirm that all action items have concrete commitments and assignees where possible.
   3. Review "Open Items" — remove any that were resolved during discussion.
 
-whisper_prompt: "retrospective retro improvement action item went well needs improvement sprint iteration commitment assignee follow-up velocity"
+recognition_hints:
+  - retrospective
+  - retro
+  - improvement
+  - action item
+  - went well
+  - needs improvement
+  - sprint
+  - iteration
+  - commitment
+  - assignee
+  - follow-up
+  - velocity
 
 quick_actions:
   - label: "Themes"

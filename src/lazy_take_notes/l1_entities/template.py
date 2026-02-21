@@ -23,7 +23,7 @@ class SessionTemplate(BaseModel):
     system_prompt: str = ''
     digest_user_template: str = ''
     final_user_template: str = ''
-    whisper_prompt: str = ''
+    recognition_hints: list[str] = Field(default_factory=list)
     quick_actions: list[QuickAction] = Field(default_factory=list)
 
     @model_validator(mode='after')

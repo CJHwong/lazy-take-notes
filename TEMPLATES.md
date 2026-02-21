@@ -38,9 +38,11 @@ final_user_template: |
   {full_transcript}
   Produce the final summary.
 
-whisper_prompt: "optional hint words for the speech recogniser"
+recognition_hints:              # optional list of hint words for the speech recogniser
+  - domain term
+  - acronym
 
-quick_actions:                   # up to 5 entries; bound to keys 1–5 by position
+quick_actions:                  # up to 5 entries; bound to keys 1–5 by position
   - label: "Pain Points"        # shown in the keybinding bar
     description: "..."          # shown in the help screen
     prompt_template: |
@@ -70,9 +72,9 @@ quick_actions:                   # up to 5 entries; bound to keys 1–5 by posit
 | `{digest_markdown}`   | Latest digest (Markdown)                 |
 | `{recent_transcript}` | Last ~30 transcript lines                |
 
-### `whisper_prompt`
+### `recognition_hints`
 
-An optional hint string prepended to the speech recogniser's context. Use it to bias recognition towards domain vocabulary (names, acronyms, technical terms) that whisper might otherwise mishear.
+An optional list of hint strings passed to the speech recogniser's context. Use it to bias recognition towards domain vocabulary (names, acronyms, technical terms) that the recogniser might otherwise mishear. Each entry is a separate word or short phrase.
 
 ### `locale`
 

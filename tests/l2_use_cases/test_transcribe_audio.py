@@ -129,7 +129,7 @@ class TestTranscribeAudioUseCase:
             def load_model(self, model_path: str) -> None:
                 pass
 
-            def transcribe(self, audio, language, initial_prompt=''):
+            def transcribe(self, audio, language, hints=None):
                 nonlocal call_count
                 call_count += 1
                 return [chunk1_seg] if call_count == 1 else [chunk2_seg]
@@ -173,7 +173,7 @@ class TestTranscribeAudioUseCase:
         result = uc.prepare_buffer()
 
         assert result is not None
-        snapshot, prompt, buf_wall_start, is_first = result
+        snapshot, hints, buf_wall_start, is_first = result
         assert len(snapshot) == SAMPLE_RATE
         assert is_first is True
         assert buf_wall_start == pytest.approx(0.0)
@@ -219,8 +219,8 @@ class TestTranscribeAudioUseCase:
         assert len(result) == 1
         assert result[0].text == 'early'
 
-    def test_apply_result_updates_prompt_chain(self):
-        """apply_result() should update _current_prompt with the last segment text."""
+    def test_apply_result_updates_hint_chain(self):
+        """apply_result() should update _current_hints with the last segment text."""
         fake = FakeTranscriber()
         uc = TranscribeAudioUseCase(transcriber=fake, language='zh', overlap=0.0)
 
@@ -230,7 +230,7 @@ class TestTranscribeAudioUseCase:
         ]
         uc.apply_result(segments, buffer_wall_start=0.0, is_first_chunk=True)
 
-        assert uc._current_prompt == 'last'
+        assert uc._current_hints == ['last']
 
     def test_prepare_then_apply_equivalent_to_process_buffer(self):
         """prepare_buffer + apply_result should produce same output as process_buffer."""
@@ -251,8 +251,8 @@ class TestTranscribeAudioUseCase:
 
         prepared = uc_async.prepare_buffer()
         assert prepared is not None
-        buf, prompt, buf_wall_start, is_first = prepared
-        raw = fake_b.transcribe(buf, 'zh', prompt)
+        buf, hints, buf_wall_start, is_first = prepared
+        raw = fake_b.transcribe(buf, 'zh', hints)
         async_result = uc_async.apply_result(raw, buf_wall_start, is_first)
 
         assert len(sync_result) == len(async_result)

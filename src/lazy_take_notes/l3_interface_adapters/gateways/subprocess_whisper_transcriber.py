@@ -45,7 +45,7 @@ def _subprocess_entry(model_path: str, conn: Any) -> None:
             segments = transcriber.transcribe(
                 audio=req['audio'],
                 language=req['language'],
-                initial_prompt=req.get('prompt', ''),
+                hints=req.get('hints', []),
             )
             conn.send({'status': 'ok', 'segments': segments})
         except Exception as e:
@@ -97,11 +97,11 @@ class SubprocessWhisperTranscriber:
         self,
         audio: np.ndarray,
         language: str,
-        initial_prompt: str = '',
+        hints: list[str] | None = None,
     ) -> list[TranscriptSegment]:
         if self._conn is None:
             raise RuntimeError('Model not loaded. Call load_model() first.')
-        self._conn.send({'audio': audio, 'language': language, 'prompt': initial_prompt})
+        self._conn.send({'audio': audio, 'language': language, 'hints': hints or []})
         try:
             if not self._conn.poll(timeout=120):
                 raise RuntimeError('Timeout waiting for transcription result')

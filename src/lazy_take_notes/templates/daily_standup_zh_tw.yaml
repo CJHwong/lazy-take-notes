@@ -65,7 +65,26 @@ final_user_template: |
   2. 確認所有成員的報告都已記錄在「已報告成員」中。
   3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。
 
-whisper_prompt: "站會 standup blocker sprint PR deploy 部署 衝刺 迭代 障礙 進度 昨天 今天 明天 code 程式碼 review 合併 測試"
+recognition_hints:
+  - 站會
+  - standup
+  - blocker
+  - sprint
+  - PR
+  - deploy
+  - 部署
+  - 衝刺
+  - 迭代
+  - 障礙
+  - 進度
+  - 昨天
+  - 今天
+  - 明天
+  - code
+  - 程式碼
+  - review
+  - 合併
+  - 測試
 
 quick_actions:
   - label: "障礙總結"
