@@ -31,6 +31,7 @@ ltn = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=7.0.0",
     "textual-dev>=1.0",
     "import-linter>=2.0",
 ]
@@ -74,6 +75,17 @@ quote-style = "single"
 [tool.ty.environment]
 python-version = "3.11"
 python = ".venv"
+
+[tool.coverage.run]
+source = ["lazy_take_notes"]
+omit = ["src/lazy_take_notes/__main__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    '^\s*\.\.\.\s*$',
+]
 
 [tool.importlinter]
 root_packages = ["lazy_take_notes"]
