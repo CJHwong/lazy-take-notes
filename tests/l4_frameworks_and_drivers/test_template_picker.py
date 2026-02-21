@@ -200,3 +200,41 @@ class TestTemplatePicker:
         assert picker.return_value is not None
         name, _mode = picker.return_value
         assert name == 'default_en'
+
+    @pytest.mark.asyncio
+    async def test_down_focuses_list_from_search(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            assert isinstance(picker.focused, Input)
+            await pilot.press('down')
+            await pilot.pause()
+            assert not isinstance(picker.focused, Input)
+
+    @pytest.mark.asyncio
+    async def test_cycle_noop_when_show_audio_mode_false(self):
+        picker = TemplatePicker(show_audio_mode=False)
+        async with picker.run_test():
+            picker.action_cycle_audio_mode()
+            assert picker._audio_mode == AudioMode.MIC_ONLY  # unchanged
+
+    @pytest.mark.asyncio
+    async def test_up_on_first_item_refocuses_search(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            # Down from search focuses list on first TemplateItem
+            await pilot.press('down')
+            await pilot.pause()
+            assert not isinstance(picker.focused, Input)
+            # Up on first TemplateItem should refocus search input
+            await pilot.press('up')
+            await pilot.pause()
+            assert isinstance(picker.focused, Input)
+
+    @pytest.mark.asyncio
+    async def test_select_noop_when_no_current_name(self):
+        picker = TemplatePicker()
+        async with picker.run_test():
+            picker._current_name = None
+            picker.action_select_template()
+            # Should not exit — still running
+            assert picker.return_value is None
