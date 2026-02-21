@@ -170,3 +170,64 @@ class TestSoundCardLoopbackSource:
             src.close()
 
         assert src._recorder is None
+
+    def test_reader_skips_none_record(self, monkeypatch):
+        """Line 92: recorder.record() returns None once, then real data."""
+        monkeypatch.setattr(sys, 'platform', 'linux')
+
+        loopback_device = _make_loopback()
+        mock_recorder = _make_recorder(blocking=True)  # default: block forever
+        real_data = np.array([[0.5], [0.6]], dtype=np.float32)
+
+        # None → real data → block (keeps thread alive until close)
+        def _record_sequence(numframes, _calls=[0]):  # noqa: B006 -- mutable default is intentional
+            _calls[0] += 1
+            if _calls[0] == 1:
+                return None
+            if _calls[0] == 2:
+                return real_data
+            time.sleep(10)
+
+        mock_recorder.record.side_effect = _record_sequence
+        loopback_device.recorder.return_value = mock_recorder
+
+        patches = _patch_sc([loopback_device])
+        with patches[0], patches[1]:
+            src = SoundCardLoopbackSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            result = src.read(timeout=0.5)
+            src.close()
+
+        assert result is not None
+        np.testing.assert_allclose(result, real_data.mean(axis=1), atol=1e-6)
+
+    def test_win32_com_init_and_uninit(self, monkeypatch):
+        """Lines 20-22, 28-30, 121-122: COM init/uninit on win32."""
+        monkeypatch.setattr(sys, 'platform', 'win32')
+
+        mock_ole32 = MagicMock()
+        mock_windll = MagicMock()
+        mock_windll.ole32 = mock_ole32
+
+        # ctypes is imported inside the function; mock it at module level
+        mock_ctypes = MagicMock()
+        mock_ctypes.windll = mock_windll
+        monkeypatch.setitem(sys.modules, 'ctypes', mock_ctypes)
+
+        loopback_device = _make_loopback()
+        mock_recorder = _make_recorder()
+        loopback_device.recorder.return_value = mock_recorder
+
+        patches = _patch_sc([loopback_device])
+        with patches[0], patches[1]:
+            src = SoundCardLoopbackSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            src.close()
+
+        # open() calls _win_com_init, reader thread calls _win_com_init
+        assert mock_ole32.CoInitializeEx.call_count >= 2
+        # close() calls _win_com_uninit (com_owner), reader finally calls _win_com_uninit
+        assert mock_ole32.CoUninitialize.call_count >= 2
+        assert src._com_owner is False
