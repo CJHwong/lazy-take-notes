@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from lazy_take_notes.l1_entities.config import AppConfig
 
-
-class ConfigLoader(Protocol):
+class ConfigLoader(Protocol):  # pragma: no cover -- abstract Protocol; never instantiated directly
     """Abstract configuration loader."""
 
     def load(
         self,
         config_path: str | None = None,
         overrides: dict | None = None,
-    ) -> AppConfig:
-        """Load and validate configuration, merging overrides."""
+    ) -> dict:
+        """Load configuration from source, returning raw dict before validation."""
         ...

@@ -6,22 +6,13 @@ from pathlib import Path
 
 import yaml
 
-from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l3_interface_adapters.gateways.paths import DEFAULT_CONFIG_PATHS
 
 
 class YamlConfigLoader:
-    """Loads AppConfig from YAML files with merge and override support."""
+    """Loads config from YAML files with merge and override support."""
 
     def load(
-        self,
-        config_path: str | None = None,
-        overrides: dict | None = None,
-    ) -> AppConfig:
-        data = _load_data(config_path, overrides)
-        return AppConfig.model_validate(data)
-
-    def load_raw(
         self,
         config_path: str | None = None,
         overrides: dict | None = None,

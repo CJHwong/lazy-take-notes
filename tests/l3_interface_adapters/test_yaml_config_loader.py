@@ -7,13 +7,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader
 
 
 class TestYamlConfigLoader:
-    def test_load_from_yaml(self, sample_config_yaml: Path):
+    def test_load_returns_dict(self, sample_config_yaml: Path):
         loader = YamlConfigLoader()
-        cfg = loader.load(str(sample_config_yaml))
+        raw = loader.load(str(sample_config_yaml))
+        assert isinstance(raw, dict)
+        assert raw['transcription']['model'] == 'breeze-q5'
+        assert raw['digest']['min_lines'] == 10
+
+    def test_load_validates_as_app_config(self, sample_config_yaml: Path):
+        loader = YamlConfigLoader()
+        cfg = AppConfig.model_validate(loader.load(str(sample_config_yaml)))
         assert cfg.transcription.model == 'breeze-q5'
         assert cfg.transcription.chunk_duration == 8.0
         assert cfg.digest.model == 'llama3:8b'
@@ -26,43 +34,28 @@ class TestYamlConfigLoader:
 
     def test_load_with_overrides(self, sample_config_yaml: Path):
         loader = YamlConfigLoader()
-        cfg = loader.load(
+        raw = loader.load(
             str(sample_config_yaml),
             overrides={'digest': {'min_lines': 99}},
         )
-        assert cfg.digest.min_lines == 99
-        assert cfg.digest.model == 'llama3:8b'
+        assert raw['digest']['min_lines'] == 99
+        assert raw['digest']['model'] == 'llama3:8b'
 
     def test_empty_yaml_raises_validation_error(self, tmp_path: Path):
         p = tmp_path / 'empty.yaml'
         p.write_text('', encoding='utf-8')
         loader = YamlConfigLoader()
         with pytest.raises(ValidationError):
-            loader.load(str(p))
+            AppConfig.model_validate(loader.load(str(p)))
 
-    def test_load_raw_returns_dict(self, sample_config_yaml: Path):
-        loader = YamlConfigLoader()
-        raw = loader.load_raw(str(sample_config_yaml))
-        assert isinstance(raw, dict)
-        assert raw['transcription']['model'] == 'breeze-q5'
-        assert raw['digest']['min_lines'] == 10
-
-    def test_load_raw_with_overrides(self, sample_config_yaml: Path):
-        loader = YamlConfigLoader()
-        raw = loader.load_raw(
-            str(sample_config_yaml),
-            overrides={'digest': {'min_lines': 99}},
-        )
-        assert raw['digest']['min_lines'] == 99
-
-    def test_load_raw_preserves_extra_keys(self, tmp_path: Path):
+    def test_load_preserves_extra_keys(self, tmp_path: Path):
         p = tmp_path / 'with_infra.yaml'
         p.write_text(
             'ollama:\n  host: "http://my-server:11434"\ntemplate: "default_en"\n',
             encoding='utf-8',
         )
         loader = YamlConfigLoader()
-        raw = loader.load_raw(str(p))
+        raw = loader.load(str(p))
         assert raw['ollama']['host'] == 'http://my-server:11434'
         assert raw['template'] == 'default_en'
 
@@ -89,7 +82,7 @@ class TestDefaultConfigResolution:
         )
 
         loader = YamlConfigLoader()
-        raw = loader.load_raw()
+        raw = loader.load()
         assert raw['template'] == 'default_en'
 
     def test_no_default_config_returns_empty(self, tmp_path: Path, monkeypatch):
@@ -107,5 +100,5 @@ class TestDefaultConfigResolution:
         )
 
         loader = YamlConfigLoader()
-        raw = loader.load_raw()
+        raw = loader.load()
         assert raw == {}

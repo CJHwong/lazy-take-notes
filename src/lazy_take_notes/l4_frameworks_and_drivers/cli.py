@@ -79,7 +79,7 @@ def cli(config_path, output_dir, label, audio_file):
         overrides: dict = {}
         if output_dir:
             overrides['output'] = {'directory': output_dir}
-        raw = config_loader.load_raw(config_path, overrides=overrides if overrides else None)
+        raw = config_loader.load(config_path, overrides=overrides if overrides else None)
         config = build_app_config(raw)
         infra = InfraConfig.model_validate(raw)
     except FileNotFoundError as e:
@@ -137,7 +137,7 @@ def cli(config_path, output_dir, label, audio_file):
         import multiprocessing.resource_tracker as _rt  # noqa: PLC0415 -- pre-init before Textual
 
         _rt.ensure_running()
-    except Exception:  # noqa: S110 — best-effort; tracker may not exist on all platforms
+    except Exception:  # noqa: S110 -- best-effort; tracker may not exist on all platforms  # pragma: no cover
         pass
 
     container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=audio_mode)
