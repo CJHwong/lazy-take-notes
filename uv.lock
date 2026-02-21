@@ -700,7 +700,7 @@ requires-dist = [
     { name = "pyperclip", specifier = ">=1.8" },
     { name = "pywhispercpp", specifier = ">=1.4.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "soundcard", specifier = ">=0.4.0" },
+    { name = "soundcard", git = "https://github.com/bastibe/SoundCard.git?rev=045e65a96112111f2cc86a033761645784197486" },
     { name = "sounddevice", specifier = ">=0.5.0" },
     { name = "textual", specifier = ">=0.89" },
 ]
@@ -1388,14 +1388,10 @@ wheels = [
 [[package]]
 name = "soundcard"
 version = "0.4.5"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/bastibe/SoundCard.git?rev=045e65a96112111f2cc86a033761645784197486#045e65a96112111f2cc86a033761645784197486" }
 dependencies = [
     { name = "cffi" },
     { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b8/b4/2064f857a9e6e6e3b152fae339f32beb65cfbcd11878d2e4a020e88fc36d/soundcard-0.4.5.tar.gz", hash = "sha256:07272ba927e32cafdf634e4a1ca53b9a3218321a60c7d2e08f54b832a56946aa", size = 40831 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/fa/d5/700e3018056716c627d8ea783594fc939f74c5878a671c0673281d9e069d/soundcard-0.4.5-py3-none-any.whl", hash = "sha256:8a19c3d5486250bb2990dbd91a75ddf9f15cab39f24ff607e5bce812f43b4917", size = 43923 },
 ]
 
 [[package]]
