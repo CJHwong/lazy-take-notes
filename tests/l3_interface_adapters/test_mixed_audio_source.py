@@ -14,7 +14,7 @@ class TestMixedAudioSource:
     def test_both_sources_mixed_and_attenuated(self):
         mic = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])
-        src = MixedAudioSource(mic, sys_audio)  # type: ignore[arg-type]
+        src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
 
         time.sleep(0.1)  # let reader threads enqueue
@@ -28,7 +28,7 @@ class TestMixedAudioSource:
     def test_only_mic_has_data(self):
         mic = FakeAudioSource(chunks=[np.array([0.3, 0.4], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[])  # no data
-        src = MixedAudioSource(mic, sys_audio)  # type: ignore[arg-type]
+        src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
 
         time.sleep(0.1)
@@ -41,7 +41,7 @@ class TestMixedAudioSource:
     def test_no_data_returns_none(self):
         mic = FakeAudioSource(chunks=[])
         sys_audio = FakeAudioSource(chunks=[])
-        src = MixedAudioSource(mic, sys_audio)  # type: ignore[arg-type]
+        src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
         result = src.read(timeout=0.05)
         src.close()
@@ -50,7 +50,7 @@ class TestMixedAudioSource:
     def test_close_calls_both_sources(self):
         mic = FakeAudioSource()
         sys_audio = FakeAudioSource()
-        src = MixedAudioSource(mic, sys_audio)  # type: ignore[arg-type]
+        src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
         src.close()
         assert mic.close_calls == 1
@@ -59,7 +59,7 @@ class TestMixedAudioSource:
     def test_size_mismatch_pads_shorter_to_mic_length(self):
         mic = FakeAudioSource(chunks=[np.array([0.1, 0.2, 0.3], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.array([0.1, 0.2], dtype=np.float32)])
-        src = MixedAudioSource(mic, sys_audio)  # type: ignore[arg-type]
+        src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
 
         time.sleep(0.1)

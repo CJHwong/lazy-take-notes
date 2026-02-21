@@ -9,27 +9,26 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import CoreAudioTapSource
-    from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+    from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 
 
 class MixedAudioSource:
-    """Mix microphone (SounddeviceAudioSource) and system audio (CoreAudioTapSource).
+    """Mix microphone and system audio from two AudioSource instances.
 
-    Chunk sizes differ between sources: sounddevice fires at device block size (~512
-    samples / 32 ms) while CoreAudioTapSource produces fixed 1600-sample (100 ms) chunks
-    tied to ScreenCaptureKit's 10 fps cadence. To handle this, _sys_buf accumulates all
-    available system chunks on every read() call (non-blocking drain) and dispenses
-    exactly len(mic_chunk) samples per mix — equal duration, not equal chunk count. Mic
-    chunk timing drives output cadence because mic data arrives more frequently; both
-    sources contribute equally to the final audio.
+    Chunk sizes may differ between sources: sounddevice fires at device block size (~512
+    samples / 32 ms) while system capture sources produce fixed 1600-sample (100 ms)
+    chunks. To handle this, _sys_buf accumulates all available system chunks on every
+    read() call (non-blocking drain) and dispenses exactly len(mic_chunk) samples per
+    mix — equal duration, not equal chunk count. Mic chunk timing drives output cadence
+    because mic data arrives more frequently; both sources contribute equally to the
+    final audio.
 
     The 0.5 attenuation is an anti-clipping guard, not normalization. The two sources
     are not amplitude-normalized: mic level depends on input gain, system audio level
-    depends on macOS system volume. If they differ significantly, one will dominate.
+    depends on OS system volume. If they differ significantly, one will dominate.
     """
 
-    def __init__(self, mic: SounddeviceAudioSource, system_audio: CoreAudioTapSource) -> None:
+    def __init__(self, mic: AudioSource, system_audio: AudioSource) -> None:
         self._mic = mic
         self._system = system_audio
         self._mic_q: queue.Queue[np.ndarray] = queue.Queue()
