@@ -89,6 +89,26 @@ class TestSaveSessionContext:
         assert (tmp_output_dir / 'session_context.txt').read_text(encoding='utf-8') == 'second'
 
 
+class TestRelocate:
+    def test_subsequent_writes_use_new_dir(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir)
+        new_dir = tmp_output_dir.parent / 'relocated'
+        new_dir.mkdir()
+        gw.relocate(new_dir)
+        assert gw.output_dir == new_dir
+        path = gw.save_digest_md('After relocate', 1)
+        assert path.parent == new_dir
+        assert 'After relocate' in path.read_text(encoding='utf-8')
+
+    def test_old_dir_not_touched_after_relocate(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir)
+        new_dir = tmp_output_dir.parent / 'relocated'
+        new_dir.mkdir()
+        gw.relocate(new_dir)
+        gw.save_digest_md('New location', 1)
+        assert not (tmp_output_dir / 'digest.md').exists()
+
+
 class TestSaveHistory:
     def test_creates_numbered_file(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)

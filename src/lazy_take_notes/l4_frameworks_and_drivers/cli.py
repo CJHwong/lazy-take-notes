@@ -150,6 +150,7 @@ def cli(config_path, output_dir, label, audio_file):
         transcriber=container.transcriber,
         missing_digest_models=missing_digest,
         missing_interactive_models=missing_interactive,
+        label=label or '',
     )
     app.run()
 

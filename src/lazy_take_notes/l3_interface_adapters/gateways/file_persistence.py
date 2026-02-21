@@ -18,6 +18,10 @@ class FilePersistenceGateway:
     def output_dir(self) -> Path:
         return self._output_dir
 
+    def relocate(self, new_dir: Path) -> None:
+        """Point subsequent writes at *new_dir* (caller already renamed the directory)."""
+        self._output_dir = new_dir
+
     def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
         path = self._output_dir / 'transcript_raw.txt'
         lines = [f'[{format_wall_time(seg.wall_start)}] {seg.text}' for seg in segments]

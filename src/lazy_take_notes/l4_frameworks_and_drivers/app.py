@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from pathlib import Path
@@ -30,6 +31,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import DownloadModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.label_modal import LabelModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.query_modal import QueryModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -45,6 +47,7 @@ class App(TextualApp):
         Binding('space', 'toggle_pause', 'Pause/Resume', priority=True),
         Binding('s', 'stop_recording', 'Stop', priority=True),
         Binding('d', 'force_digest', 'Digest now', show=False),
+        Binding('l', 'rename_session', 'Label', show=False),
         Binding('h', 'show_help', 'Help', priority=True),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
     ]
@@ -59,6 +62,7 @@ class App(TextualApp):
         transcriber: Transcriber | None = None,
         missing_digest_models: list[str] | None = None,
         missing_interactive_models: list[str] | None = None,
+        label: str = '',
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -66,6 +70,7 @@ class App(TextualApp):
         self._template = template
         self._output_dir = output_dir
         self._output_dir.mkdir(parents=True, exist_ok=True)
+        self._session_label = label
 
         setup_file_logging(self._output_dir)
 
@@ -106,14 +111,19 @@ class App(TextualApp):
                 show=False,
             )
 
-    def compose(self) -> ComposeResult:
+    def _build_header_text(self) -> str:
         meta = self._template.metadata
         header_text = f'  lazy-take-notes | {meta.name}'
         if meta.description:
             header_text += f' - {meta.description}'
         if meta.locale:
             header_text += f' [{meta.locale}]'
-        yield Static(header_text, id='header')
+        if self._session_label:
+            header_text += f' \u2014 {self._session_label}'
+        return header_text
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._build_header_text(), id='header')
         with Horizontal(id='main-panels'):
             yield TranscriptPanel(id='transcript-panel')
             with Vertical(id='digest-col'):
@@ -123,10 +133,10 @@ class App(TextualApp):
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
-            return r'\[Space] pause  \[s] stop  \[d] digest  \[h] help'
+            return r'\[Space] pause  \[s] stop  \[d] digest  \[l] label  \[h] help'
         if state == 'paused':
-            return r'\[Space] resume  \[s] stop  \[h] help'
-        return r'\[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
+            return r'\[Space] resume  \[s] stop  \[l] label  \[h] help'
+        return r'\[l] label  \[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
 
     def _update_hints(self, state: str) -> None:
         try:
@@ -427,6 +437,42 @@ class App(TextualApp):
             return
         self._run_digest_worker(is_final=False)
 
+    def action_rename_session(self) -> None:
+        self.push_screen(
+            LabelModal(current_label=self._session_label),
+            callback=self._on_label_result,
+        )
+
+    def _on_label_result(self, label: str | None) -> None:
+        if not label:
+            return
+        safe_label = re.sub(r'[^\w\-]', '_', label.strip())
+        if not safe_label:
+            return
+
+        # Preserve the YYYY-MM-DD_HHMMSS timestamp prefix from the current dir name.
+        current_name = self._output_dir.name
+        # Timestamp is always the first 17 chars: "2026-02-21_143052"
+        timestamp_prefix = current_name[:17]
+        new_name = f'{timestamp_prefix}_{safe_label}'
+        new_path = self._output_dir.parent / new_name
+
+        if new_path != self._output_dir:
+            self._output_dir.rename(new_path)
+            self._output_dir = new_path
+
+            from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import (  # noqa: PLC0415 -- L4 reaches into concrete adapter for relocate
+                FilePersistenceGateway,
+            )
+
+            persistence = self._controller._persistence  # noqa: SLF001 — L4 composition root reaches through
+            if isinstance(persistence, FilePersistenceGateway):
+                persistence.relocate(new_path)
+
+        self._session_label = safe_label
+        self.query_one('#header', Static).update(self._build_header_text())
+        self.notify(f'Session: {safe_label}', timeout=3)
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id == 'context-input':
             self._controller.user_context = event.text_area.text
@@ -492,6 +538,7 @@ class App(TextualApp):
                 '| `Space` | Pause / Resume |',
                 '| `s` | Stop recording |',
                 '| `d` | Force digest now |',
+                '| `l` | Rename session |',
                 '| `h` | Toggle this help |',
             ]
         )
