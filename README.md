@@ -103,20 +103,24 @@ output/
 
 ## Platform Support
 
-Currently **macOS only**. Mic-only transcription uses cross-platform libraries, but system audio capture relies on a native CoreAudio tap binary.
+| Feature                    | macOS | Linux                 | Windows           |
+| -------------------------- | ----- | --------------------- | ----------------- |
+| Mic capture                | ✅     | ✅                     | ✅                 |
+| System audio capture       | ✅     | ✅ PulseAudio/PipeWire | ✅ WASAPI loopback |
+| Mixed audio (mic + system) | ✅     | ✅                     | ✅                 |
+| Audio file batch mode      | ✅     | ✅                     | ✅                 |
 
-| Feature                    | macOS | Linux      | Windows    |
-| -------------------------- | ----- | ---------- | ---------- |
-| Mic capture                | ✅     | ❌ untested | ❌ untested |
-| System audio capture       | ✅     | ❌          | ❌          |
-| Mixed audio (mic + system) | ✅     | ❌          | ❌          |
-| Audio file batch mode      | ✅     | ❌ untested | ❌ untested |
+> **Mix mode note:** On macOS, the built-in mic may pick up speaker audio
+> even in mic-only mode (no echo cancellation on raw capture). On Windows
+> and Linux, drivers typically apply echo cancellation, so use **mix mode**
+> to capture both voice and speaker output.
 
 ### Roadmap
 
 - [x] Linux support — mic capture + PulseAudio/PipeWire system audio
 - [x] Windows support — mic capture + WASAPI system audio
 - [x] Platform-native config paths (`platformdirs`)
+- [ ] macOS VoiceProcessingIO — enable AEC on mic capture so mix mode behaves identically across platforms
 - [ ] PyPI release once cross-platform coverage is sufficient
 
 ## Development

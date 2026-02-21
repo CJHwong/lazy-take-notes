@@ -19,9 +19,9 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
 )
 
 _MODE_LABELS = {
-    AudioMode.MIC_ONLY: 'mic only',
-    AudioMode.SYSTEM_ONLY: 'system only',
-    AudioMode.MIX: 'mix [dim]⚠ use headphones[/dim]',
+    AudioMode.MIC_ONLY: 'mic only [dim](voice)[/dim]',
+    AudioMode.SYSTEM_ONLY: 'system only [dim](speakers)[/dim]',
+    AudioMode.MIX: 'mix [dim](voice + speakers)[/dim]',
 }
 _MODE_CYCLE = [
     AudioMode.MIC_ONLY,
@@ -149,6 +149,8 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         if self._show_audio_mode:
             label = _MODE_LABELS[self._audio_mode]
             base += rf'  \[d] Audio: {label}'
+            if self._audio_mode == AudioMode.MIX:
+                base += '  [dim]tip: use headphones if you hear echo[/dim]'
         base += r'  \[Esc] Cancel'
         return base
 
