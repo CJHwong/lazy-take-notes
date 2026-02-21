@@ -8,7 +8,6 @@ import pytest
 from textual.widgets import Input, Markdown
 
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as yaml_loader_mod
-import lazy_take_notes.l4_frameworks_and_drivers.template_picker as template_picker_mod
 from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import all_template_names
 from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
@@ -20,12 +19,6 @@ from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
 def _isolate_user_templates(monkeypatch):
     """Ensure user templates dir does not exist so only built-ins show."""
     monkeypatch.setattr(yaml_loader_mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
-
-
-@pytest.fixture(autouse=True)
-def _force_macos(monkeypatch):
-    """Make tests behave as if running on macOS so [d] binding is active."""
-    monkeypatch.setattr(template_picker_mod.sys, 'platform', 'darwin')
 
 
 class TestTemplatePicker:
@@ -118,11 +111,10 @@ class TestTemplatePicker:
             assert picker._audio_mode == AudioMode.MIC_ONLY  # unchanged
 
     @pytest.mark.asyncio
-    async def test_d_hidden_on_non_macos(self, monkeypatch):
-        monkeypatch.setattr(template_picker_mod.sys, 'platform', 'linux')
-        picker = TemplatePicker()
+    async def test_d_hidden_when_show_audio_mode_false(self):
+        picker = TemplatePicker(show_audio_mode=False)
         async with picker.run_test() as pilot:
-            # Tab to list so any key handling fires — still no-op on non-macOS
+            # Tab to list so any key handling fires — still no-op when audio mode hidden
             await pilot.press('tab')
             await pilot.pause()
             before = picker._audio_mode

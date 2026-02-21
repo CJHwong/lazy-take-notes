@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from lazy_take_notes.l1_entities.audio_mode import AudioMode
@@ -56,21 +57,32 @@ class DependencyContainer:
     def _build_audio_source(mode: AudioMode) -> AudioSource:
         if mode == AudioMode.MIC_ONLY:
             return SounddeviceAudioSource()
-        if mode == AudioMode.SYSTEM_ONLY:
-            from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import (  # noqa: PLC0415 -- deferred: only on macOS with system audio mode
+
+        if sys.platform == 'darwin':
+            from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import (  # noqa: PLC0415 -- deferred: macOS only
                 CoreAudioTapSource,
             )
 
-            return CoreAudioTapSource()
-        # MIX
-        from lazy_take_notes.l3_interface_adapters.gateways.coreaudio_tap_source import (  # noqa: PLC0415 -- deferred: only on macOS with mix mode
-            CoreAudioTapSource,
+            if mode == AudioMode.SYSTEM_ONLY:
+                return CoreAudioTapSource()
+            from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: macOS mix mode
+                MixedAudioSource,
+            )
+
+            return MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())
+
+        # Linux / Windows — use soundcard loopback
+        from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import (  # noqa: PLC0415 -- deferred: non-macOS only
+            SoundCardLoopbackSource,
         )
-        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: only on macOS with mix mode
+
+        if mode == AudioMode.SYSTEM_ONLY:
+            return SoundCardLoopbackSource()
+        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: non-macOS mix mode
             MixedAudioSource,
         )
 
-        return MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())
+        return MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())
 
     @staticmethod
     def config_loader() -> YamlConfigLoader:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections import defaultdict
 
 from textual.app import App, ComposeResult
@@ -130,9 +129,9 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         self._templates: dict[str, SessionTemplate] = {name: loader.load(name) for name in sorted(all_template_names())}
         self._current_name: str | None = None
         self._audio_mode: AudioMode = AudioMode.MIC_ONLY
-        # Show audio mode selector only on macOS AND when the caller opts in
+        # Show audio mode selector when the caller opts in
         # (batch/--audio-file mode passes show_audio_mode=False since audio_mode is irrelevant)
-        self._show_audio_mode = sys.platform == 'darwin' and show_audio_mode
+        self._show_audio_mode = show_audio_mode
 
     def compose(self) -> ComposeResult:
         count = len(self._templates)
