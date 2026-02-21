@@ -133,10 +133,10 @@ class App(TextualApp):
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
-            return r'\[Space] pause  \[s] stop  \[d] digest  \[l] label  \[h] help'
+            return r'\[Space] pause  \[s] stop  \[d] digest  \[c] copy  \[l] label  \[h] help'
         if state == 'paused':
-            return r'\[Space] resume  \[s] stop  \[l] label  \[h] help'
-        return r'\[l] label  \[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
+            return r'\[Space] resume  \[s] stop  \[c] copy  \[l] label  \[h] help'
+        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
 
     def _update_hints(self, state: str) -> None:
         try:
@@ -504,14 +504,6 @@ class App(TextualApp):
         if lines:
             lines.append('')
 
-        # Quick actions
-        if self._template.quick_actions:
-            lines.append('### Quick Actions')
-            for i, qa in enumerate(self._template.quick_actions):
-                desc = f' - {qa.description}' if qa.description else ''
-                lines.append(f'- `{i + 1}` **{qa.label}**{desc}')
-            lines.append('')
-
         # Status bar
         min_lines = self._config.digest.min_lines
         lines.extend(
@@ -538,16 +530,10 @@ class App(TextualApp):
                 '| `Space` | Pause / Resume |',
                 '| `s` | Stop recording |',
                 '| `d` | Force digest now |',
-                '| `l` | Rename session |',
-                '| `h` | Toggle this help |',
-            ]
-        )
-        for i, qa in enumerate(self._template.quick_actions):
-            lines.append(f'| `{i + 1}` | {qa.label} |')
-        lines.extend(
-            [
                 '| `c` | Copy focused panel |',
                 '| `Tab` | Switch panel focus |',
+                '| `l` | Rename session |',
+                '| `h` | Toggle this help |',
                 '| `q` | Quit |',
             ]
         )
