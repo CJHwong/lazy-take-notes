@@ -60,14 +60,27 @@ class SoundCardLoopbackSource:
 
     @staticmethod
     def _find_loopback():
-        """Find a PulseAudio/WASAPI loopback device."""
+        """Find a loopback device matching the default speaker.
+
+        On Windows/Linux, WASAPI/PulseAudio loopback captures from a specific
+        output device.  We match the default speaker so the user hears audio
+        from the same device we're capturing.  Falls back to first loopback
+        if no match (e.g. PulseAudio monitor naming differs).
+        """
         mics = sc.all_microphones(include_loopback=True)
-        for mic in mics:
-            if mic.isloopback:
-                return mic
-        raise RuntimeError(
-            'No loopback audio device found. Ensure PulseAudio/PipeWire (Linux) or WASAPI (Windows) is running.'
-        )
+        loopbacks = [m for m in mics if m.isloopback]
+        if not loopbacks:
+            raise RuntimeError(
+                'No loopback audio device found. Ensure PulseAudio/PipeWire (Linux) or WASAPI (Windows) is running.'
+            )
+
+        default_speaker = sc.default_speaker()
+        if default_speaker is not None:
+            for mic in loopbacks:
+                if mic.id == default_speaker.id:
+                    return mic
+
+        return loopbacks[0]
 
     def _reader(self, recorder, sample_rate: int) -> None:
         _win_com_init()
