@@ -34,7 +34,7 @@ class CoreAudioTapSource:
             raise RuntimeError(f'Native binary not found: {_BINARY}\nRun: bash scripts/build_native.sh')
         self._error = None
         self._stop.clear()
-        self._proc = subprocess.Popen(  # noqa: S603
+        self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
             [str(_BINARY)],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

@@ -106,9 +106,9 @@ Currently **macOS only**. Mic-only transcription uses cross-platform libraries, 
 
 ### Roadmap
 
-- [ ] Linux support — mic capture + PulseAudio/PipeWire system audio
-- [ ] Windows support — mic capture + WASAPI system audio
 - [ ] Platform-native config paths (`platformdirs`)
+- [x] Linux support — mic capture + PulseAudio/PipeWire system audio
+- [x] Windows support — mic capture + WASAPI system audio
 - [ ] PyPI release once cross-platform coverage is sufficient
 
 ## Development

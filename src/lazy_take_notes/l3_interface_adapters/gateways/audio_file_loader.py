@@ -47,7 +47,7 @@ def load_audio_file(path: Path) -> np.ndarray:
     ]
 
     try:
-        result = subprocess.run(cmd, capture_output=True, timeout=_FFMPEG_TIMEOUT)  # noqa: S603
+        result = subprocess.run(cmd, capture_output=True, timeout=_FFMPEG_TIMEOUT)  # noqa: S603 -- fixed arg list, not shell=True
     except subprocess.TimeoutExpired as exc:
         raise RuntimeError(f'ffmpeg timed out after {_FFMPEG_TIMEOUT}s processing: {path}') from exc
     except OSError as exc:

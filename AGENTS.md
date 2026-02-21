@@ -28,6 +28,20 @@ uv run pytest tests/ -v
 uv run lint-imports
 ```
 
+* **Linux Smoke Test** (requires Docker):
+```bash
+docker build -f scripts/linux-smoke/Dockerfile -t ltn-linux-smoke .
+docker run --rm ltn-linux-smoke
+```
+Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exercises `SoundCardLoopbackSource` against a real PulseAudio null-sink loopback device. Verifies device discovery, audio capture, and clean shutdown.
+
+
+## Code Style
+
+* **`noqa` must include a reason**: Every `# noqa: XXXX` comment **MUST** have a `--` reason suffix explaining why the suppression is justified.
+  * Good: `# noqa: S603 -- fixed arg list, not shell=True`
+  * Bad: `# noqa: S603`
+
 
 ## Testing Guidelines
 
@@ -60,15 +74,15 @@ Audio Worker (thread)          Digest Task (async)          Query Task (async)
 
 Digest and query are on-demand async tasks (`self.run_worker(..., exclusive=True, group=...)`) — not persistent background workers. `_digest_running` / `_query_running` flags prevent double-firing.
 
-## Audio Modes (macOS only)
+## Audio Modes
 
-Selected at startup via template picker:
+Selected at startup via template picker (all platforms):
 
 - **MIC_ONLY** — `SounddeviceAudioSource` (PortAudio, cross-platform)
-- **SYSTEM_ONLY** — `CoreAudioTapSource` (native Swift binary via ScreenCaptureKit, macOS only)
+- **SYSTEM_ONLY** — macOS: `CoreAudioTapSource` (ScreenCaptureKit); Linux/Windows: `SoundCardLoopbackSource` (PulseAudio/WASAPI loopback)
 - **MIX** — `MixedAudioSource` (mic + system blended, 0.5 attenuation anti-clipping)
 
-On non-macOS platforms, only MIC_ONLY is available; the audio mode selector is hidden.
+`DependencyContainer._build_audio_source()` selects the system audio backend by platform.
 
 ## Data Flow
 
@@ -89,8 +103,8 @@ On non-macOS platforms, only MIC_ONLY is available; the audio mode selector is h
 - **Template-driven**: All prompts, labels, and quick actions are defined in YAML templates — core logic is locale-agnostic
 - **Message passing**: Workers communicate with the App exclusively through Textual Messages — clean separation of concerns
 - **Transcriber** and **LLMClient** are fully isolated behind L2 ports — new implementations (FasterWhisper, OpenAI, etc.) can be added with zero L2 changes
-- **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` selects per audio mode
+- **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` selects per platform + audio mode
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
-- **Template picker**: Interactive TUI launched before the main app; selects template + audio mode (macOS) to configure the session
+- **Template picker**: Interactive TUI launched before the main app; selects template + audio mode to configure the session
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest

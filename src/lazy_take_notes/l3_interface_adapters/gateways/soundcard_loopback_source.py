@@ -7,7 +7,7 @@ import sys
 import threading
 
 import numpy as np
-import soundcard as sc  # noqa: PLC0415
+import soundcard as sc  # noqa: PLC0415 -- top-level import for L3 adapter; forbidden in L1/L2 by import-linter
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 
@@ -76,7 +76,7 @@ class SoundCardLoopbackSource:
             self._thread = None
         if self._recorder is not None:
             try:
-                self._recorder.__exit__(None, None, None)  # noqa: PLC2801
+                self._recorder.__exit__(None, None, None)  # noqa: PLC2801 -- manual context: open/close are separate methods
             except Exception:  # noqa: BLE001, S110
                 pass
             self._recorder = None
