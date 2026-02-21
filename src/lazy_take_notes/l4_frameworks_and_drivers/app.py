@@ -546,6 +546,9 @@ class App(TextualApp):
             return  # q is intentionally disabled while recording/paused; press s first
 
         if self._pending_quit:
+            if self._digest_running:
+                self.notify('Final digest in progress — please wait', severity='warning', timeout=3)
+                return
             self.exit()
             return
 
@@ -581,29 +584,33 @@ class App(TextualApp):
     def _run_final_digest(self) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...'
+        self._digest_running = True
 
         async def _final_task() -> None:
-            result = await self._controller.run_digest(is_final=True)
-            if result.data is not None:
-                self.post_message(
-                    DigestReady(
-                        markdown=result.data,
-                        digest_number=self._controller.digest_state.digest_count,
-                        is_final=True,
+            try:
+                result = await self._controller.run_digest(is_final=True)
+                if result.data is not None:
+                    self.post_message(
+                        DigestReady(
+                            markdown=result.data,
+                            digest_number=self._controller.digest_state.digest_count,
+                            is_final=True,
+                        )
                     )
-                )
-                self.notify('Final digest ready. Press q to quit.', timeout=10)
-            else:
-                self.post_message(
-                    DigestError(
-                        error=result.error,
-                        consecutive_failures=self._controller.digest_state.consecutive_failures,
+                    self.notify('Final digest ready. Press q to quit.', timeout=10)
+                else:
+                    self.post_message(
+                        DigestError(
+                            error=result.error,
+                            consecutive_failures=self._controller.digest_state.consecutive_failures,
+                        )
                     )
-                )
-                self.notify(
-                    'Final digest failed. Press q to quit.',
-                    severity='error',
-                    timeout=10,
-                )
+                    self.notify(
+                        'Final digest failed. Press q to quit.',
+                        severity='error',
+                        timeout=10,
+                    )
+            finally:
+                self._digest_running = False
 
         self.run_worker(_final_task, exclusive=True, group='final')
