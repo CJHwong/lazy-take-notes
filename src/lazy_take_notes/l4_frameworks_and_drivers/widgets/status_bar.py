@@ -51,8 +51,15 @@ class StatusBar(Static):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._start_time = time.monotonic()
+        self._start_time = 0.0
+        self._recording_started = False
         self._level_history: deque[float] = deque([0.0] * 6, maxlen=6)
+
+    def watch_recording(self, value: bool) -> None:
+        """Start the elapsed timer on the first recording=True transition."""
+        if value and not self._recording_started:
+            self._start_time = time.monotonic()
+            self._recording_started = True
 
     def watch_download_percent(self, value: int) -> None:
         """Re-render immediately when download progress changes."""
@@ -69,6 +76,9 @@ class StatusBar(Static):
     def watch_stopped(self, value: bool) -> None:
         """Freeze the elapsed timer (recording time only) when recording stops."""
         if value and self._frozen_elapsed is None:
+            if not self._recording_started:
+                self._frozen_elapsed = 0.0
+                return
             now = time.monotonic()
             paused = self._paused_total
             if self._pause_start is not None:
@@ -88,6 +98,8 @@ class StatusBar(Static):
         return now - self._start_time - paused
 
     def _format_elapsed(self, now: float) -> str:
+        if not self._recording_started and self._frozen_elapsed is None:
+            return '00:00:00'
         elapsed = self._frozen_elapsed if self._frozen_elapsed is not None else self._recording_elapsed(now)
         hours = int(elapsed // 3600)
         minutes = int((elapsed % 3600) // 60)

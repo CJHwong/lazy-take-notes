@@ -1207,8 +1207,9 @@ class TestStatusBarStopWhilePaused:
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 bar = app.query_one('#status-bar', StatusBar)
-                # Push _start_time back so elapsed is large enough to
-                # absorb the paused time without going negative.
+                # Simulate that recording had started, then push _start_time
+                # back so elapsed is large enough to absorb the paused time.
+                bar._recording_started = True
                 bar._start_time = time.monotonic() - 20.0
                 bar._pause_start = time.monotonic() - 5.0
                 bar._paused_total = 2.0
