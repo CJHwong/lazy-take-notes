@@ -13,7 +13,7 @@ uv sync
 
 * **Run App**:
 ```bash
-uv run ltn
+uv run lazy-take-notes
 ```
 
 

@@ -13,7 +13,7 @@ Terminal app for live transcription and note-taking. Records your mic, transcrib
 
 ```bash
 # try without installing (uv required)
-uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git ltn
+uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git lazy-take-notes
 
 # or clone and install locally
 uv sync
@@ -25,10 +25,10 @@ pip install -e .
 ## Run
 
 ```bash
-ltn                                                     # start with defaults
-ltn --config path/to/config.yaml                        # custom config
-ltn --output-dir ./my_session                           # custom output dir
-ltn --audio-file recording.m4a                          # batch-transcribe a file
+lazy-take-notes                                         # start with defaults
+lazy-take-notes --config path/to/config.yaml            # custom config
+lazy-take-notes --output-dir ./my_session               # custom output dir
+lazy-take-notes --audio-file recording.m4a              # batch-transcribe a file
 ```
 
 ## Keys
