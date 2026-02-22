@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.digest_state import DigestState
 from lazy_take_notes.l1_entities.template import SessionTemplate
@@ -13,8 +11,6 @@ from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult, RunDigest
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.persistence import PersistenceGateway
 from lazy_take_notes.l2_use_cases.quick_action_use_case import RunQuickActionUseCase
-
-log = logging.getLogger('ltn.controller')
 
 
 class SessionController:

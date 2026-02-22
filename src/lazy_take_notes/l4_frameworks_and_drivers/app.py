@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import threading
 import time
@@ -35,6 +36,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.label_modal import LabelM
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.query_modal import QueryModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
+
+log = logging.getLogger('ltn.app')
 
 
 class App(TextualApp):
@@ -381,6 +384,7 @@ class App(TextualApp):
             try:
                 result = await self._controller.run_quick_action(key)
             except Exception as e:
+                log.error('Quick action failed: %s', e, exc_info=True)
                 self.post_message(QueryResult(result=f'Error: {e}', action_label=label, is_error=True))
                 return
             finally:

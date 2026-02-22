@@ -288,6 +288,7 @@ def run_audio_worker(
             audio_source.close()
 
     except Exception as e:
+        log.error('Audio source error: %s', e, exc_info=True)
         post_message(AudioWorkerStatus(status='error', error=str(e)))
 
     # Stop raw audio recorder (mic mode)
