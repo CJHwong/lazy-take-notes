@@ -1,6 +1,10 @@
-# lazy-take-notes
+<p align="center">
+  <img src="logo-banner.png" alt="lazy-take-notes" width="360">
+</p>
 
 Terminal app for live transcription and note-taking. Records your mic, transcribes speech to text, and periodically generates structured digests of what's happening.
+
+![screenshot](screenshot.png)
 
 ## Requirements
 
@@ -100,28 +104,6 @@ output/
     ├── digest_002.md
     └── digest_003_final.md   # final digest on quit/stop
 ```
-
-## Platform Support
-
-| Feature                    | macOS | Linux                 | Windows           |
-| -------------------------- | ----- | --------------------- | ----------------- |
-| Mic capture                | ✅     | ✅                     | ✅                 |
-| System audio capture       | ✅     | ✅ PulseAudio/PipeWire | ✅ WASAPI loopback |
-| Mixed audio (mic + system) | ✅     | ✅                     | ✅                 |
-| Audio file batch mode      | ✅     | ✅                     | ✅                 |
-
-> **Mix mode note:** On macOS, the built-in mic may pick up speaker audio
-> even in mic-only mode (no echo cancellation on raw capture). On Windows
-> and Linux, drivers typically apply echo cancellation, so use **mix mode**
-> to capture both voice and speaker output.
-
-### Roadmap
-
-- [x] Linux support — mic capture + PulseAudio/PipeWire system audio
-- [x] Windows support — mic capture + WASAPI system audio
-- [x] Platform-native config paths (`platformdirs`)
-- [ ] macOS VoiceProcessingIO — enable AEC on mic capture so mix mode behaves identically across platforms
-- [ ] PyPI release once cross-platform coverage is sufficient
 
 ## Development
 
