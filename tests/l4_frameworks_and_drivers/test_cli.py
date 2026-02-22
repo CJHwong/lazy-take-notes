@@ -25,6 +25,7 @@ _YAML_TPL = 'lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader
 _BUILD = 'lazy_take_notes.l4_frameworks_and_drivers.infra_config.build_app_config'
 _INFRA = 'lazy_take_notes.l4_frameworks_and_drivers.infra_config.InfraConfig'
 _PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.template_picker.TemplatePicker'
+_SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.session_picker.SessionPicker'
 _CLI = 'lazy_take_notes.l4_frameworks_and_drivers.cli'
 
 
@@ -115,17 +116,18 @@ class TestPreflightMicrophone:
             _preflight_microphone()
 
 
-class TestCliCommand:
+class TestCliGroup:
     def test_version_flag(self):
         runner = CliRunner()
         result = runner.invoke(cli, ['--version'])
         assert result.exit_code == 0
         assert __version__ in result.output
 
-    def test_picker_returns_none_exits_cleanly(self, tmp_path: Path):
+    def test_no_subcommand_invokes_record(self, tmp_path: Path):
+        """Running `lazy-take-notes` with no subcommand defaults to `record`."""
         runner = CliRunner()
         mock_picker = MagicMock()
-        mock_picker.run.return_value = None
+        mock_picker.run.return_value = None  # user cancels picker → clean exit
 
         with (
             patch(_YAML_CFG) as mock_config_cls,
@@ -140,7 +142,7 @@ class TestCliCommand:
 
         assert result.exit_code == 0
 
-    def test_config_file_not_found_exits_1(self, tmp_path: Path):
+    def test_config_file_not_found_exits_1(self):
         runner = CliRunner()
 
         with (
@@ -155,16 +157,57 @@ class TestCliCommand:
         assert result.exit_code == 1
         assert 'Error' in result.output
 
-    def test_audio_file_mode_calls_run_batch(self, tmp_path: Path):
-        runner = CliRunner()
-        audio_file = tmp_path / 'audio.wav'
-        audio_file.touch()
 
+class TestRecordSubcommand:
+    def test_picker_returns_none_exits_cleanly(self, tmp_path: Path):
+        runner = CliRunner()
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = None
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock()
+            result = runner.invoke(cli, ['record'])
+
+        assert result.exit_code == 0
+
+    def test_template_not_found_exits_1(self, tmp_path: Path):
+        runner = CliRunner()
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = ('nonexistent_template', MagicMock())
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL) as mock_tpl_cls,
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock()
+            mock_tpl_cls.return_value.load.side_effect = FileNotFoundError('not found')
+            result = runner.invoke(cli, ['record'])
+
+        assert result.exit_code == 1
+        assert 'Error' in result.output
+
+    def test_normal_run_calls_record_app(self, tmp_path: Path):
+        runner = CliRunner()
         mock_picker = MagicMock()
         mock_picker.run.return_value = ('default_en', MagicMock())
 
         mock_template_loader = MagicMock()
-        mock_template_loader.load.return_value = MagicMock(metadata=MagicMock(locale='en-US'))
+        mock_template_loader.load.return_value = MagicMock(
+            metadata=MagicMock(locale='en-US'),
+            quick_actions=[],
+            recognition_hints=[],
+        )
 
         with (
             patch(_YAML_CFG) as mock_config_cls,
@@ -172,13 +215,16 @@ class TestCliCommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.batch_runner.run_batch') as mock_batch,
+            patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
+            patch(f'{_CLI}._preflight_microphone'),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp') as mock_app_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
             mock_config_cls.return_value.load.return_value = {}
             mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            runner.invoke(cli, ['-f', str(audio_file)])
+            runner.invoke(cli, ['record'])
 
-        assert mock_batch.called
+        mock_app_cls.return_value.run.assert_called_once()
 
     def test_output_dir_override(self, tmp_path: Path):
         runner = CliRunner()
@@ -202,20 +248,45 @@ class TestCliCommand:
             patch(_PICKER, return_value=mock_picker),
             patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
             patch(f'{_CLI}._preflight_microphone'),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.app.App'),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
             mock_config_cls.return_value.load.return_value = {}
             mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            result = runner.invoke(cli, ['-o', str(custom_dir)])
+            result = runner.invoke(cli, ['-o', str(custom_dir), 'record'])
 
         assert result.exit_code == 0
         call_kwargs = mock_config_cls.return_value.load.call_args
         overrides = call_kwargs[1].get('overrides')
         assert overrides == {'output': {'directory': str(custom_dir)}}
 
+
+class TestTranscribeSubcommand:
+    def test_picker_returns_none_exits_cleanly(self, tmp_path: Path):
+        runner = CliRunner()
+        audio_file = tmp_path / 'audio.wav'
+        audio_file.touch()
+
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = None
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock()
+            result = runner.invoke(cli, ['transcribe', str(audio_file)])
+
+        assert result.exit_code == 0
+
     def test_template_not_found_exits_1(self, tmp_path: Path):
         runner = CliRunner()
+        audio_file = tmp_path / 'audio.wav'
+        audio_file.touch()
 
         mock_picker = MagicMock()
         mock_picker.run.return_value = ('nonexistent_template', MagicMock())
@@ -230,13 +301,15 @@ class TestCliCommand:
             mock_config_cls.return_value.load.return_value = {}
             mock_build.return_value = MagicMock()
             mock_tpl_cls.return_value.load.side_effect = FileNotFoundError('not found')
-            result = runner.invoke(cli, [])
+            result = runner.invoke(cli, ['transcribe', str(audio_file)])
 
         assert result.exit_code == 1
         assert 'Error' in result.output
 
-    def test_normal_run_calls_app_run(self, tmp_path: Path):
+    def test_transcribe_calls_transcribe_app(self, tmp_path: Path):
         runner = CliRunner()
+        audio_file = tmp_path / 'audio.wav'
+        audio_file.touch()
 
         mock_picker = MagicMock()
         mock_picker.run.return_value = ('default_en', MagicMock())
@@ -255,12 +328,54 @@ class TestCliCommand:
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
             patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
-            patch(f'{_CLI}._preflight_microphone'),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.app.App') as mock_app_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
             mock_config_cls.return_value.load.return_value = {}
             mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            runner.invoke(cli, [])
+            runner.invoke(cli, ['transcribe', str(audio_file)])
+
+        mock_app_cls.return_value.run.assert_called_once()
+
+
+class TestViewSubcommand:
+    def test_picker_returns_none_exits_cleanly(self, tmp_path: Path):
+        runner = CliRunner()
+
+        mock_session_picker = MagicMock()
+        mock_session_picker.run.return_value = None
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_SESSION_PICKER, return_value=mock_session_picker),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, ['view'])
+
+        assert result.exit_code == 0
+
+    def test_view_calls_view_app(self, tmp_path: Path):
+        runner = CliRunner()
+        session_dir = tmp_path / '2026-02-22_120000'
+        session_dir.mkdir()
+
+        mock_session_picker = MagicMock()
+        mock_session_picker.run.side_effect = [session_dir, None]
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_SESSION_PICKER, return_value=mock_session_picker),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.ViewApp') as mock_app_cls,
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            runner.invoke(cli, ['view'])
 
         mock_app_cls.return_value.run.assert_called_once()

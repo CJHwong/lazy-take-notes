@@ -25,39 +25,8 @@ def _make_session_dir(base_dir: Path, label: str | None) -> Path:
     return session_dir
 
 
-@click.command()
-@click.option(
-    '-c',
-    '--config',
-    'config_path',
-    default=None,
-    type=click.Path(exists=True),
-    help='Path to YAML config file.',
-)
-@click.option(
-    '-o',
-    '--output-dir',
-    default=None,
-    type=click.Path(),
-    help='Base output directory (session subfolder created automatically).',
-)
-@click.option(
-    '-l',
-    '--label',
-    default=None,
-    help="Session label appended to the timestamp folder (e.g. 'sprint-review').",
-)
-@click.option(
-    '-f',
-    '--audio-file',
-    'audio_file',
-    default=None,
-    type=click.Path(exists=True, dir_okay=False),
-    help='Transcribe an audio file and generate a single final digest (no TUI).',
-)
-@click.version_option(version=__version__)
-def cli(config_path, output_dir, label, audio_file):
-    """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
+def _load_config(config_path, output_dir):
+    """Load configuration and infra settings. Returns (config, infra, template_loader) or exits."""
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlConfigLoader,
     )
@@ -67,9 +36,6 @@ def cli(config_path, output_dir, label, audio_file):
     from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --help
         InfraConfig,
         build_app_config,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
-        TemplatePicker,
     )
 
     config_loader = YamlConfigLoader()
@@ -86,7 +52,74 @@ def cli(config_path, output_dir, label, audio_file):
         click.echo(f'Error: {e}', err=True)
         sys.exit(1)
 
-    picker = TemplatePicker(show_audio_mode=audio_file is None)
+    return config, infra, template_loader
+
+
+def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort platform guard
+    """Pre-initialize the multiprocessing resource tracker before Textual replaces sys.stderr.
+
+    ctx.Process.start() (spawn context) calls resource_tracker.ensure_running(),
+    which spawns the tracker subprocess and includes sys.stderr.fileno() in
+    fds_to_pass. Textual replaces sys.stderr with a stream that returns fileno()
+    == -1, which causes spawnv_passfds to raise ValueError. Calling
+    ensure_running() here (while sys.stderr is still the real fd) starts the
+    tracker once; all subsequent calls inside the TUI are no-ops.
+    """
+    try:
+        import multiprocessing.resource_tracker as _rt  # noqa: PLC0415 -- pre-init before Textual
+
+        _rt.ensure_running()
+    except Exception:  # noqa: S110 -- best-effort; tracker may not exist on all platforms
+        pass
+
+
+@click.group(invoke_without_command=True)
+@click.option(
+    '-c',
+    '--config',
+    'config_path',
+    default=None,
+    type=click.Path(exists=True),
+    help='Path to YAML config file.',
+)
+@click.option(
+    '-o',
+    '--output-dir',
+    default=None,
+    type=click.Path(),
+    help='Base output directory (session subfolder created automatically).',
+)
+@click.version_option(version=__version__)
+@click.pass_context
+def cli(ctx, config_path, output_dir):
+    """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
+    ctx.ensure_object(dict)
+    ctx.obj['config_path'] = config_path
+    ctx.obj['output_dir'] = output_dir
+
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(record)
+
+
+@cli.command()
+@click.option(
+    '-l',
+    '--label',
+    default=None,
+    help="Session label appended to the timestamp folder (e.g. 'sprint-review').",
+)
+@click.pass_context
+def record(ctx, label):
+    """Start a live recording session with real-time transcription and digest."""
+    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        TemplatePicker,
+    )
+
+    config_path = ctx.obj['config_path']
+    output_dir = ctx.obj['output_dir']
+    config, infra, template_loader = _load_config(config_path, output_dir)
+
+    picker = TemplatePicker(show_audio_mode=True)
     picker_result = picker.run()
     if picker_result is None:
         return
@@ -102,46 +135,19 @@ def cli(config_path, output_dir, label, audio_file):
     out_dir = _make_session_dir(base_dir, label)
 
     missing_digest, missing_interactive = _preflight_ollama(infra, config)
-
-    if audio_file:
-        from lazy_take_notes.l4_frameworks_and_drivers.batch_runner import (  # noqa: PLC0415 -- deferred: batch mode only, not loaded for TUI path
-            run_batch,
-        )
-
-        run_batch(
-            audio_path=Path(audio_file),
-            config=config,
-            template=template,
-            out_dir=out_dir,
-            infra=infra,
-        )
-        return
-
     _preflight_microphone()
 
-    from lazy_take_notes.l4_frameworks_and_drivers.app import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help or --list-templates
-        App,
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        RecordApp,
     )
-    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help or --list-templates
+    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         DependencyContainer,
     )
 
-    # Pre-initialize the resource tracker before Textual replaces sys.stderr.
-    # ctx.Process.start() (spawn context) calls resource_tracker.ensure_running(),
-    # which spawns the tracker subprocess and includes sys.stderr.fileno() in
-    # fds_to_pass. Textual replaces sys.stderr with a stream that returns fileno()
-    # == -1, which causes spawnv_passfds to raise ValueError. Calling
-    # ensure_running() here (while sys.stderr is still the real fd) starts the
-    # tracker once; all subsequent calls inside the TUI are no-ops.
-    try:
-        import multiprocessing.resource_tracker as _rt  # noqa: PLC0415 -- pre-init before Textual
-
-        _rt.ensure_running()
-    except Exception:  # noqa: S110 -- best-effort; tracker may not exist on all platforms  # pragma: no cover
-        pass
+    _pre_init_resource_tracker()
 
     container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=audio_mode)
-    app = App(
+    app = RecordApp(
         config=config,
         template=template,
         output_dir=out_dir,
@@ -153,6 +159,93 @@ def cli(config_path, output_dir, label, audio_file):
         label=label or '',
     )
     app.run()
+
+
+@cli.command()
+@click.argument('audio_file', type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    '-l',
+    '--label',
+    default=None,
+    help="Session label appended to the timestamp folder (e.g. 'sprint-review').",
+)
+@click.pass_context
+def transcribe(ctx, audio_file, label):
+    """Transcribe an audio file with streaming TUI and generate a final digest."""
+    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        TemplatePicker,
+    )
+
+    config_path = ctx.obj['config_path']
+    output_dir = ctx.obj['output_dir']
+    config, infra, template_loader = _load_config(config_path, output_dir)
+
+    picker = TemplatePicker(show_audio_mode=False)
+    picker_result = picker.run()
+    if picker_result is None:
+        return
+    tmpl_ref, _audio_mode = picker_result
+
+    try:
+        template = template_loader.load(tmpl_ref)
+    except FileNotFoundError as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+    base_dir = Path(output_dir or config.output.directory)
+    out_dir = _make_session_dir(base_dir, label)
+
+    missing_digest, missing_interactive = _preflight_ollama(infra, config)
+
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        TranscribeApp,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        DependencyContainer,
+    )
+
+    _pre_init_resource_tracker()
+
+    container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=None)
+    app = TranscribeApp(
+        config=config,
+        template=template,
+        output_dir=out_dir,
+        controller=container.controller,
+        audio_path=Path(audio_file),
+        transcriber=container.transcriber,
+        missing_digest_models=missing_digest,
+        missing_interactive_models=missing_interactive,
+        label=label or '',
+    )
+    app.run()
+
+
+@cli.command()
+@click.pass_context
+def view(ctx):
+    """Browse a previously saved session (transcript + digest, read-only)."""
+    config_path = ctx.obj['config_path']
+    output_dir = ctx.obj['output_dir']
+    config, _infra, _template_loader = _load_config(config_path, output_dir)
+
+    base_dir = Path(output_dir or config.output.directory)
+
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.view import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        ViewApp,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.session_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        SessionPicker,
+    )
+
+    while True:
+        picker = SessionPicker(sessions_dir=base_dir)
+        session_dir = picker.run()
+        if session_dir is None:
+            return
+
+        app = ViewApp(session_dir=session_dir)
+        app.run()
 
 
 def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
