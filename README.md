@@ -29,10 +29,12 @@ pip install -e .
 ## Run
 
 ```bash
-lazy-take-notes                               # start with defaults
+lazy-take-notes record                        # start recording
+lazy-take-notes record -l sprint-review       # record with session label
 lazy-take-notes --config path/to/config.yaml  # custom config
 lazy-take-notes --output-dir ./my_session     # custom output dir
-lazy-take-notes --audio-file recording.m4a    # batch-transcribe a file
+lazy-take-notes transcribe recording.m4a      # transcribe an audio file
+lazy-take-notes view                          # browse saved sessions
 ```
 
 ## Keys

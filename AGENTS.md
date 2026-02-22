@@ -46,6 +46,7 @@ Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exer
 ## Testing Guidelines
 
 * **Architecture**: The project follows **Clean Architecture** (L1 Entities -> L2 Use Cases -> L3 Adapters -> L4 Frameworks).
+* **Test directory convention**: `tests/` mirrors the source tree one-to-one. Each source subdirectory has a corresponding test subdirectory (e.g. `l3_interface_adapters/gateways/` → `tests/l3_interface_adapters/gateways/`). New test files go in the matching subdir.
 * **Mocking Strategy**:
 * Do **NOT** use `@patch` on concrete libraries (e.g., `ollama`, `sounddevice`) in L2 tests.
 * **MUST** use the provided protocol-conforming fakes located in `tests/conftest.py` (e.g., `FakeLLMClient`, `FakeTranscriber`).
@@ -92,8 +93,9 @@ Selected at startup via template picker (all platforms):
 4. **Digest cycle**: Template-driven prompt (with user session context) → ollama.AsyncClient.chat → JSON parse → DigestData → persist + update panel
 5. **Token compaction**: When prompt_tokens exceeds threshold, conversation history is compacted to 3 messages (system, compressed state, last response)
 6. **Quick actions**: Positional keybinding (1–5) → format prompt from template with current digest + recent transcript → ollama fast model → modal display
-7. **Audio file batch mode**: CLI `--audio-file PATH` → ffmpeg decode → chunked transcription → single final digest (headless, no TUI)
-8. **Recording**: When `save_audio: true`, WAV is written alongside output — mic mode records at native sample rate, system/mixed mode records processed 16 kHz int16
+7. **File transcription**: `lazy-take-notes transcribe <file>` → TemplatePicker (no audio mode) → ffmpeg decode → chunked transcription via `FileTranscriptionWorker` (thread) → streaming TUI output + auto-trigger final digest on completion
+8. **Session viewer**: `lazy-take-notes view` → SessionPicker (browse saved sessions) → ViewApp (read-only, standalone TextualApp — no controller/workers)
+9. **Recording**: When `save_audio: true`, WAV is written alongside output — mic mode records at native sample rate, system/mixed mode records processed 16 kHz int16
 
 ## Design Decisions
 
@@ -106,5 +108,6 @@ Selected at startup via template picker (all platforms):
 - **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` selects per platform + audio mode
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
-- **Template picker**: Interactive TUI launched before the main app; selects template + audio mode to configure the session
+- **Template picker**: Interactive TUI launched before the main app; selects template + audio mode to configure the session. `record` shows audio mode selector; `transcribe` hides it (input is a file, not a device)
+- **Session picker**: Interactive TUI for `view` subcommand; lists saved session directories and loops back after each ViewApp exit
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
