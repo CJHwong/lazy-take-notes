@@ -15,17 +15,17 @@ from lazy_take_notes.l4_frameworks_and_drivers.cli import (
     _preflight_ollama,  # noqa: PLC2701 -- testing private helper
     cli,
 )
-from lazy_take_notes.l4_frameworks_and_drivers.infra_config import InfraConfig, build_app_config
+from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
 
 # Patch targets at SOURCE module level (not cli module) because cli() uses
 # deferred `from X import Y` which creates local bindings that bypass
 # module-level attribute patches.
 _YAML_CFG = 'lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader.YamlConfigLoader'
 _YAML_TPL = 'lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader.YamlTemplateLoader'
-_BUILD = 'lazy_take_notes.l4_frameworks_and_drivers.infra_config.build_app_config'
-_INFRA = 'lazy_take_notes.l4_frameworks_and_drivers.infra_config.InfraConfig'
-_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.template_picker.TemplatePicker'
-_SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.session_picker.SessionPicker'
+_BUILD = 'lazy_take_notes.l4_frameworks_and_drivers.config.build_app_config'
+_INFRA = 'lazy_take_notes.l4_frameworks_and_drivers.config.InfraConfig'
+_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker.TemplatePicker'
+_SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker.SessionPicker'
 _CLI = 'lazy_take_notes.l4_frameworks_and_drivers.cli'
 
 

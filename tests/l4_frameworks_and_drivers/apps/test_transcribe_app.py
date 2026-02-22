@@ -11,7 +11,7 @@ from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
 from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import TranscribeApp
-from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
+from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     ModelDownloadProgress,

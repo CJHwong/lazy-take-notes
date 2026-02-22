@@ -8,12 +8,12 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
-from lazy_take_notes.l4_frameworks_and_drivers.file_transcription_worker import run_file_transcription
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     ModelDownloadProgress,
     TranscriptChunk,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import run_file_transcription
 
 # Patch at SOURCE module level — deferred imports inside run_file_transcription
 # create local bindings, so patches must target the original modules.

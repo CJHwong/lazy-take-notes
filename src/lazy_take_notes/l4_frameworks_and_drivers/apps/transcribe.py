@@ -75,7 +75,7 @@ class TranscribeApp(BaseApp):
         )
 
     def _file_worker_thread(self):  # pragma: no cover -- thread body; tested independently
-        from lazy_take_notes.l4_frameworks_and_drivers.file_transcription_worker import (  # noqa: PLC0415 -- deferred: loaded only when session starts
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import (  # noqa: PLC0415 -- deferred: loaded only when session starts
             run_file_transcription,
         )
 

@@ -23,7 +23,7 @@ from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source imp
 from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import SubprocessWhisperTranscriber
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
-from lazy_take_notes.l4_frameworks_and_drivers.infra_config import InfraConfig
+from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig
 
 
 class DependencyContainer:

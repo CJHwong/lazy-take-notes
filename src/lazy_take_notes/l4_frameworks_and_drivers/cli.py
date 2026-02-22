@@ -33,7 +33,7 @@ def _load_config(config_path, output_dir):
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlTemplateLoader,
     )
-    from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (  # noqa: PLC0415 -- deferred: not needed for --help
+    from lazy_take_notes.l4_frameworks_and_drivers.config import (  # noqa: PLC0415 -- deferred: not needed for --help
         InfraConfig,
         build_app_config,
     )
@@ -108,7 +108,7 @@ def cli(ctx, config_path, output_dir):
 @click.pass_context
 def record(ctx, label):
     """Start a live recording session with transcription and digest."""
-    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+    from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         TemplatePicker,
     )
 
@@ -169,7 +169,7 @@ def record(ctx, label):
 @click.pass_context
 def transcribe(ctx, audio_file, label):
     """Transcribe an audio file with streaming TUI and generate a final digest."""
-    from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+    from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         TemplatePicker,
     )
 
@@ -231,7 +231,7 @@ def view(ctx):
     from lazy_take_notes.l4_frameworks_and_drivers.apps.view import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         ViewApp,
     )
-    from lazy_take_notes.l4_frameworks_and_drivers.session_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+    from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         SessionPicker,
     )
 

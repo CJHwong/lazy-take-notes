@@ -92,7 +92,7 @@ class RecordApp(BaseApp):
         from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
             HfModelResolver,
         )
-        from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
             run_audio_worker,
         )
 

@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
+from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
-from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
 
 
 class TestDependencyContainer:

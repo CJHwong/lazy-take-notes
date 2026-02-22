@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lazy_take_notes.l4_frameworks_and_drivers.session_picker import (
+from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (
     SessionPicker,
     discover_sessions,
 )

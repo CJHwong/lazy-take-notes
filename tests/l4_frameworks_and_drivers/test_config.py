@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from lazy_take_notes.l4_frameworks_and_drivers.infra_config import (
+from lazy_take_notes.l4_frameworks_and_drivers.config import (
     APP_CONFIG_DEFAULTS,
     build_app_config,
     deep_merge,

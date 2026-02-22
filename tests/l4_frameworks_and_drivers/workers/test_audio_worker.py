@@ -11,14 +11,14 @@ import numpy as np
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
-from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (
-    _start_processed_recorder,  # noqa: PLC2701 -- testing private helper
-    run_audio_worker,
-)
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
+    _start_processed_recorder,  # noqa: PLC2701 -- testing private helper
+    run_audio_worker,
 )
 from tests.conftest import FakeAudioSource, FakeTranscriber
 

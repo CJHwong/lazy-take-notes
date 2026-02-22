@@ -10,7 +10,7 @@ from textual.widgets import Input, Markdown
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as yaml_loader_mod
 from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import all_template_names
-from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (
+from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (
     TemplatePicker,
 )
 
