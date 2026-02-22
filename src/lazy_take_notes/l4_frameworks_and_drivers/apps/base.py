@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager launch
+import sys
 import time
 from pathlib import Path
 
@@ -43,6 +45,7 @@ class BaseApp(TextualApp):
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
         Binding('l', 'rename_session', 'Label', show=False),
+        Binding('o', 'open_session_dir', 'Open', show=False),
         Binding('h', 'show_help', 'Help', priority=True),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
     ]
@@ -117,7 +120,7 @@ class BaseApp(TextualApp):
         yield StatusBar(id='status-bar')
 
     def _hints_for_state(self, state: str) -> str:
-        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'
+        return r'\[c] copy  \[l] label  \[o] open  \[h] help  \[q] quit'
 
     def _update_hints(self, state: str) -> None:
         try:
@@ -412,9 +415,22 @@ class BaseApp(TextualApp):
             '| `c` | Copy focused panel |',
             '| `Tab` | Switch panel focus |',
             '| `l` | Rename session |',
+            '| `o` | Open session directory |',
             '| `h` | Toggle this help |',
             '| `q` | Quit |',
         ]
+
+    def action_open_session_dir(self) -> None:
+        bar = self.query_one('#status-bar', StatusBar)
+        if not bar.stopped:
+            return
+        if sys.platform == 'darwin':
+            opener = 'open'
+        elif sys.platform == 'win32':
+            opener = 'explorer'
+        else:
+            opener = 'xdg-open'
+        subprocess.Popen([opener, str(self._output_dir)])  # noqa: S603 -- fixed arg list, not shell=True
 
     def action_quit_app(self) -> None:
         self.exit()

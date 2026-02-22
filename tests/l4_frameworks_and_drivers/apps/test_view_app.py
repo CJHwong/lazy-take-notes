@@ -86,6 +86,62 @@ class TestViewAppQuit:
                 mock_exit.assert_called_once()
 
 
+class TestOpenSessionDir:
+    @pytest.mark.asyncio
+    async def test_o_opens_session_dir(self, tmp_path):
+        from unittest.mock import patch
+
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            with patch('subprocess.Popen') as mock_popen:
+                await pilot.press('o')
+                await pilot.pause()
+                mock_popen.assert_called_once()
+                args = mock_popen.call_args[0][0]
+                assert str(session_dir) in args
+
+    @pytest.mark.asyncio
+    async def test_o_uses_xdg_open_on_linux(self, tmp_path):
+        from unittest.mock import patch
+
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            with (
+                patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.sys') as mock_sys,
+                patch('subprocess.Popen') as mock_popen,
+            ):
+                mock_sys.platform = 'linux'
+                await pilot.press('o')
+                await pilot.pause()
+                mock_popen.assert_called_once()
+                assert mock_popen.call_args[0][0][0] == 'xdg-open'
+
+    @pytest.mark.asyncio
+    async def test_o_uses_explorer_on_win32(self, tmp_path):
+        from unittest.mock import patch
+
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            with (
+                patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.sys') as mock_sys,
+                patch('subprocess.Popen') as mock_popen,
+            ):
+                mock_sys.platform = 'win32'
+                await pilot.press('o')
+                await pilot.pause()
+                mock_popen.assert_called_once()
+                assert mock_popen.call_args[0][0][0] == 'explorer'
+
+
 class TestViewAppStatusBar:
     @pytest.mark.asyncio
     async def test_status_bar_shows_stopped(self, tmp_path):

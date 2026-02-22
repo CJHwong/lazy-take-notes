@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager launch
+import sys
 from pathlib import Path
 
 from textual.app import App as TextualApp
@@ -26,6 +28,7 @@ class ViewApp(TextualApp):
 
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
+        Binding('o', 'open_session_dir', 'Open', show=False),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
     ]
 
@@ -45,7 +48,7 @@ class ViewApp(TextualApp):
     def on_mount(self) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'View'
-        bar.keybinding_hints = r'\[c] copy  \[Tab] switch  \[q] back'
+        bar.keybinding_hints = r'\[c] copy  \[o] open  \[Tab] switch  \[q] back'
 
         # Load transcript — write raw lines directly; the saved file already
         # contains timestamps so we must NOT go through append_segments()
@@ -69,6 +72,15 @@ class ViewApp(TextualApp):
                 panel.update_digest(digest_text)
 
         bar.stopped = True
+
+    def action_open_session_dir(self) -> None:
+        if sys.platform == 'darwin':
+            opener = 'open'
+        elif sys.platform == 'win32':
+            opener = 'explorer'
+        else:
+            opener = 'xdg-open'
+        subprocess.Popen([opener, str(self._session_dir)])  # noqa: S603 -- fixed arg list, not shell=True
 
     def action_quit_app(self) -> None:
         self.exit()

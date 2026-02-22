@@ -200,6 +200,36 @@ class TestTranscribeAppActions:
                     mock_exit.assert_called_once()
 
 
+class TestOpenSessionDir:
+    @pytest.mark.asyncio
+    async def test_o_noop_while_transcribing(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+
+                with patch('subprocess.Popen') as mock_popen:
+                    await pilot.press('o')
+                    await pilot.pause()
+                    mock_popen.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_o_opens_dir_when_stopped(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='stopped'))
+                await pilot.pause()
+
+                with patch('subprocess.Popen') as mock_popen:
+                    await pilot.press('o')
+                    await pilot.pause()
+                    mock_popen.assert_called_once()
+                    args = mock_popen.call_args[0][0]
+                    assert str(app._output_dir) in args
+
+
 class TestTranscribeAppHints:
     @pytest.mark.asyncio
     async def test_hints_when_transcribing(self, tmp_path):

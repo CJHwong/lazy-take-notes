@@ -51,7 +51,7 @@ class RecordApp(BaseApp):
             return r'\[Space] pause  \[s] stop  \[d] digest  \[c] copy  \[l] label  \[h] help'
         if state == 'paused':
             return r'\[Space] resume  \[s] stop  \[c] copy  \[l] label  \[h] help'
-        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'
+        return r'\[c] copy  \[l] label  \[o] open  \[h] help  \[q] quit'
 
     def _help_keybindings(self) -> list[str]:
         return [
@@ -63,6 +63,7 @@ class RecordApp(BaseApp):
             '| `c` | Copy focused panel |',
             '| `Tab` | Switch panel focus |',
             '| `l` | Rename session |',
+            '| `o` | Open session directory |',
             '| `h` | Toggle this help |',
             '| `q` | Quit |',
         ]

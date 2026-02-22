@@ -43,7 +43,7 @@ class TranscribeApp(BaseApp):
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
             return r'\[s] stop  \[d] digest  \[c] copy  \[l] label  \[h] help'
-        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'
+        return r'\[c] copy  \[l] label  \[o] open  \[h] help  \[q] quit'
 
     def _help_keybindings(self) -> list[str]:
         return [
@@ -54,6 +54,7 @@ class TranscribeApp(BaseApp):
             '| `c` | Copy focused panel |',
             '| `Tab` | Switch panel focus |',
             '| `l` | Rename session |',
+            '| `o` | Open session directory |',
             '| `h` | Toggle this help |',
             '| `q` | Quit |',
         ]
