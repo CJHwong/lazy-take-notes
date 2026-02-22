@@ -24,7 +24,15 @@ class DigestPanel(Markdown):
     }
     """
 
-    BINDINGS = [Binding('c', 'copy_content', 'Copy', show=False)]
+    BINDINGS = [
+        Binding('c', 'copy_content', 'Copy', show=False),
+        Binding('up', 'scroll_up', 'Scroll up', show=False),
+        Binding('down', 'scroll_down', 'Scroll down', show=False),
+        Binding('pageup', 'page_up', 'Page up', show=False),
+        Binding('pagedown', 'page_down', 'Page down', show=False),
+        Binding('home', 'scroll_home', 'Home', show=False),
+        Binding('end', 'scroll_end', 'End', show=False),
+    ]
 
     def __init__(self, title: str = 'Digest', **kwargs) -> None:
         super().__init__('', **kwargs)
