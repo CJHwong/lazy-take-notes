@@ -29,10 +29,10 @@ pip install -e .
 ## Run
 
 ```bash
-lazy-take-notes                                         # start with defaults
-lazy-take-notes --config path/to/config.yaml            # custom config
-lazy-take-notes --output-dir ./my_session               # custom output dir
-lazy-take-notes --audio-file recording.m4a              # batch-transcribe a file
+lazy-take-notes                               # start with defaults
+lazy-take-notes --config path/to/config.yaml  # custom config
+lazy-take-notes --output-dir ./my_session     # custom output dir
+lazy-take-notes --audio-file recording.m4a    # batch-transcribe a file
 ```
 
 ## Keys
@@ -108,9 +108,9 @@ output/
 ## Development
 
 ```bash
-uv sync                        # install deps
-uv run pytest tests/ -v        # run tests
-uv run lint-imports            # check layer contracts
+uv sync                  # install deps
+uv run pytest tests/ -v  # run tests
+uv run lint-imports      # check layer contracts
 ```
 
 Architecture details are in [AGENTS.md](AGENTS.md).
