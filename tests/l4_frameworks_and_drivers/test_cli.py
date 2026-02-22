@@ -123,24 +123,14 @@ class TestCliGroup:
         assert result.exit_code == 0
         assert __version__ in result.output
 
-    def test_no_subcommand_invokes_record(self, tmp_path: Path):
-        """Running `lazy-take-notes` with no subcommand defaults to `record`."""
+    def test_no_subcommand_shows_help(self):
+        """Running `lazy-take-notes` with no subcommand shows usage with all subcommands."""
         runner = CliRunner()
-        mock_picker = MagicMock()
-        mock_picker.run.return_value = None  # user cancels picker → clean exit
-
-        with (
-            patch(_YAML_CFG) as mock_config_cls,
-            patch(_YAML_TPL),
-            patch(_BUILD) as mock_build,
-            patch(_INFRA),
-            patch(_PICKER, return_value=mock_picker),
-        ):
-            mock_config_cls.return_value.load.return_value = {}
-            mock_build.return_value = MagicMock()
-            result = runner.invoke(cli, [])
-
-        assert result.exit_code == 0
+        result = runner.invoke(cli, [])
+        assert result.exit_code == 2
+        assert 'record' in result.output
+        assert 'transcribe' in result.output
+        assert 'view' in result.output
 
     def test_config_file_not_found_exits_1(self):
         runner = CliRunner()
@@ -152,7 +142,7 @@ class TestCliGroup:
             patch(_INFRA),
         ):
             mock_config_cls.return_value.load.side_effect = FileNotFoundError('not found')
-            result = runner.invoke(cli, [])
+            result = runner.invoke(cli, ['record'])
 
         assert result.exit_code == 1
         assert 'Error' in result.output

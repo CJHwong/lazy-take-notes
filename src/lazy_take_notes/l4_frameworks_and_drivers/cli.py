@@ -73,7 +73,7 @@ def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort pla
         pass
 
 
-@click.group(invoke_without_command=True)
+@click.group()
 @click.option(
     '-c',
     '--config',
@@ -92,13 +92,10 @@ def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort pla
 @click.version_option(version=__version__)
 @click.pass_context
 def cli(ctx, config_path, output_dir):
-    """lazy-take-notes -- TUI for real-time transcription and AI-assisted note-taking."""
+    """lazy-take-notes -- live transcription & AI summaries in your terminal."""
     ctx.ensure_object(dict)
     ctx.obj['config_path'] = config_path
     ctx.obj['output_dir'] = output_dir
-
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(record)
 
 
 @cli.command()
@@ -110,7 +107,7 @@ def cli(ctx, config_path, output_dir):
 )
 @click.pass_context
 def record(ctx, label):
-    """Start a live recording session with real-time transcription and digest."""
+    """Start a live recording session with transcription and digest."""
     from lazy_take_notes.l4_frameworks_and_drivers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         TemplatePicker,
     )

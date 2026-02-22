@@ -1,3 +1,3 @@
-"""lazy-take-notes: TUI for real-time transcription and AI-assisted note-taking."""
+"""lazy-take-notes: live transcription & AI summaries in your terminal."""
 
 __version__ = '0.1.0'

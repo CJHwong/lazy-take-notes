@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "lazy-take-notes"
 version = "0.1.0"
-description = "TUI for real-time transcription and AI-assisted note-taking"
+description = "live transcription & AI summaries in your terminal."
 requires-python = ">=3.11,<3.14"
 license = "MIT"
 dependencies = [
