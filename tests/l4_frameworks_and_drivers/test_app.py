@@ -37,7 +37,7 @@ def make_app(
     missing_interactive_models: list[str] | None = None,
 ) -> RecordApp:
     config = build_app_config({})
-    template = YamlTemplateLoader().load('default_zh_tw')
+    template = YamlTemplateLoader().load('default_en')
     output_dir = tmp_path / 'output'
     output_dir.mkdir()
     fake_llm = FakeLLMClient()
@@ -869,8 +869,11 @@ class TestStatusBarRender:
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as _pilot:
                 bar = app.query_one('#status-bar', StatusBar)
-                bar.last_digest_time = time.monotonic() - 30
-                rendered = bar.render()
+                # Pin monotonic so the test works on fresh CI runners
+                # where uptime < 30 s would make (monotonic() - 30) negative.
+                with patch('time.monotonic', return_value=1000.0):
+                    bar.last_digest_time = 1000.0 - 30
+                    rendered = bar.render()
                 assert 'last' in rendered
                 assert 'ago' in rendered
 
@@ -880,8 +883,11 @@ class TestStatusBarRender:
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as _pilot:
                 bar = app.query_one('#status-bar', StatusBar)
-                bar.last_digest_time = time.monotonic() - 120
-                rendered = bar.render()
+                # Pin monotonic so the test works on fresh CI runners
+                # where uptime < 120 s would make (monotonic() - 120) negative.
+                with patch('time.monotonic', return_value=1000.0):
+                    bar.last_digest_time = 1000.0 - 120
+                    rendered = bar.render()
                 assert 'last' in rendered
                 assert 'm ago' in rendered
 
@@ -978,7 +984,7 @@ class TestQueryWorkerAsync:
         app = make_app(tmp_path)
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
-                # key='1' corresponds to first quick action in default_zh_tw
+                # key='1' corresponds to first quick action in default_en
                 app._run_query_worker('1')
                 await pilot.pause()
                 await pilot.pause()
