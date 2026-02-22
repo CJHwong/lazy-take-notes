@@ -11,13 +11,13 @@ import pytest
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import FilePersistenceGateway
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
-from lazy_take_notes.l4_frameworks_and_drivers.app import App
+from lazy_take_notes.l4_frameworks_and_drivers.apps.record import RecordApp
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.label_modal import LabelModal
 from tests.conftest import FakeLLMClient
 
 
-def _make_app(tmp_path: Path, *, label: str = '', dir_name: str = '2026-02-21_143052') -> App:
+def _make_app(tmp_path: Path, *, label: str = '', dir_name: str = '2026-02-21_143052') -> RecordApp:
     config = build_app_config({})
     template = YamlTemplateLoader().load('default_zh_tw')
     output_dir = tmp_path / dir_name
@@ -30,7 +30,7 @@ def _make_app(tmp_path: Path, *, label: str = '', dir_name: str = '2026-02-21_14
         llm_client=fake_llm,
         persistence=persistence,
     )
-    return App(
+    return RecordApp(
         config=config,
         template=template,
         output_dir=output_dir,

@@ -1,10 +1,9 @@
-"""Textual App — thin TUI shell: compose + message routing only."""
+"""BaseApp — shared TUI shell: compose, digest/query routing, session management."""
 
 from __future__ import annotations
 
 import logging
 import re
-import threading
 import time
 from pathlib import Path
 
@@ -16,13 +15,9 @@ from textual.widgets import Static, TextArea
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
-from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
-from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
-    AudioLevel,
-    AudioWorkerStatus,
     DigestError,
     DigestReady,
     ModelDownloadProgress,
@@ -40,16 +35,13 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import T
 log = logging.getLogger('ltn.app')
 
 
-class App(TextualApp):
-    """Main TUI application for transcription and digest."""
+class BaseApp(TextualApp):
+    """Shared TUI shell — compose, digest/query routing, session management."""
 
     CSS_PATH = 'app.tcss'
 
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
-        Binding('space', 'toggle_pause', 'Pause/Resume', priority=True),
-        Binding('s', 'stop_recording', 'Stop', priority=True),
-        Binding('d', 'force_digest', 'Digest now', show=False),
         Binding('l', 'rename_session', 'Label', show=False),
         Binding('h', 'show_help', 'Help', priority=True),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
@@ -61,8 +53,6 @@ class App(TextualApp):
         template: SessionTemplate,
         output_dir: Path,
         controller: SessionController | None = None,
-        audio_source: AudioSource | None = None,
-        transcriber: Transcriber | None = None,
         missing_digest_models: list[str] | None = None,
         missing_interactive_models: list[str] | None = None,
         label: str = '',
@@ -88,17 +78,9 @@ class App(TextualApp):
             container = DependencyContainer(config, template, output_dir)
             self._controller = container.controller
 
-        self._audio_source = audio_source
-        self._transcriber = transcriber
-
         self._missing_digest_models: list[str] = missing_digest_models or []
         self._missing_interactive_models: list[str] = missing_interactive_models or []
 
-        # Audio control state
-        self._audio_paused = threading.Event()
-        self._audio_shutdown = threading.Event()
-        self._audio_stopped = False
-        self._pending_quit = False
         self._download_modal: DownloadModal | None = None
         self._digest_running = False
         self._query_running = False
@@ -135,11 +117,7 @@ class App(TextualApp):
         yield StatusBar(id='status-bar')
 
     def _hints_for_state(self, state: str) -> str:
-        if state == 'recording':
-            return r'\[Space] pause  \[s] stop  \[d] digest  \[c] copy  \[l] label  \[h] help'
-        if state == 'paused':
-            return r'\[Space] resume  \[s] stop  \[c] copy  \[l] label  \[h] help'
-        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'  # stopped / idle / loading / downloading / error
+        return r'\[c] copy  \[l] label  \[h] help  \[q] quit'
 
     def _update_hints(self, state: str) -> None:
         try:
@@ -169,61 +147,7 @@ class App(TextualApp):
                 severity='warning',
                 timeout=10,
             )
-        self._start_audio_worker()
         self.set_interval(0.2, self._refresh_status_bar)
-
-    def _start_audio_worker(self) -> None:  # pragma: no cover -- thin thread launcher; patched out in tests
-        tc = self._config.transcription
-        locale = self._template.metadata.locale
-        self._audio_model_name = tc.model_for_locale(locale)
-        self._audio_language = locale.split('-')[0].lower()
-        self.run_worker(
-            self._audio_worker_thread,
-            thread=True,
-            group='audio',
-        )
-
-    def _report_download_progress(self, percent: int) -> None:
-        self.post_message(ModelDownloadProgress(percent=percent, model_name=self._audio_model_name))
-
-    def _audio_worker_thread(
-        self,
-    ):  # pragma: no cover -- thread body; tested independently
-        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
-            HfModelResolver,
-        )
-        from lazy_take_notes.l4_frameworks_and_drivers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
-            run_audio_worker,
-        )
-
-        # Resolve model in the worker thread so downloads don't block the TUI.
-        try:
-            resolver = HfModelResolver(on_progress=self._report_download_progress)
-            model_path = resolver.resolve(self._audio_model_name)
-        except Exception as e:
-            self.post_message(AudioWorkerStatus(status='error', error=str(e)))
-            return []
-
-        tc = self._config.transcription
-        return run_audio_worker(
-            post_message=self.post_message,
-            is_cancelled=lambda: self._audio_shutdown.is_set(),
-            model_path=model_path,
-            language=self._audio_language,
-            chunk_duration=tc.chunk_duration,
-            overlap=tc.overlap,
-            silence_threshold=tc.silence_threshold,
-            pause_duration=tc.pause_duration,
-            recognition_hints=self._template.recognition_hints,
-            pause_event=self._audio_paused,
-            output_dir=self._output_dir,
-            save_audio=self._config.output.save_audio,
-            transcriber=self._transcriber,
-            audio_source=self._audio_source,
-        )
-
-    def _cancel_audio_workers(self) -> None:
-        self._audio_shutdown.set()
 
     def _refresh_status_bar(self) -> None:
         try:
@@ -262,50 +186,6 @@ class App(TextualApp):
         else:
             self._download_modal.update_progress(message.percent)
 
-    def on_audio_worker_status(self, message: AudioWorkerStatus) -> None:
-        bar = self.query_one('#status-bar', StatusBar)
-        bar.audio_status = message.status
-        bar.download_percent = -1
-
-        if message.status == 'loading_model' and self._download_modal is not None:
-            self._download_modal.switch_to_loading()
-        elif message.status in ('model_ready', 'recording'):
-            self._dismiss_download_modal()
-
-        if message.status == 'recording':
-            bar.recording = True
-            bar.paused = False
-            bar.stopped = False
-            self.screen.refresh(layout=True)
-            self._update_hints('recording')
-        elif message.status == 'stopped':
-            bar.recording = False
-            self._update_hints('stopped')
-            if self._pending_quit:
-                # Quit was triggered before recording started; flush is now complete.
-                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-                if has_content and not self._final_digest_done:
-                    self._run_final_digest()
-                else:
-                    self.exit()
-            elif self._audio_stopped:
-                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-                if has_content and not self._final_digest_done:
-                    self._run_digest_worker(is_final=True)
-        elif message.status == 'error':
-            self._dismiss_download_modal()
-            self._update_hints('error')
-            if message.error:
-                self.notify(
-                    f'Audio error: {message.error}\n(see ltn_debug.log)',
-                    severity='error',
-                    timeout=12,
-                )
-        elif message.status == 'loading_model':
-            self._update_hints('idle')
-        elif message.status == 'model_ready':
-            self._update_hints('idle')
-
     def on_digest_ready(self, message: DigestReady) -> None:
         panel = self.query_one('#digest-panel', DigestPanel)
         panel.update_digest(message.markdown)
@@ -331,13 +211,6 @@ class App(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.push_screen(QueryModal(title=message.action_label, body=message.result, is_error=message.is_error))
-
-    def on_audio_level(self, message: AudioLevel) -> None:
-        try:
-            bar = self.query_one('#status-bar', StatusBar)
-            bar.audio_level = message.rms
-        except Exception:  # noqa: S110 -- TUI race guard; widget may not exist during startup  # pragma: no cover
-            pass
 
     # --- Workers ---
 
@@ -395,48 +268,45 @@ class App(TextualApp):
 
         self.run_worker(_query_task, exclusive=True, group='query')
 
+    def _run_final_digest(self) -> None:
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.activity = 'Final digest...'
+        self._digest_running = True
+
+        async def _final_task() -> None:
+            try:
+                result = await self._controller.run_digest(is_final=True)
+                if result.data is not None:
+                    self.post_message(
+                        DigestReady(
+                            markdown=result.data,
+                            digest_number=self._controller.digest_state.digest_count,
+                            is_final=True,
+                        )
+                    )
+                    self.notify('Final digest ready. Press q to quit.', timeout=10)
+                else:
+                    self.post_message(
+                        DigestError(
+                            error=result.error,
+                            consecutive_failures=self._controller.digest_state.consecutive_failures,
+                        )
+                    )
+                    self.notify(
+                        'Final digest failed. Press q to quit.',
+                        severity='error',
+                        timeout=10,
+                    )
+            finally:
+                self._digest_running = False
+
+        self.run_worker(_final_task, exclusive=True, group='final')
+
     # --- Actions ---
-
-    def action_toggle_pause(self) -> None:
-        if self._audio_stopped:
-            self.notify('Recording already stopped', severity='warning', timeout=3)
-            return
-
-        bar = self.query_one('#status-bar', StatusBar)
-
-        if self._audio_paused.is_set():
-            self._audio_paused.clear()
-            bar.paused = False
-            bar.recording = True
-            self.notify('Recording resumed', timeout=2)
-            self._update_hints('recording')
-        else:
-            self._audio_paused.set()
-            bar.paused = True
-            bar.recording = False
-            self.notify('Recording paused', timeout=2)
-            self._update_hints('paused')
-
-    def action_stop_recording(self) -> None:
-        if self._audio_stopped:
-            return
-
-        self._audio_stopped = True
-        self._cancel_audio_workers()
-
-        bar = self.query_one('#status-bar', StatusBar)
-        bar.recording = False
-        bar.paused = False
-        bar.stopped = True
-        self._update_hints('stopped')
-
-        self.notify('Recording stopped. You can still browse and run quick actions.', timeout=5)
 
     def action_force_digest(self) -> None:
         if self._digest_running:
             self.notify('Digest already in progress', severity='warning', timeout=3)
-            return
-        if self._pending_quit:
             return
         if not self._controller.digest_state.buffer:
             self.notify('Nothing in buffer to digest yet', timeout=3)
@@ -471,7 +341,7 @@ class App(TextualApp):
                 FilePersistenceGateway,
             )
 
-            persistence = self._controller._persistence  # noqa: SLF001 — L4 composition root reaches through
+            persistence = self._controller._persistence  # noqa: SLF001 -- L4 composition root reaches through
             if isinstance(persistence, FilePersistenceGateway):
                 persistence.relocate(new_path)
 
@@ -485,10 +355,10 @@ class App(TextualApp):
 
     def action_quick_action(self, key: str) -> None:
         if self._digest_running:
-            self.notify('Digest in progress — please wait', severity='warning', timeout=3)
+            self.notify('Digest in progress \u2014 please wait', severity='warning', timeout=3)
             return
         if self._query_running:
-            self.notify('Quick action already running — please wait', severity='warning', timeout=3)
+            self.notify('Quick action already running \u2014 please wait', severity='warning', timeout=3)
             return
         self._run_query_worker(key)
 
@@ -517,106 +387,34 @@ class App(TextualApp):
                 '### Status Bar',
                 '| Indicator | Meaning |',
                 '|-----------|---------|',
-                '| `● Rec` `❚❚ Paused` `■ Stopped` `○ Idle` | Recording state |',
+                '| `\u25cf Rec` `\u275a\u275a Paused` `\u25a0 Stopped` `\u25cb Idle` | Recording state |',
                 f'| `buf N/{min_lines}` | Lines buffered toward next digest (fires at {min_lines}) |',
                 '| `00:00:00` | Recording time, pauses excluded |',
                 '| `last Xs ago` | Time elapsed since the last digest |',
-                '| `▁▂▄█▄▂` | Mic input level — flat means silence detected |',
-                '| `⟳ Digesting…` | LLM digest cycle in progress |',
+                '| `\u2581\u2582\u2584\u2588\u2584\u2582` | Mic input level \u2014 flat means silence detected |',
+                '| `\u27f3 Digesting\u2026` | LLM digest cycle in progress |',
                 '',
             ]
         )
 
         # Keybindings
         lines.append('### Keybindings')
-        lines.extend(
-            [
-                '| Key | Action |',
-                '|-----|--------|',
-                '| `Space` | Pause / Resume |',
-                '| `s` | Stop recording |',
-                '| `d` | Force digest now |',
-                '| `c` | Copy focused panel |',
-                '| `Tab` | Switch panel focus |',
-                '| `l` | Rename session |',
-                '| `h` | Toggle this help |',
-                '| `q` | Quit |',
-            ]
-        )
+        lines.extend(self._help_keybindings())
 
         self.push_screen(HelpModal(body_md='\n'.join(lines)))
 
+    def _help_keybindings(self) -> list[str]:
+        """Return keybinding help table rows. Subclasses override for mode-specific bindings."""
+        return [
+            '| Key | Action |',
+            '|-----|--------|',
+            '| `d` | Force digest now |',
+            '| `c` | Copy focused panel |',
+            '| `Tab` | Switch panel focus |',
+            '| `l` | Rename session |',
+            '| `h` | Toggle this help |',
+            '| `q` | Quit |',
+        ]
+
     def action_quit_app(self) -> None:
-        bar = self.query_one('#status-bar', StatusBar)
-        if bar.recording or bar.paused:
-            return  # q is intentionally disabled while recording/paused; press s first
-
-        if self._pending_quit:
-            if self._digest_running:
-                self.notify('Final digest in progress — please wait', severity='warning', timeout=3)
-                return
-            self.exit()
-            return
-
-        if self._digest_running:
-            self.notify('Digest in progress — please wait', severity='warning', timeout=3)
-            return
-
-        self._cancel_audio_workers()
-
-        was_already_stopped = self._audio_stopped
-        if not self._audio_stopped:
-            self._audio_stopped = True
-            bar = self.query_one('#status-bar', StatusBar)
-            bar.recording = False
-            bar.paused = False
-            bar.stopped = True
-            self._update_hints('stopped')
-
-        if not was_already_stopped:
-            # Audio worker is still flushing — defer final digest/exit until
-            # AudioWorkerStatus(stopped) confirms the flush is complete.
-            self._pending_quit = True
-            return
-
-        # Audio was already stopped — flush already happened, buffer is up to date.
-        has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-        if has_content and not self._final_digest_done:
-            self._pending_quit = True
-            self._run_final_digest()
-        else:
-            self.exit()
-
-    def _run_final_digest(self) -> None:
-        bar = self.query_one('#status-bar', StatusBar)
-        bar.activity = 'Final digest...'
-        self._digest_running = True
-
-        async def _final_task() -> None:
-            try:
-                result = await self._controller.run_digest(is_final=True)
-                if result.data is not None:
-                    self.post_message(
-                        DigestReady(
-                            markdown=result.data,
-                            digest_number=self._controller.digest_state.digest_count,
-                            is_final=True,
-                        )
-                    )
-                    self.notify('Final digest ready. Press q to quit.', timeout=10)
-                else:
-                    self.post_message(
-                        DigestError(
-                            error=result.error,
-                            consecutive_failures=self._controller.digest_state.consecutive_failures,
-                        )
-                    )
-                    self.notify(
-                        'Final digest failed. Press q to quit.',
-                        severity='error',
-                        timeout=10,
-                    )
-            finally:
-                self._digest_running = False
-
-        self.run_worker(_final_task, exclusive=True, group='final')
+        self.exit()

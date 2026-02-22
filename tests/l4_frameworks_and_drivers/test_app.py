@@ -12,7 +12,7 @@ from textual.widgets import TextArea
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
-from lazy_take_notes.l4_frameworks_and_drivers.app import App
+from lazy_take_notes.l4_frameworks_and_drivers.apps.record import RecordApp
 from lazy_take_notes.l4_frameworks_and_drivers.infra_config import build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
@@ -35,7 +35,7 @@ def make_app(
     tmp_path: Path,
     missing_digest_models: list[str] | None = None,
     missing_interactive_models: list[str] | None = None,
-) -> App:
+) -> RecordApp:
     config = build_app_config({})
     template = YamlTemplateLoader().load('default_zh_tw')
     output_dir = tmp_path / 'output'
@@ -48,7 +48,7 @@ def make_app(
         llm_client=fake_llm,
         persistence=fake_persist,
     )
-    return App(
+    return RecordApp(
         config=config,
         template=template,
         output_dir=output_dir,
@@ -1252,3 +1252,41 @@ class TestPendingQuitWithContentRunsFinalDigest:
                     app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
                     mock_final.assert_called_once()
+
+
+class TestBaseAppDefaults:
+    """Exercise BaseApp methods that subclasses normally override."""
+
+    @pytest.mark.asyncio
+    async def test_base_hints_for_state(self, tmp_path):
+        """BaseApp._hints_for_state returns default hint string."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
+
+                base_hints = BaseApp._hints_for_state(app, 'idle')
+                assert 'quit' in base_hints
+
+    @pytest.mark.asyncio
+    async def test_base_help_keybindings(self, tmp_path):
+        """BaseApp._help_keybindings returns table rows."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
+
+                rows = BaseApp._help_keybindings(app)
+                assert any('Quit' in row for row in rows)
+
+    @pytest.mark.asyncio
+    async def test_base_action_quit_app(self, tmp_path):
+        """BaseApp.action_quit_app calls self.exit()."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
+
+                with patch.object(app, 'exit') as mock_exit:
+                    BaseApp.action_quit_app(app)
+                    mock_exit.assert_called_once()

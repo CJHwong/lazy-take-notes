@@ -42,6 +42,7 @@ class StatusBar(Static):
     buf_max: reactive[int] = reactive(15)
     audio_level: reactive[float] = reactive(0.0)
     last_digest_time: reactive[float] = reactive(0.0)
+    mode_label: reactive[str] = reactive('')
     keybinding_hints: reactive[str] = reactive('')
     quick_action_hints: reactive[str] = reactive('')
     _start_time: float = 0.0
@@ -124,11 +125,16 @@ class StatusBar(Static):
         else:
             status_icon = '○ Idle'
 
-        left_parts = [
-            status_icon,
-            f'buf {self.buf_count}/{self.buf_max}',
-            self._format_elapsed(now),
-        ]
+        left_parts = []
+        if self.mode_label:
+            left_parts.append(self.mode_label)
+        left_parts.extend(
+            [
+                status_icon,
+                f'buf {self.buf_count}/{self.buf_max}',
+                self._format_elapsed(now),
+            ]
+        )
         if self.last_digest_time > 0:
             since = now - self.last_digest_time
             if since < 60:
