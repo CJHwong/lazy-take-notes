@@ -52,7 +52,7 @@ class TestOllamaLLMClient:
         client = OllamaLLMClient()
         ok, err = client.check_connectivity()
         assert ok is True
-        assert err == ''
+        assert not err
 
     @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
     def test_check_connectivity_failure(self, mock_client_cls):

@@ -9,8 +9,17 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-import lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source as loopback_mod
-from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import SoundCardLoopbackSource
+# soundcard eagerly connects to PulseAudio at import time (module-level singleton).
+# Pre-seed sys.modules so collection works on Linux CI without a running daemon.
+# setdefault is a no-op on macOS/Windows where the real import already succeeded.
+_sc_stub = MagicMock()
+sys.modules.setdefault('soundcard', _sc_stub)
+sys.modules.setdefault('soundcard.pulseaudio', _sc_stub)
+
+import lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source as loopback_mod  # noqa: E402 -- must follow soundcard stub
+from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import (  # noqa: E402 -- must follow soundcard stub
+    SoundCardLoopbackSource,
+)
 
 
 def _make_loopback(device_id='dev-1'):

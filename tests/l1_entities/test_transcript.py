@@ -12,4 +12,4 @@ class TestTranscriptSegment:
 
     def test_empty_text(self):
         seg = TranscriptSegment(text='', wall_start=0.0, wall_end=0.0)
-        assert seg.text == ''
+        assert not seg.text
