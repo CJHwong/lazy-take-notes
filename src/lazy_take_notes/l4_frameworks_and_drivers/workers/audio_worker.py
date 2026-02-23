@@ -168,6 +168,7 @@ def run_audio_worker(
     all_segments: list[TranscriptSegment] = []
     total_samples_fed: int = 0
     _last_level_post: float = 0.0
+    _level_accum: list[np.ndarray] = []
 
     # Off-thread transcription: audio reading continues while subprocess infers.
     _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -241,9 +242,12 @@ def run_audio_worker(
                 use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
                 use_case.feed_audio(data)
 
+                _level_accum.append(data)
                 now_abs = time.monotonic()
                 if now_abs - _last_level_post >= 0.1:
-                    rms = float(np.sqrt(np.mean(data**2)))
+                    window = np.concatenate(_level_accum)
+                    rms = float(np.sqrt(np.mean(window**2)))
+                    _level_accum.clear()
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
 

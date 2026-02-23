@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from collections import deque
 
@@ -11,10 +12,18 @@ from textual.widgets import Static
 
 _WAVE_CHARS = '▁▂▃▄▅▆▇█'
 
+# dB-scaled level meter: maps -60 dB (silence) to -11 dB (loud) across 8 bars.
+# Works for both quiet mic input (~0.005–0.06 RMS) and loud system audio (~0.1–0.5 RMS).
+_DB_FLOOR = -60.0
+_DB_RANGE = 49.0  # -60 to -11
+
 
 def _rms_to_char(rms: float) -> str:
-    idx = min(int(rms * 50), 7)  # saturates at ~0.14 RMS (typical speech peak)
-    return _WAVE_CHARS[idx]
+    if rms < 1e-7:
+        return _WAVE_CHARS[0]
+    db = 20.0 * math.log10(rms)
+    idx = int((db - _DB_FLOOR) / _DB_RANGE * 7)
+    return _WAVE_CHARS[min(max(idx, 0), 7)]
 
 
 class StatusBar(Static):
