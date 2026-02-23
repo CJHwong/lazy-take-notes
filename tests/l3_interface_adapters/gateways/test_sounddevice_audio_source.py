@@ -9,9 +9,13 @@ import numpy as np
 MODULE = 'lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source'
 
 
+_FAKE_DEVICE_INFO = {'name': 'Test Input', 'default_samplerate': 48000.0}
+
+
 class TestSounddeviceAudioSource:
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_open_creates_and_starts_stream(self, mock_stream_cls):
+    def test_open_creates_and_starts_stream(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream = MagicMock()
@@ -27,8 +31,9 @@ class TestSounddeviceAudioSource:
         assert call_kwargs['dtype'] == 'float32'
         mock_stream.start.assert_called_once()
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_callback_wires_to_queue(self, mock_stream_cls):
+    def test_callback_wires_to_queue(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream = MagicMock()
@@ -48,8 +53,9 @@ class TestSounddeviceAudioSource:
         assert result is not None
         np.testing.assert_allclose(result, [0.1, 0.2], atol=1e-6)
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_read_timeout_returns_none(self, mock_stream_cls):
+    def test_read_timeout_returns_none(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream_cls.return_value = MagicMock()
@@ -61,8 +67,9 @@ class TestSounddeviceAudioSource:
         result = src.read(timeout=0.01)
         assert result is None
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_drain_concatenates_chunks(self, mock_stream_cls):
+    def test_drain_concatenates_chunks(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream_cls.return_value = MagicMock()
@@ -78,8 +85,9 @@ class TestSounddeviceAudioSource:
         assert result is not None
         np.testing.assert_allclose(result, [0.1, 0.2, 0.3, 0.4], atol=1e-6)
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_drain_empty_returns_none(self, mock_stream_cls):
+    def test_drain_empty_returns_none(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream_cls.return_value = MagicMock()
@@ -90,8 +98,9 @@ class TestSounddeviceAudioSource:
         result = src.drain()
         assert result is None
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_close_stops_and_closes_stream(self, mock_stream_cls):
+    def test_close_stops_and_closes_stream(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream = MagicMock()
@@ -105,8 +114,9 @@ class TestSounddeviceAudioSource:
         mock_stream.close.assert_called_once()
         assert src._stream is None
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_callback_warns_on_portaudio_status(self, mock_stream_cls):
+    def test_callback_warns_on_portaudio_status(self, mock_stream_cls, _mock_qd):
         """Non-empty PortAudio status in callback triggers log.warning."""
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
