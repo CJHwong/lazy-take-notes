@@ -156,6 +156,29 @@ The binary watches stdin for EOF via `DispatchSource.makeReadSource`. When the P
 parent closes `proc.stdin` (or crashes), stdin becomes readable with 0 bytes, and the
 binary sets `shouldStop = true` and exits cleanly. This prevents zombie processes.
 
+**Dead-audio detection and auto-restart**
+
+CoreAudio I/O overloads (caused by misbehaving HAL clients) can silently kill SCKit's
+capture path — the `SCStream` stays alive, callbacks fire, but buffers are zero-filled.
+The system audio output remains functional (coreaudiod's own RMS stays healthy).
+
+Recovery: the audio callback tracks peak amplitude and counts consecutive zero-filled
+callbacks. After 150 consecutive zeros (~15 seconds at 10 fps) the main loop tears down
+the `SCStream` and creates a fresh one via `createCaptureStream()`, which reconnects to
+the still-alive system audio mixer. Up to 10 consecutive restarts are attempted; the
+counter resets when real audio resumes. The 15-second threshold avoids false positives
+on legitimate meeting silence (muted participants, pauses between speakers).
+
+A `hadAudio` guard prevents false restarts on startup silence — restarts only fire
+after the stream has previously delivered non-zero audio.
+
+**SIGUSR1 testing hook**
+
+Send `SIGUSR1` to inject zero audio (simulates dead SCKit stream). The restart logic
+detects the zeros and restarts the stream, clearing the injection flag so real audio
+resumes — verifying the full recovery path. Requires real audio to be flowing first
+(to set the `hadAudio` flag).
+
 ### Python integration
 
 The Python gateway is at:
