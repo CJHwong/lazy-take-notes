@@ -25,6 +25,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     ModelDownloadProgress,
     QueryResult,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import DownloadModal
@@ -160,6 +161,10 @@ class BaseApp(TextualApp):
             pass
 
     # --- Message Handlers ---
+
+    def on_transcription_status(self, message: TranscriptionStatus) -> None:
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.transcribing = message.active
 
     def on_transcript_chunk(self, message: TranscriptChunk) -> None:
         panel = self.query_one('#transcript-panel', TranscriptPanel)
@@ -395,6 +400,7 @@ class BaseApp(TextualApp):
                 '| `00:00:00` | Recording time, pauses excluded |',
                 '| `last Xs ago` | Time elapsed since the last digest |',
                 '| `\u2581\u2582\u2584\u2588\u2584\u2582` | Mic input level \u2014 flat means silence detected |',
+                '| `\u27f3 Transcribing\u2026` | Speech-to-text in progress |',
                 '| `\u27f3 Digesting\u2026` | LLM digest cycle in progress |',
                 '',
             ]

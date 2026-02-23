@@ -22,6 +22,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     ModelDownloadProgress,
     QueryResult,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import DownloadModal
@@ -1382,3 +1383,45 @@ class TestBaseAppDefaults:
                 with patch.object(app, 'exit') as mock_exit:
                     BaseApp.action_quit_app(app)
                     mock_exit.assert_called_once()
+
+
+class TestTranscriptionStatusHandler:
+    @pytest.mark.asyncio
+    async def test_transcription_status_active_sets_bar(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(TranscriptionStatus(active=True))
+                await pilot.pause()
+
+                bar = app.query_one('#status-bar', StatusBar)
+                assert bar.transcribing is True
+
+    @pytest.mark.asyncio
+    async def test_transcription_status_inactive_clears_bar(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                bar = app.query_one('#status-bar', StatusBar)
+                bar.transcribing = True
+
+                app.post_message(TranscriptionStatus(active=False))
+                await pilot.pause()
+
+                assert bar.transcribing is False
+
+    @pytest.mark.asyncio
+    async def test_transcribing_independent_of_digest_activity(self, tmp_path):
+        """Transcribing and digest activity are separate reactives — clearing one doesn't affect the other."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                bar = app.query_one('#status-bar', StatusBar)
+                bar.transcribing = True
+                bar.activity = 'Digesting...'
+
+                app.post_message(TranscriptionStatus(active=False))
+                await pilot.pause()
+
+                assert bar.transcribing is False
+                assert bar.activity == 'Digesting...'

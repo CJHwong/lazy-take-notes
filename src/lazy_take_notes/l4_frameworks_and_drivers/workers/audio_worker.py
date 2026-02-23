@@ -21,6 +21,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 
 log = logging.getLogger('ltn.audio')
@@ -202,6 +203,7 @@ def run_audio_worker(
         finally:
             _transcript_future = None
             _pending_meta = None
+            post_message(TranscriptionStatus(active=False))
 
     # Raw WAV recorder only makes sense for mic-based sources
     from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when worker starts
@@ -296,6 +298,7 @@ def run_audio_worker(
                         log.debug('transcription triggered: buffer=%d samples, first_chunk=%s', len(buf), is_first)
                         _stats_transcriptions += 1
                         _pending_meta = (buf_wall_start, is_first)
+                        post_message(TranscriptionStatus(active=True))
                         _transcript_future = _executor.submit(
                             transcriber.transcribe,
                             buf,
@@ -323,7 +326,11 @@ def run_audio_worker(
                 use_case.feed_audio(data)
 
             use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
-            flushed = use_case.flush()
+            post_message(TranscriptionStatus(active=True))
+            try:
+                flushed = use_case.flush()
+            finally:
+                post_message(TranscriptionStatus(active=False))
             if flushed:
                 all_segments.extend(flushed)
                 post_message(TranscriptChunk(segments=flushed))

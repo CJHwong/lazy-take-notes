@@ -14,6 +14,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     ModelDownloadProgress,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 
 log = logging.getLogger('ltn.file_worker')
@@ -105,14 +106,22 @@ def run_file_transcription(
         use_case.set_session_offset(offset / SAMPLE_RATE)
 
         if use_case.should_trigger():
-            segments = use_case.process_buffer()
+            post_message(TranscriptionStatus(active=True))
+            try:
+                segments = use_case.process_buffer()
+            finally:
+                post_message(TranscriptionStatus(active=False))
             if segments:
                 all_segments.extend(segments)
                 post_message(TranscriptChunk(segments=segments))
 
     # Flush remaining audio
     if not is_cancelled():
-        tail = use_case.flush()
+        post_message(TranscriptionStatus(active=True))
+        try:
+            tail = use_case.flush()
+        finally:
+            post_message(TranscriptionStatus(active=False))
         if tail:
             all_segments.extend(tail)
             post_message(TranscriptChunk(segments=tail))

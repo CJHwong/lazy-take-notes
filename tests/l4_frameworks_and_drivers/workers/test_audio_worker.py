@@ -15,6 +15,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
     _start_processed_recorder,  # noqa: PLC2701 -- testing private helper
@@ -239,6 +240,76 @@ class TestAudioWorkerTranscription:
         assert level_msgs[0].rms > 0
         # Return value includes segments
         assert len(result) >= 1
+
+    def test_transcription_posts_status_active_and_inactive(self):
+        """TranscriptionStatus(active=True) posted before transcription, False after."""
+        segments = [TranscriptSegment(text='hello', wall_start=0.0, wall_end=1.0)]
+        fake_transcriber = FakeTranscriber(segments=segments)
+
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = FakeAudioSource(chunks=[chunk, chunk])
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 4
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            chunk_duration=0.1,
+            overlap=0.0,
+            silence_threshold=0.001,
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        status_msgs = [m for m in messages if isinstance(m, TranscriptionStatus)]
+        # At least one active=True and one active=False
+        assert any(s.active for s in status_msgs), 'expected TranscriptionStatus(active=True)'
+        assert any(not s.active for s in status_msgs), 'expected TranscriptionStatus(active=False)'
+        # Every True must be followed by a False (paired)
+        active_count = sum(1 for s in status_msgs if s.active)
+        inactive_count = sum(1 for s in status_msgs if not s.active)
+        assert inactive_count >= active_count
+
+    def test_flush_posts_transcription_status(self):
+        """Flush at shutdown brackets transcription with TranscriptionStatus messages."""
+        segments = [TranscriptSegment(text='flushed', wall_start=0.0, wall_end=0.5)]
+        fake_transcriber = FakeTranscriber(segments=segments)
+
+        chunk = _make_nonsilent_chunk(SAMPLE_RATE * 3)
+        fake_source = FakeAudioSource(chunks=[chunk])
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 2
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            chunk_duration=10.0,
+            overlap=0.0,
+            silence_threshold=0.001,
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        status_msgs = [m for m in messages if isinstance(m, TranscriptionStatus)]
+        # Flush path should produce at least one True/False pair
+        assert any(s.active for s in status_msgs)
+        assert any(not s.active for s in status_msgs)
 
     def test_flush_posts_remaining_segments(self):
         """Feed audio that triggers transcription, then cancel — flush should produce segments."""

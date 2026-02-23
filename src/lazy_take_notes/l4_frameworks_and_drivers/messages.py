@@ -62,6 +62,14 @@ class QueryResult(Message):
         self.is_error = is_error
 
 
+class TranscriptionStatus(Message):
+    """Posted by workers when transcription inference starts/finishes."""
+
+    def __init__(self, active: bool) -> None:
+        super().__init__()
+        self.active = active
+
+
 class AudioLevel(Message):
     """Posted by audio worker with current mic RMS level (~10 Hz during recording)."""
 

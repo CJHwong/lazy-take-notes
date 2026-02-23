@@ -44,6 +44,7 @@ class StatusBar(Static):
     paused: reactive[bool] = reactive(False)
     stopped: reactive[bool] = reactive(False)
     audio_status: reactive[str] = reactive('')
+    transcribing: reactive[bool] = reactive(False)
     activity: reactive[str] = reactive('')
     download_percent: reactive[int] = reactive(-1)
     download_model: reactive[str] = reactive('')
@@ -153,6 +154,8 @@ class StatusBar(Static):
         if self.recording:
             wave = ''.join(_rms_to_char(v) for v in self._level_history)
             left_parts.append(wave)
+        if self.transcribing:
+            left_parts.append('⟳ Transcribing\u2026')
         if self.activity:
             left_parts.append(f'⟳ {self.activity}')
         left = ' │ '.join(left_parts)

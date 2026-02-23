@@ -12,6 +12,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     ModelDownloadProgress,
     TranscriptChunk,
+    TranscriptionStatus,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import run_file_transcription
 
@@ -169,6 +170,30 @@ class TestRunFileTranscription:
         progress = [m for m in messages if isinstance(m, ModelDownloadProgress)]
         assert len(progress) == 1
         assert progress[0].percent == 50
+
+    def test_transcription_status_posted_on_flush(self):
+        """Flush path brackets transcription with TranscriptionStatus active/inactive."""
+        mock_load, mock_resolver_cls, mock_transcriber = _make_mocks()
+        result, messages = self._run(mock_load, mock_resolver_cls, mock_transcriber)
+
+        status_msgs = [m for m in messages if isinstance(m, TranscriptionStatus)]
+        # At least one True/False pair from flush
+        assert any(s.active for s in status_msgs), 'expected TranscriptionStatus(active=True)'
+        assert any(not s.active for s in status_msgs), 'expected TranscriptionStatus(active=False)'
+
+    def test_transcription_status_posted_mid_loop(self):
+        """Mid-loop transcription brackets with TranscriptionStatus active/inactive."""
+        audio_26s = np.ones(16000 * 26, dtype=np.float32) * 0.1
+        mock_load, mock_resolver_cls, mock_transcriber = _make_mocks(audio=audio_26s)
+
+        result, messages = self._run(mock_load, mock_resolver_cls, mock_transcriber)
+
+        status_msgs = [m for m in messages if isinstance(m, TranscriptionStatus)]
+        active_count = sum(1 for s in status_msgs if s.active)
+        inactive_count = sum(1 for s in status_msgs if not s.active)
+        # Mid-loop trigger + flush = at least 2 pairs
+        assert active_count >= 2
+        assert inactive_count >= active_count
 
     def test_long_audio_triggers_mid_loop(self):
         """With 26s of audio, should_trigger fires mid-loop (default chunk_duration=25s)."""
