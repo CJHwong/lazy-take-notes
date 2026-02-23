@@ -1494,3 +1494,55 @@ class TestTranscriptionStatusHandler:
 
                 assert bar.transcribing is False
                 assert bar.activity == 'Digesting...'
+
+
+class TestConsentNoticeOnMount:
+    @pytest.mark.asyncio
+    async def test_consent_notice_shown_when_marker_absent(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            with patch(
+                'lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH',
+                tmp_path / '.consent_noticed',
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
+
+                    assert isinstance(app.screen, ConsentNotice)
+
+    @pytest.mark.asyncio
+    async def test_consent_notice_skipped_when_marker_exists(self, tmp_path):
+        marker = tmp_path / '.consent_noticed'
+        marker.touch()
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            with patch(
+                'lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH',
+                marker,
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
+
+                    assert not isinstance(app.screen, ConsentNotice)
+
+    @pytest.mark.asyncio
+    async def test_suppress_callback_creates_marker_file(self, tmp_path):
+        marker = tmp_path / '.consent_noticed'
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            with patch(
+                'lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH',
+                marker,
+            ):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
+
+                    assert isinstance(app.screen, ConsentNotice)
+
+                    await pilot.press('n')
+                    await pilot.pause()
+                    assert marker.exists()
+                    assert not isinstance(app.screen, ConsentNotice)

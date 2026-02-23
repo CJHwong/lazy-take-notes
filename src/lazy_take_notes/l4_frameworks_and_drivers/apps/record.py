@@ -9,12 +9,14 @@ from textual.binding import Binding
 
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
+from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioLevel,
     AudioWorkerStatus,
     ModelDownloadProgress,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 
 log = logging.getLogger('ltn.app')
@@ -72,6 +74,12 @@ class RecordApp(BaseApp):
         super().on_mount()
         self.query_one('#status-bar', StatusBar).mode_label = 'Record'
         self._start_audio_worker()
+        if not CONSENT_NOTICED_PATH.exists():
+            self.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
+
+    def _suppress_consent_notice(self) -> None:
+        CONSENT_NOTICED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONSENT_NOTICED_PATH.touch()
 
     def _start_audio_worker(self) -> None:  # pragma: no cover -- thin thread launcher; patched out in tests
         tc = self._config.transcription
