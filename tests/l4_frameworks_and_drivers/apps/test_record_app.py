@@ -1347,6 +1347,75 @@ class TestOpenSessionDir:
                     assert mock_popen.call_args[0][0][0] == 'explorer'
 
 
+class TestWarningStatus:
+    @pytest.mark.asyncio
+    async def test_warning_status_shows_notification(self, tmp_path):
+        """AudioWorkerStatus(warning) should call notify without changing recording state."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+
+                with patch.object(app, 'notify') as mock_notify:
+                    app.post_message(AudioWorkerStatus(status='warning', error='Audio signal lost'))
+                    await pilot.pause()
+                    mock_notify.assert_called_once()
+                    assert 'Audio signal lost' in mock_notify.call_args[0][0]
+
+                # Recording state should NOT change
+                bar = app.query_one('#status-bar', StatusBar)
+                assert bar.audio_status == 'warning'  # status updated
+                assert app._audio_stopped is False  # not stopped
+
+    @pytest.mark.asyncio
+    async def test_warning_without_error_is_noop(self, tmp_path):
+        """AudioWorkerStatus(warning) with empty error should not notify."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                with patch.object(app, 'notify') as mock_notify:
+                    app.post_message(AudioWorkerStatus(status='warning', error=''))
+                    await pilot.pause()
+                    mock_notify.assert_not_called()
+
+
+class TestUnexpectedWorkerStop:
+    @pytest.mark.asyncio
+    async def test_unexpected_stop_marks_stopped_and_triggers_digest(self, tmp_path):
+        """When worker stops without user pressing [s], app should auto-stop and trigger final digest."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                segments = [TranscriptSegment(text='data', wall_start=0.0, wall_end=1.0)]
+                app.post_message(TranscriptChunk(segments=segments))
+                await pilot.pause()
+
+                assert app._audio_stopped is False
+
+                with patch.object(app, '_run_digest_worker') as mock_digest:
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    await pilot.pause()
+
+                    assert app._audio_stopped is True
+                    bar = app.query_one('#status-bar', StatusBar)
+                    assert bar.stopped is True
+                    mock_digest.assert_called_once_with(is_final=True)
+
+    @pytest.mark.asyncio
+    async def test_unexpected_stop_no_content_does_not_trigger_digest(self, tmp_path):
+        """Unexpected stop with no buffered content should not trigger digest."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                with patch.object(app, '_run_digest_worker') as mock_digest:
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    await pilot.pause()
+
+                    assert app._audio_stopped is True
+                    mock_digest.assert_not_called()
+
+
 class TestBaseAppDefaults:
     """Exercise BaseApp methods that subclasses normally override."""
 

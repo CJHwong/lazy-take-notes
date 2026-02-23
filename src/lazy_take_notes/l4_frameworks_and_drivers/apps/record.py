@@ -146,7 +146,13 @@ class RecordApp(BaseApp):
             self._update_hints('recording')
         elif message.status == 'stopped':
             bar.recording = False
+            bar.stopped = True
             self._update_hints('stopped')
+            if not self._audio_stopped:
+                # Audio worker finished without user pressing [s] — stream may have
+                # exhausted or the worker exited on its own.  Transition cleanly.
+                log.warning('Audio worker stopped without explicit user stop — marking as stopped')
+                self._audio_stopped = True
             if self._pending_quit:
                 # Quit was triggered before recording started; flush is now complete.
                 has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
@@ -158,6 +164,9 @@ class RecordApp(BaseApp):
                 has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
                 if has_content and not self._final_digest_done:
                     self._run_digest_worker(is_final=True)
+        elif message.status == 'warning':
+            if message.error:
+                self.notify(message.error, severity='warning', timeout=10)
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._update_hints('error')

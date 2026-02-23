@@ -237,19 +237,52 @@ def run_audio_worker(
         log.info('Audio source opened: %s', type(audio_source).__name__)
         _worker_start = time.monotonic()
         _stats_last_time = _worker_start
+        _last_data_time = _worker_start
+        _silence_logged_at: float = 0.0
+        _consecutive_zero_chunks: int = 0
+        _zero_warned: bool = False
         try:
             while not is_cancelled():
                 if pause_event is not None and pause_event.is_set():
                     use_case.reset_buffer()
                     _collect_future()
                     time.sleep(0.1)
+                    _last_data_time = time.monotonic()  # don't count pause as silence
                     continue
 
                 _collect_future()
 
                 data = audio_source.read(timeout=0.1)
                 if data is None:
+                    gap = time.monotonic() - _last_data_time
+                    # Check if the audio source signals permanent exhaustion
+                    source_exhausted = getattr(audio_source, 'exhausted', False)
+                    if source_exhausted:
+                        elapsed = time.monotonic() - _worker_start
+                        log.error(
+                            'Audio stream exhausted after %.1fs (%d samples captured, %d segments transcribed)',
+                            elapsed,
+                            total_samples_fed,
+                            len(all_segments),
+                        )
+                        post_message(
+                            AudioWorkerStatus(
+                                status='error',
+                                error=f'Audio stream stopped unexpectedly after {elapsed:.0f}s',
+                            )
+                        )
+                        break
+                    if gap >= 5.0 and time.monotonic() - _silence_logged_at >= 5.0:
+                        log.warning(
+                            'No audio data for %.1fs (total_samples=%d, segments=%d)',
+                            gap,
+                            total_samples_fed,
+                            len(all_segments),
+                        )
+                        _silence_logged_at = time.monotonic()
                     continue
+
+                _last_data_time = time.monotonic()
 
                 if proc_rec_q is not None:
                     proc_rec_q.put(data)
@@ -264,6 +297,22 @@ def run_audio_worker(
                 _stats_rms_count += 1
                 _stats_zero_samples += int(np.count_nonzero(data == 0.0))
                 _stats_total_samples += len(data)
+
+                # Detect dead audio: all-zero signal for 5+ seconds
+                if chunk_rms == 0.0:
+                    _consecutive_zero_chunks += 1
+                    # 1600 samples per chunk at 16 kHz = 100ms → 50 chunks = 5s
+                    if _consecutive_zero_chunks == 50 and not _zero_warned:
+                        _zero_warned = True
+                        log.warning('Audio signal is all-zero for 5s — source may be dead')
+                        post_message(
+                            AudioWorkerStatus(status='warning', error='Audio signal lost — no sound from source')
+                        )
+                else:
+                    if _zero_warned and _consecutive_zero_chunks > 0:
+                        log.info('Audio signal recovered after %d zero chunks', _consecutive_zero_chunks)
+                        _zero_warned = False
+                    _consecutive_zero_chunks = 0
 
                 _level_accum.append(data)
                 now_abs = time.monotonic()

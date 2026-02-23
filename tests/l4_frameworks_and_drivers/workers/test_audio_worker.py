@@ -521,6 +521,179 @@ class TestAudioWorkerTranscription:
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)
 
+    def test_exhausted_source_breaks_loop_and_posts_error(self):
+        """When audio source signals exhaustion, worker should break, post error, and stop."""
+
+        class ExhaustibleSource:
+            """Audio source that signals exhaustion after producing all chunks."""
+
+            def __init__(self, chunks):
+                self._chunks = list(chunks)
+                self._idx = 0
+                self._exhausted = False
+                self.open_calls = []
+                self.close_calls = 0
+
+            @property
+            def exhausted(self):
+                return self._exhausted
+
+            def open(self, sr, ch):
+                self.open_calls.append((sr, ch))
+
+            def read(self, timeout=0.1):
+                if self._idx >= len(self._chunks):
+                    self._exhausted = True
+                    return None
+                chunk = self._chunks[self._idx]
+                self._idx += 1
+                return chunk
+
+            def close(self):
+                self.close_calls += 1
+
+        fake_transcriber = FakeTranscriber()
+        source = ExhaustibleSource(chunks=[_make_nonsilent_chunk(1600)])
+
+        messages: list = []
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: False,  # never cancels — exhaustion should break the loop
+            model_path='test-model',
+            language='zh',
+            transcriber=fake_transcriber,
+            audio_source=source,  # type: ignore[arg-type]
+        )
+
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert any(s.status == 'error' and 'unexpectedly' in s.error for s in statuses)
+        assert any(s.status == 'stopped' for s in statuses)
+        assert source.close_calls == 1
+
+    def test_dead_audio_posts_warning_after_50_zero_chunks(self):
+        """50 consecutive all-zero chunks should trigger a warning message."""
+        fake_transcriber = FakeTranscriber()
+        zero_chunks = [np.zeros(1600, dtype=np.float32) for _ in range(55)]
+        fake_source = FakeAudioSource(chunks=zero_chunks)
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 58
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        warnings = [s for s in statuses if s.status == 'warning']
+        assert len(warnings) == 1
+        assert 'signal lost' in warnings[0].error.lower() or 'no sound' in warnings[0].error.lower()
+
+    def test_dead_audio_warning_fires_only_once(self):
+        """Warning should not repeat while signal remains zero."""
+        fake_transcriber = FakeTranscriber()
+        # 100 zero chunks — way past the threshold
+        zero_chunks = [np.zeros(1600, dtype=np.float32) for _ in range(100)]
+        fake_source = FakeAudioSource(chunks=zero_chunks)
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 105
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        warnings = [s for s in statuses if s.status == 'warning']
+        assert len(warnings) == 1  # only one, not repeated
+
+    def test_dead_audio_recovery_allows_new_warning(self):
+        """After recovery from zero signal, a new zero run should trigger warning again."""
+        fake_transcriber = FakeTranscriber()
+        # 55 zeros, then 5 non-zeros, then 55 zeros
+        chunks: list[np.ndarray] = []
+        chunks.extend([np.zeros(1600, dtype=np.float32) for _ in range(55)])
+        chunks.extend([_make_nonsilent_chunk(1600) for _ in range(5)])
+        chunks.extend([np.zeros(1600, dtype=np.float32) for _ in range(55)])
+        fake_source = FakeAudioSource(chunks=chunks)
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 120
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        warnings = [s for s in statuses if s.status == 'warning']
+        assert len(warnings) == 2  # fired twice: once per zero run
+
+    def test_prolonged_no_data_logs_warning(self):
+        """When read() returns None for 5+ seconds, worker should log a warning."""
+        fake_transcriber = FakeTranscriber()
+        # One real chunk, then source returns None forever
+        fake_source = FakeAudioSource(chunks=[_make_nonsilent_chunk(1600)])
+
+        messages: list = []
+        _mono_calls = 0
+
+        def fake_monotonic():
+            nonlocal _mono_calls
+            _mono_calls += 1
+            # First 3 calls: _worker_start, _last_data_time (chunk), now_abs (chunk)
+            # After that: jump to 106s so gap = 6.0 triggers the warning branch
+            return 100.0 if _mono_calls <= 3 else 106.0
+
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 5
+
+        with patch('time.monotonic', fake_monotonic):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=is_cancelled,
+                model_path='test-model',
+                language='zh',
+                transcriber=fake_transcriber,
+                audio_source=fake_source,
+            )
+
+        # Worker should complete cleanly (the warning is logged, not posted)
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert any(s.status == 'stopped' for s in statuses)
+
     def test_periodic_stats_logged(self):
         """After 30s elapses, periodic stats line should execute."""
         fake_transcriber = FakeTranscriber()

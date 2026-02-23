@@ -27,9 +27,15 @@ class CoreAudioTapSource:
         self._proc: subprocess.Popen | None = None
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
         self._stop = threading.Event()
+        self._exhausted = threading.Event()
         self._thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
+
+    @property
+    def exhausted(self) -> bool:
+        """True when the audio stream ended unexpectedly (EOF without explicit stop)."""
+        return self._exhausted.is_set()
 
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform != 'darwin':
@@ -38,6 +44,7 @@ class CoreAudioTapSource:
             raise RuntimeError(f'Native binary not found: {_BINARY}\nRun: bash scripts/build_native.sh')
         self._error = None
         self._stop.clear()
+        self._exhausted.clear()
         self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
             [str(_BINARY)],
             stdout=subprocess.PIPE,
@@ -73,6 +80,7 @@ class CoreAudioTapSource:
             self._queue.put(np.frombuffer(raw, dtype=np.float32).copy())
         if not self._stop.is_set():
             log.warning('coreaudio-tap stdout EOF (binary stopped writing)')
+            self._exhausted.set()
         # Detect abnormal exit so read() can surface it instead of silently returning None.
         if not self._stop.is_set() and proc.poll() != 0:
             rc = proc.wait()

@@ -167,6 +167,11 @@ class BaseApp(TextualApp):
         bar.transcribing = message.active
 
     def on_transcript_chunk(self, message: TranscriptChunk) -> None:
+        log.debug(
+            'TranscriptChunk received: %d segments, total_all=%d',
+            len(message.segments),
+            len(self._controller.all_segments) + len(message.segments),
+        )
         panel = self.query_one('#transcript-panel', TranscriptPanel)
         panel.append_segments(message.segments)
 

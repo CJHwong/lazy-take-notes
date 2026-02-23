@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment, format_wall_time
+
+log = logging.getLogger('ltn.persist')
 
 
 class FilePersistenceGateway:
@@ -29,6 +32,14 @@ class FilePersistenceGateway:
         with path.open(mode, encoding='utf-8') as f:
             for line in lines:
                 f.write(line + '\n')
+        last_ts = format_wall_time(segments[-1].wall_start) if segments else '?'
+        log.debug(
+            'Wrote %d segments to %s (last_ts=%s, mode=%s)',
+            len(segments),
+            path.name,
+            last_ts,
+            mode,
+        )
         return path
 
     def save_digest_md(self, markdown: str, digest_number: int) -> Path:
