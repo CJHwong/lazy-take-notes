@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from typing import TYPE_CHECKING
@@ -10,6 +11,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
+
+log = logging.getLogger('ltn.audio.mixed')
 
 
 class MixedAudioSource:
@@ -40,6 +43,11 @@ class MixedAudioSource:
         self._threads: list[threading.Thread] = []
 
     def open(self, sample_rate: int, channels: int) -> None:
+        log.info(
+            'opening mixed source: mic=%s, system=%s',
+            type(self._mic).__name__,
+            type(self._system).__name__,
+        )
         self._mic.open(sample_rate, channels)
         self._system.open(sample_rate, channels)
         self._stop.clear()
@@ -90,6 +98,7 @@ class MixedAudioSource:
         return (mic + sys) * 0.5
 
     def close(self) -> None:
+        log.debug('closing mixed source')
         self._stop.set()
         self._mic.close()
         self._system.close()

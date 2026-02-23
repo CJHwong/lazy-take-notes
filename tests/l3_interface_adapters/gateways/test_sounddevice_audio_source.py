@@ -105,6 +105,24 @@ class TestSounddeviceAudioSource:
         mock_stream.close.assert_called_once()
         assert src._stream is None
 
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_callback_warns_on_portaudio_status(self, mock_stream_cls):
+        """Non-empty PortAudio status in callback triggers log.warning."""
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+        mock_stream_cls.return_value = MagicMock()
+
+        src = SounddeviceAudioSource()
+        src.open(16000, 1)
+
+        callback = mock_stream_cls.call_args.kwargs['callback']
+        fake_data = np.array([[0.1], [0.2]], dtype=np.float32)
+        callback(fake_data, 2, None, 'input overflow')
+
+        result = src.read(timeout=0.1)
+        assert result is not None
+        np.testing.assert_allclose(result, [0.1, 0.2], atol=1e-6)
+
     def test_close_when_none_stream_is_noop(self):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 

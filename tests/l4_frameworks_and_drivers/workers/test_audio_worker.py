@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import wave
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 
@@ -447,5 +447,40 @@ class TestAudioWorkerTranscription:
         # Recorder should have received at least the drain chunks
         wav_path = tmp_path / 'recording.wav'
         assert wav_path.exists()
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert any(s.status == 'stopped' for s in statuses)
+
+    def test_periodic_stats_logged(self):
+        """After 30s elapses, periodic stats line should execute."""
+        fake_transcriber = FakeTranscriber()
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = FakeAudioSource(chunks=[chunk])
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 1  # one loop iteration
+
+        # First monotonic call → _worker_start=100.  All later calls → 131 (31s gap > 30s interval).
+        _mono_calls = 0
+
+        def fake_monotonic():
+            nonlocal _mono_calls
+            _mono_calls += 1
+            return 100.0 if _mono_calls == 1 else 131.0
+
+        with patch('time.monotonic', fake_monotonic):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=is_cancelled,
+                model_path='test-model',
+                language='zh',
+                transcriber=fake_transcriber,
+                audio_source=fake_source,
+            )
+
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)

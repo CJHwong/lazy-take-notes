@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 
 import numpy as np
 import sounddevice as sd
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
+
+log = logging.getLogger('ltn.audio.sounddevice')
 
 
 class SounddeviceAudioSource:
@@ -18,7 +21,18 @@ class SounddeviceAudioSource:
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
 
     def open(self, sample_rate: int = SAMPLE_RATE, channels: int = 1) -> None:
+        device_info = sd.query_devices(kind='input')
+        log.info(
+            'opening sounddevice: device=%s, native_sr=%s, requested_sr=%d, channels=%d',
+            device_info.get('name', '?'),
+            device_info.get('default_samplerate', '?'),
+            sample_rate,
+            channels,
+        )
+
         def _callback(indata, frames, time_info, status):
+            if status:
+                log.warning('PortAudio status: %s', status)
             self._queue.put(indata.copy())
 
         self._stream = sd.InputStream(
@@ -47,6 +61,7 @@ class SounddeviceAudioSource:
 
     def close(self) -> None:
         if self._stream is not None:
+            log.debug('closing sounddevice stream')
             self._stream.stop()
             self._stream.close()
             self._stream = None

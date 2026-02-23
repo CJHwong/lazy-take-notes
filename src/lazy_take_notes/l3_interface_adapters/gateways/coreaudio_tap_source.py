@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import subprocess  # noqa: S404 -- intentional: fixed arg list, not shell=True
 import sys
@@ -11,6 +12,8 @@ from pathlib import Path
 import numpy as np
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
+
+log = logging.getLogger('ltn.audio.coreaudio')
 
 _BINARY = Path(__file__).parent.parent.parent / '_native' / 'bin' / 'coreaudio-tap'
 _BYTES_PER_SAMPLE = 4  # float32
@@ -25,6 +28,7 @@ class CoreAudioTapSource:
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
 
     def open(self, sample_rate: int, channels: int) -> None:
@@ -40,10 +44,24 @@ class CoreAudioTapSource:
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
         )
+        log.info('coreaudio-tap started (pid=%d, binary=%s)', self._proc.pid, _BINARY)
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
+        self._stderr_thread = threading.Thread(target=self._stderr_reader, daemon=True)
+        self._stderr_thread.start()
+
+    def _stderr_reader(self) -> None:
+        """Stream stderr from the Swift binary so diagnostic lines appear in the debug log."""
+        proc = self._proc
+        if proc is None or proc.stderr is None:  # pragma: no cover
+            return
+        for raw_line in proc.stderr:
+            line = raw_line.decode('utf-8', errors='replace').rstrip()
+            if line:
+                log.info('coreaudio-tap: %s', line)
 
     def _reader(self) -> None:
+        log.debug('stdout reader thread started')
         chunk_bytes = _CHUNK_FRAMES * _BYTES_PER_SAMPLE
         proc = self._proc
         if proc is None or proc.stdout is None:  # pragma: no cover -- guard for ScreenCaptureKit process state
@@ -53,6 +71,8 @@ class CoreAudioTapSource:
             if not raw:
                 break
             self._queue.put(np.frombuffer(raw, dtype=np.float32).copy())
+        if not self._stop.is_set():
+            log.warning('coreaudio-tap stdout EOF (binary stopped writing)')
         # Detect abnormal exit so read() can surface it instead of silently returning None.
         if not self._stop.is_set() and proc.poll() != 0:
             rc = proc.wait()
@@ -65,6 +85,7 @@ class CoreAudioTapSource:
             msg = f'coreaudio-tap exited with code {rc}'
             if stderr_text:
                 msg += f': {stderr_text}'
+            log.error(msg)
             self._error = RuntimeError(msg)
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
@@ -78,6 +99,7 @@ class CoreAudioTapSource:
     def close(self) -> None:
         self._stop.set()
         if self._proc is not None:
+            log.debug('closing coreaudio-tap (pid=%d)', self._proc.pid)
             self._proc.terminate()
             try:
                 self._proc.wait(timeout=3)
@@ -87,3 +109,6 @@ class CoreAudioTapSource:
         if self._thread is not None:
             self._thread.join(timeout=2)
             self._thread = None
+        if self._stderr_thread is not None:
+            self._stderr_thread.join(timeout=2)
+            self._stderr_thread = None

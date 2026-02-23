@@ -64,7 +64,7 @@ class RunDigestUseCase:
         try:
             resp = await self._llm.chat(model=model, messages=state.messages)
             raw = resp.content
-            log.debug('LLM raw response (%d chars): %s', len(raw), raw[:500])
+            log.debug('LLM raw response (%d chars): %s', len(raw), raw[:500].replace('\n', '\\n'))
 
             if not raw.strip():
                 state.consecutive_failures += 1

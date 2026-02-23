@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import struct
 import sys
 import time
@@ -138,6 +139,28 @@ class TestCoreAudioTapSource:
             time.sleep(0.05)
             with pytest.raises(RuntimeError, match='exited with code 42'):
                 src.read(timeout=0.1)
+            src.close()
+
+    def test_stderr_reader_logs_lines(self, monkeypatch, tmp_path):
+        """_stderr_reader thread should consume stderr lines from the Swift binary."""
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''  # EOF immediately
+        mock_proc.poll.return_value = 0  # clean exit
+        mock_proc.stdin = MagicMock()
+        mock_proc.pid = 12345
+        # BytesIO is iterable (yields lines) AND has .read() — matches real stderr
+        mock_proc.stderr = io.BytesIO(b'48000 Hz 2ch -> 16000 Hz 1ch\nready\n')
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.1)  # let stderr_reader thread consume lines
             src.close()
 
     def test_close_kills_on_timeout(self, monkeypatch, tmp_path):

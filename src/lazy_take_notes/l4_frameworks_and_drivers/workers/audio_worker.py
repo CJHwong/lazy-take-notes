@@ -170,6 +170,15 @@ def run_audio_worker(
     _last_level_post: float = 0.0
     _level_accum: list[np.ndarray] = []
 
+    # Periodic stats accumulators (30s intervals)
+    _stats_interval: float = 30.0
+    _stats_last_time: float = 0.0  # set after audio_source.open()
+    _stats_rms_sum: float = 0.0
+    _stats_rms_count: int = 0
+    _stats_zero_samples: int = 0
+    _stats_total_samples: int = 0
+    _stats_transcriptions: int = 0
+
     # Off-thread transcription: audio reading continues while subprocess infers.
     _executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     _transcript_future: concurrent.futures.Future | None = None
@@ -183,6 +192,7 @@ def run_audio_worker(
             raw_segs = _transcript_future.result()
             buf_start, was_first = _pending_meta  # type: ignore[misc]
             new_segs = use_case.apply_result(raw_segs, buf_start, was_first)
+            log.debug('transcription complete: %d segments', len(new_segs))
             if new_segs:
                 all_segments.extend(new_segs)
                 post_message(TranscriptChunk(segments=new_segs))
@@ -219,8 +229,12 @@ def run_audio_worker(
 
     # Start recording
     post_message(AudioWorkerStatus(status='recording'))
+    _worker_start: float = 0.0
     try:
         audio_source.open(SAMPLE_RATE, 1)
+        log.info('Audio source opened: %s', type(audio_source).__name__)
+        _worker_start = time.monotonic()
+        _stats_last_time = _worker_start
         try:
             while not is_cancelled():
                 if pause_event is not None and pause_event.is_set():
@@ -242,6 +256,13 @@ def run_audio_worker(
                 use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
                 use_case.feed_audio(data)
 
+                # Accumulate stats for periodic logging
+                chunk_rms = float(np.sqrt(np.mean(data**2)))
+                _stats_rms_sum += chunk_rms
+                _stats_rms_count += 1
+                _stats_zero_samples += int(np.count_nonzero(data == 0.0))
+                _stats_total_samples += len(data)
+
                 _level_accum.append(data)
                 now_abs = time.monotonic()
                 if now_abs - _last_level_post >= 0.1:
@@ -251,10 +272,29 @@ def run_audio_worker(
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
 
+                # Periodic stats every 30s
+                if now_abs - _stats_last_time >= _stats_interval:
+                    elapsed = now_abs - _worker_start
+                    rms_avg = _stats_rms_sum / _stats_rms_count if _stats_rms_count else 0.0
+                    zero_pct = (_stats_zero_samples / _stats_total_samples * 100) if _stats_total_samples else 0.0
+                    minutes, secs = divmod(int(elapsed), 60)
+                    log.info(
+                        'Audio stats [%d:%02d]: %d samples, rms=%.3f, zero=%.1f%%, transcriptions=%d',
+                        minutes,
+                        secs,
+                        total_samples_fed,
+                        rms_avg,
+                        zero_pct,
+                        _stats_transcriptions,
+                    )
+                    _stats_last_time = now_abs
+
                 if use_case.should_trigger() and _transcript_future is None:
                     prepared = use_case.prepare_buffer()
                     if prepared is not None:
                         buf, hints, buf_wall_start, is_first = prepared
+                        log.debug('transcription triggered: buffer=%d samples, first_chunk=%s', len(buf), is_first)
+                        _stats_transcriptions += 1
                         _pending_meta = (buf_wall_start, is_first)
                         _transcript_future = _executor.submit(
                             transcriber.transcribe,
@@ -290,6 +330,11 @@ def run_audio_worker(
 
         finally:
             audio_source.close()
+            log.info(
+                'Audio source closed: %d total samples, %d segments',
+                total_samples_fed,
+                len(all_segments),
+            )
 
     except Exception as e:
         log.error('Audio source error: %s', e, exc_info=True)
