@@ -31,3 +31,7 @@
     height: 6;
     border: tall $primary;
 }
+
+#context-input:focus {
+    height: 40%;
+}

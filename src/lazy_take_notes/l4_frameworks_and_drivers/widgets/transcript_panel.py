@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pyperclip
 from textual.binding import Binding
-from textual.widgets import RichLog
+from textual.widgets import RichLog, TextArea
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment, format_wall_time
 
@@ -36,10 +36,20 @@ class TranscriptPanel(RichLog):
             self._all_text.append(f'[{timestamp}] {seg.text}')
             self.write(f'[dim]\\[{timestamp}][/dim] {seg.text}')
 
+    def _session_context_suffix(self) -> str:
+        """Return session context text to append when copying, or empty string."""
+        try:
+            ctx = self.app.query_one('#context-input', TextArea)
+            if ctx.read_only and ctx.text.strip():
+                return f'\n\n---\nSession Context:\n{ctx.text.strip()}'
+        except Exception:  # noqa: S110 -- widget may not exist in all app modes
+            pass
+        return ''
+
     def action_copy_content(self) -> None:
         """Copy full transcript text to system clipboard."""
         if not self._all_text:
             self.app.notify('No transcript to copy', severity='warning', timeout=2)
             return
-        pyperclip.copy('\n'.join(self._all_text))
+        pyperclip.copy('\n'.join(self._all_text) + self._session_context_suffix())
         self.app.notify('Transcript copied', timeout=2)

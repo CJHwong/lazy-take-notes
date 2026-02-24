@@ -6,6 +6,7 @@ import logging
 import threading
 
 from textual.binding import Binding
+from textual.widgets import TextArea
 
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
@@ -161,6 +162,7 @@ class RecordApp(BaseApp):
                 # exhausted or the worker exited on its own.  Transition cleanly.
                 log.warning('Audio worker stopped without explicit user stop — marking as stopped')
                 self._audio_stopped = True
+                self.query_one('#context-input', TextArea).read_only = True
             if self._pending_quit:
                 # Quit was triggered before recording started; flush is now complete.
                 has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
@@ -231,6 +233,7 @@ class RecordApp(BaseApp):
         bar.stopped = True
         self._update_hints('stopped')
 
+        self.query_one('#context-input', TextArea).read_only = True
         self.notify('Recording stopped. You can still browse and run quick actions.', timeout=5)
 
     def action_force_digest(self) -> None:

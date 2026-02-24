@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pyperclip
 from textual.binding import Binding
-from textual.widgets import Markdown
+from textual.widgets import Markdown, TextArea
 
 
 class DigestPanel(Markdown):
@@ -44,10 +44,20 @@ class DigestPanel(Markdown):
         self._current_markdown = markdown
         self.update(markdown)
 
+    def _session_context_suffix(self) -> str:
+        """Return session context text to append when copying, or empty string."""
+        try:
+            ctx = self.app.query_one('#context-input', TextArea)
+            if ctx.read_only and ctx.text.strip():
+                return f'\n\n---\n\n**Session Context**\n\n{ctx.text.strip()}'
+        except Exception:  # noqa: S110 -- widget may not exist in all app modes
+            pass
+        return ''
+
     def action_copy_content(self) -> None:
         """Copy digest markdown to system clipboard."""
         if not self._current_markdown:
             self.app.notify('No digest to copy', severity='warning', timeout=2)
             return
-        pyperclip.copy(self._current_markdown)
+        pyperclip.copy(self._current_markdown + self._session_context_suffix())
         self.app.notify('Digest copied', timeout=2)

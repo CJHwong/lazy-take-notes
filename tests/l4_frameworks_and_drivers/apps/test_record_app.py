@@ -174,6 +174,9 @@ class TestStopRecording:
                 assert bar.recording is False
                 assert app._audio_stopped is True
 
+                ctx = app.query_one('#context-input', TextArea)
+                assert ctx.read_only is True
+
     @pytest.mark.asyncio
     async def test_pause_after_stop_is_noop(self, tmp_path):
         app = make_app(tmp_path)
@@ -625,6 +628,149 @@ class TestCopyEmptyTranscript:
                     await pilot.press('c')
                     await pilot.pause()
                     mock_clip.copy.assert_not_called()
+
+
+class TestCopyIncludesSessionContext:
+    @pytest.mark.asyncio
+    async def test_digest_copy_appends_session_context_when_stopped(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                # Set up digest content and session context
+                markdown = '## Topic\nTest content\n'
+                panel = app.query_one('#digest-panel', DigestPanel)
+                panel.update_digest(markdown)
+
+                ctx = app.query_one('#context-input', TextArea)
+                ctx.focus()
+                await pilot.pause()
+                ctx.insert('Speaker A = Alice')
+                await pilot.pause()
+
+                # Focus away from TextArea so [s] reaches the app binding
+                panel.focus()
+                await pilot.pause()
+
+                # Stop recording → context becomes read_only
+                await pilot.press('s')
+                await pilot.pause()
+                assert ctx.read_only is True
+                await pilot.pause()
+
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                    mock_clip.copy.assert_called_once()
+                    copied = mock_clip.copy.call_args[0][0]
+                    assert markdown in copied
+                    assert 'Session Context' in copied
+                    assert 'Speaker A = Alice' in copied
+
+    @pytest.mark.asyncio
+    async def test_transcript_copy_appends_session_context_when_stopped(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                # Set up transcript and session context
+                segments = [
+                    TranscriptSegment(text='Line one', wall_start=1.0, wall_end=2.0),
+                ]
+                panel = app.query_one('#transcript-panel', TranscriptPanel)
+                panel.append_segments(segments)
+
+                ctx = app.query_one('#context-input', TextArea)
+                ctx.focus()
+                await pilot.pause()
+                ctx.insert('Project X standup')
+                await pilot.pause()
+
+                # Focus away from TextArea so [s] reaches the app binding
+                panel.focus()
+                await pilot.pause()
+
+                # Stop recording → context becomes read_only
+                await pilot.press('s')
+                await pilot.pause()
+                await pilot.pause()
+
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                    mock_clip.copy.assert_called_once()
+                    copied = mock_clip.copy.call_args[0][0]
+                    assert 'Line one' in copied
+                    assert 'Session Context' in copied
+                    assert 'Project X standup' in copied
+
+    @pytest.mark.asyncio
+    async def test_digest_copy_excludes_context_before_stop(self, tmp_path):
+        """Before stopping, [c] should NOT include session context."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                markdown = '## Topic\nTest\n'
+                panel = app.query_one('#digest-panel', DigestPanel)
+                panel.update_digest(markdown)
+
+                ctx = app.query_one('#context-input', TextArea)
+                ctx.focus()
+                await pilot.pause()
+                ctx.insert('some context')
+                await pilot.pause()
+
+                # NOT stopped — context is still editable
+                assert ctx.read_only is False
+
+                panel.focus()
+                await pilot.pause()
+
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                    mock_clip.copy.assert_called_once_with(markdown)
+
+    @pytest.mark.asyncio
+    async def test_copy_excludes_empty_context_when_stopped(self, tmp_path):
+        """When stopped but context is empty, copy should not append separator."""
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                markdown = '## Topic\nTest\n'
+                panel = app.query_one('#digest-panel', DigestPanel)
+                panel.update_digest(markdown)
+
+                await pilot.press('s')
+                await pilot.pause()
+
+                panel.focus()
+                await pilot.pause()
+
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                    mock_clip.copy.assert_called_once_with(markdown)
+
+
+class TestSessionContextSuffixFallback:
+    """Cover the except branch in _session_context_suffix when #context-input is absent."""
+
+    @pytest.mark.asyncio
+    async def test_digest_panel_suffix_returns_empty_on_missing_widget(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                panel = app.query_one('#digest-panel', DigestPanel)
+                with patch.object(app, 'query_one', side_effect=Exception('no widget')):
+                    assert not panel._session_context_suffix()
+
+    @pytest.mark.asyncio
+    async def test_transcript_panel_suffix_returns_empty_on_missing_widget(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                panel = app.query_one('#transcript-panel', TranscriptPanel)
+                with patch.object(app, 'query_one', side_effect=Exception('no widget')):
+                    assert not panel._session_context_suffix()
 
 
 class TestModelDownloadProgress:
@@ -1401,6 +1547,9 @@ class TestUnexpectedWorkerStop:
                     bar = app.query_one('#status-bar', StatusBar)
                     assert bar.stopped is True
                     mock_digest.assert_called_once_with(is_final=True)
+
+                    ctx = app.query_one('#context-input', TextArea)
+                    assert ctx.read_only is True
 
     @pytest.mark.asyncio
     async def test_unexpected_stop_no_content_does_not_trigger_digest(self, tmp_path):
