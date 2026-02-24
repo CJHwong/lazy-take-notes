@@ -11,7 +11,7 @@ Terminal app for live transcription and note-taking. Records your mic, transcrib
 - Python 3.11+
 - A microphone
 - A transcription engine ([whisper.cpp](https://github.com/ggerganov/whisper.cpp) by default)
-- An LLM backend ([Ollama](https://ollama.com) by default)
+- An LLM backend ([Ollama](https://ollama.com) by default, or any [OpenAI-compatible API](https://platform.openai.com/))
 
 ## Install
 
@@ -25,6 +25,8 @@ uv sync
 # or pip
 pip install -e .
 ```
+
+**New to this?** See the [Getting Started guide](GETTING_STARTED.md) for step-by-step setup instructions.
 
 ## Run
 
@@ -63,6 +65,17 @@ Config lives in your OS config directory:
 Example `config.yaml`:
 
 ```yaml
+# LLM provider: 'ollama' (default) or 'openai' (any OpenAI-compatible API)
+llm_provider: ollama
+
+ollama:
+  host: "http://localhost:11434"
+
+# OpenAI-compatible provider (OpenAI, Gemini, Groq, Together, vLLM, etc.)
+# openai:
+#   api_key: sk-...               # or set OPENAI_API_KEY env var
+#   base_url: "https://api.openai.com/v1"
+
 transcription:
   model: "large-v3-turbo-q8_0"    # default whisper model
   models:                         # per-locale overrides
@@ -72,14 +85,12 @@ transcription:
   silence_threshold: 0.01
   pause_duration: 1.5
 digest:
-  model: "gpt-oss:120b-cloud"     # heavy model for periodic digests
+  model: "gpt-oss:20b"            # heavy model for periodic digests
   min_lines: 15
   min_interval: 60
   compact_token_threshold: 100000
 interactive:
-  model: "gpt-oss:20b-cloud"      # fast model for quick actions
-ollama:
-  host: "http://localhost:11434"
+  model: "gpt-oss:20b"            # fast model for quick actions
 output:
   directory: "./output"
   save_audio: true                # save recording.wav alongside transcript

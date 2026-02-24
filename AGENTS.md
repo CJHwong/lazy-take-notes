@@ -48,7 +48,7 @@ Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exer
 * **Architecture**: The project follows **Clean Architecture** (L1 Entities -> L2 Use Cases -> L3 Adapters -> L4 Frameworks).
 * **Test directory convention**: `tests/` mirrors the source tree one-to-one. Each source subdirectory has a corresponding test subdirectory (e.g. `l3_interface_adapters/gateways/` → `tests/l3_interface_adapters/gateways/`). New test files go in the matching subdir.
 * **Mocking Strategy**:
-* Do **NOT** use `@patch` on concrete libraries (e.g., `ollama`, `sounddevice`) in L2 tests.
+* Do **NOT** use `@patch` on concrete libraries (e.g., `ollama`, `openai`, `sounddevice`) in L2 tests.
 * **MUST** use the provided protocol-conforming fakes located in `tests/conftest.py` (e.g., `FakeLLMClient`, `FakeTranscriber`).
 * Library mocking is only permitted at the L3 (Adapter) boundary.
 
@@ -57,7 +57,7 @@ Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exer
 
 ```
 Audio Worker (thread)          Digest Task (async)          Query Task (async)
-  AudioSource + whisper          ollama heavy model           ollama fast model
+  AudioSource + whisper          LLM heavy model              LLM fast model
         │                              │                           │
         │ TranscriptChunk              │ DigestReady               │ QueryResult
         │ AudioWorkerStatus            │ DigestError               │
@@ -90,9 +90,9 @@ Selected at startup via template picker (all platforms):
 1. **Audio capture**: AudioSource → numpy float32 buffer → VAD trigger → whisper transcribe (off-thread) → TranscriptSegment
 2. **Transcript buffering**: App receives TranscriptChunk → updates panel, persists to disk, appends to DigestState.buffer
 3. **Digest trigger**: When buffer >= min_lines AND elapsed >= min_interval, or buffer >= max_lines (force) → launch async digest task
-4. **Digest cycle**: Template-driven prompt (with user session context) → ollama.AsyncClient.chat → JSON parse → DigestData → persist + update panel
+4. **Digest cycle**: Template-driven prompt (with user session context) → LLMClient.chat → JSON parse → DigestData → persist + update panel
 5. **Token compaction**: When prompt_tokens exceeds threshold, conversation history is compacted to 3 messages (system, compressed state, last response)
-6. **Quick actions**: Positional keybinding (1–5) → format prompt from template with current digest + recent transcript → ollama fast model → modal display
+6. **Quick actions**: Positional keybinding (1–5) → format prompt from template with current digest + recent transcript → LLM fast model → modal display
 7. **File transcription**: `lazy-take-notes transcribe <file>` → TemplatePicker (no audio mode) → ffmpeg decode → chunked transcription via `FileTranscriptionWorker` (thread) → streaming TUI output + auto-trigger final digest on completion
 8. **Session viewer**: `lazy-take-notes view` → SessionPicker (browse saved sessions) → ViewApp (read-only, standalone TextualApp — no controller/workers)
 9. **Recording**: When `save_audio: true`, WAV is written alongside output — mic mode records at native sample rate, system/mixed mode records processed 16 kHz int16
@@ -100,11 +100,11 @@ Selected at startup via template picker (all platforms):
 ## Design Decisions
 
 - **Thread worker for audio**: sounddevice and whisper.cpp are blocking C libraries, cannot run in asyncio. Transcription runs in a `ThreadPoolExecutor` within the audio worker thread.
-- **Async tasks for LLM**: ollama.AsyncClient integrates naturally with Textual's event loop. Digest and query are spawned on-demand with `exclusive=True` to prevent overlapping calls.
+- **Async tasks for LLM**: LLMClient (Ollama or OpenAI-compatible) integrates with Textual's event loop via async methods. Digest and query are spawned on-demand with `exclusive=True` to prevent overlapping calls.
 - **Single-threaded state**: DigestState lives on the controller, only mutated on event loop — no locks needed
 - **Template-driven**: All prompts, labels, and quick actions are defined in YAML templates — core logic is locale-agnostic
 - **Message passing**: Workers communicate with the App exclusively through Textual Messages — clean separation of concerns
-- **Transcriber** and **LLMClient** are fully isolated behind L2 ports — new implementations (FasterWhisper, OpenAI, etc.) can be added with zero L2 changes
+- **Transcriber** and **LLMClient** are fully isolated behind L2 ports — `OllamaLLMClient` and `OpenAICompatLLMClient` are interchangeable; new implementations can be added with zero L2 changes
 - **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` selects per platform + audio mode
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
