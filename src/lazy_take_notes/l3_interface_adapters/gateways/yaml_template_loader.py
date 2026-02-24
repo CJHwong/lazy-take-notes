@@ -30,6 +30,34 @@ def all_template_names() -> set[str]:
     return builtin_names() | user_template_names()
 
 
+def ensure_user_copy(name: str) -> Path:
+    """Return the user-templates path for *name*, copying the built-in if needed.
+
+    - Already a user template → return its path (no overwrite).
+    - Built-in only → copy YAML to user templates dir, return new path.
+    - Unknown → raise FileNotFoundError.
+    """
+    if name in user_template_names():
+        return USER_TEMPLATES_DIR / f'{name}.yaml'
+    if name not in builtin_names():
+        raise FileNotFoundError(f"Template not found: '{name}'")
+    USER_TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    source = _TEMPLATES_DIR / f'{name}.yaml'
+    dest = USER_TEMPLATES_DIR / f'{name}.yaml'
+    dest.write_text(source.read_text(encoding='utf-8'), encoding='utf-8')
+    return dest
+
+
+def delete_user_template(name: str) -> None:
+    """Delete a user template YAML file.
+
+    Raises ValueError if *name* is not a user template.
+    """
+    if name not in user_template_names():
+        raise ValueError(f"'{name}' is not a user template")
+    (USER_TEMPLATES_DIR / f'{name}.yaml').unlink()
+
+
 class YamlTemplateLoader:
     """Loads SessionTemplate from YAML files or built-in resources."""
 

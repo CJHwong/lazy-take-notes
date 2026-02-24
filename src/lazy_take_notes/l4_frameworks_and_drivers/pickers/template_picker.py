@@ -2,21 +2,113 @@
 
 from __future__ import annotations
 
+import os
+import platform
+import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell commands
+import sys
 from collections import defaultdict
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Key
-from textual.widgets import Input, ListItem, ListView, Markdown, Static
+from textual.containers import Center, Horizontal, Vertical, VerticalScroll
+from textual.events import AppFocus, Key
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, ListItem, ListView, Markdown, Static
 
 from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (
     YamlTemplateLoader,
     all_template_names,
+    builtin_names,
+    delete_user_template,
+    ensure_user_copy,
     user_template_names,
 )
+
+
+def resolve_editor() -> list[str] | None:
+    """Resolve the user's preferred editor command as an argv list.
+
+    Priority: $VISUAL → $EDITOR → platform fallback (open -t / xdg-open / notepad).
+    Returns None only if nothing is found (should never happen with platform fallback).
+    """
+    for var in ('VISUAL', 'EDITOR'):
+        value = os.environ.get(var, '').strip()
+        if value:
+            return value.split()
+    fallbacks = {
+        'darwin': ['open', '-t'],
+        'linux': ['xdg-open'],
+        'win32': ['notepad'],
+    }
+    plat = sys.platform if sys.platform in fallbacks else platform.system().lower()
+    return fallbacks.get(plat)
+
+
+class _ConfirmDeleteScreen(ModalScreen[bool]):
+    """Modal yes/no dialog for template deletion — overlays the picker."""
+
+    CSS = """
+    _ConfirmDeleteScreen {
+        align: center middle;
+    }
+    #confirm-dialog {
+        width: 50;
+        height: auto;
+        border: thick $error;
+        background: $surface;
+        padding: 1 2;
+    }
+    #confirm-msg {
+        width: 1fr;
+        text-align: center;
+        margin-bottom: 1;
+    }
+    #confirm-buttons {
+        width: 100%;
+        align-horizontal: center;
+    }
+    #confirm-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding('y', 'confirm', 'Yes'),
+        Binding('n', 'dismiss_no', 'No'),
+        Binding('escape', 'dismiss_no', 'Cancel'),
+        Binding('left', 'focus_previous', 'Focus previous', show=False),
+        Binding('right', 'focus_next', 'Focus next', show=False),
+    ]
+
+    def __init__(self, template_name: str) -> None:
+        super().__init__()
+        self._template_name = template_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id='confirm-dialog'):
+            yield Static(
+                f'Delete user template [bold]"{self._template_name}"[/bold]?',
+                id='confirm-msg',
+                markup=True,
+            )
+            with Center(id='confirm-buttons'):
+                yield Button('No (n)', id='confirm-no', variant='default')
+                yield Button('Yes (y)', id='confirm-yes', variant='error')
+
+    def on_mount(self) -> None:
+        self.query_one('#confirm-no', Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == 'confirm-yes')
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_dismiss_no(self) -> None:
+        self.dismiss(False)
+
 
 _MODE_LABELS = {
     AudioMode.MIC_ONLY: 'mic only [dim](voice)[/dim]',
@@ -132,6 +224,10 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         # Show audio mode selector when the caller opts in
         # (batch/--audio-file mode passes show_audio_mode=False since audio_mode is irrelevant)
         self._show_audio_mode = show_audio_mode
+        # Set after [e] edit — cleared on AppFocus reload so GUI editors
+        # (which return from subprocess.run immediately) get a second reload
+        # when the user switches back to the terminal.
+        self._pending_reload_name: str | None = None
 
     def compose(self) -> ComposeResult:
         count = len(self._templates)
@@ -151,7 +247,7 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             base += rf'  \[d] Audio: {label}'
             if self._audio_mode == AudioMode.MIX:
                 base += '  [dim]tip: use headphones if you hear echo[/dim]'
-        base += r'  \[Esc] Cancel'
+        base += r'  \[e] Edit  \[x] Delete  \[Esc] Cancel'
         return base
 
     def on_mount(self) -> None:
@@ -166,6 +262,14 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
                 self.action_cycle_audio_mode()
                 event.prevent_default()
                 return
+        if event.key == 'e' and not isinstance(self.focused, Input):
+            self.action_edit_template()
+            event.prevent_default()
+            return
+        if event.key == 'x' and not isinstance(self.focused, Input):
+            self.action_delete_template()
+            event.prevent_default()
+            return
         if event.key == 'down' and self.focused is self.query_one('#search-input', Input):
             self.query_one('#template-list', _TemplateListView).focus()
             event.prevent_default()
@@ -241,6 +345,83 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         lines.append(tmpl.system_prompt)
 
         self.query_one('#preview-md', Markdown).update('\n'.join(lines))
+
+    def action_edit_template(self) -> None:
+        """Open the highlighted template in $EDITOR (copies built-in to user dir first)."""
+        if self._current_name is None:
+            return
+        editor_argv = resolve_editor()
+        if editor_argv is None:
+            self.notify('No editor found ($VISUAL / $EDITOR)', severity='error')
+            return
+        path = ensure_user_copy(self._current_name)
+        edit_name = self._current_name
+        try:
+            with self.suspend():
+                subprocess.run([*editor_argv, str(path)], check=False)  # noqa: S603 -- argv built from env/platform, not user shell input
+        except SuspendNotSupported:
+            self.notify('Cannot open editor in this environment', severity='error')
+            return
+        # Reload now (covers terminal editors that block until close).
+        # For GUI editors that return immediately, AppFocus will re-reload.
+        self._pending_reload_name = edit_name
+        self._reload_after_edit(edit_name)
+
+    def on_app_focus(self, _event: AppFocus) -> None:
+        """Re-reload template when terminal regains focus (handles GUI editors)."""
+        if self._pending_reload_name is not None:
+            name = self._pending_reload_name
+            self._pending_reload_name = None
+            self._reload_after_edit(name)
+
+    def action_delete_template(self) -> None:
+        """Delete the highlighted user template after confirmation."""
+        if self._current_name is None:
+            return
+        if self._current_name not in self._user_names:
+            self.notify('Only user templates can be deleted', severity='warning')
+            return
+        self.push_screen(
+            _ConfirmDeleteScreen(self._current_name),
+            callback=self._on_delete_confirmed,
+        )
+
+    def _on_delete_confirmed(self, confirmed: bool | None) -> None:
+        if not confirmed or self._current_name is None:
+            return
+        name = self._current_name
+        try:
+            delete_user_template(name)
+        except ValueError:
+            self.notify(f'"{name}" is not a user template', severity='error')
+            return
+        self._user_names = user_template_names()
+        # If a built-in with the same name exists, reload it; otherwise drop it entirely
+        if name in builtin_names():
+            self._templates[name] = YamlTemplateLoader().load(name)
+        else:
+            del self._templates[name]
+        query = self.query_one('#search-input', Input).value.strip().lower()
+        self._rebuild_list(query)
+        self.notify(f'Deleted user template "{name}"')
+
+    def _reload_after_edit(self, name: str) -> None:
+        """Refresh template data after external edit, rebuild the list."""
+        self._user_names = user_template_names()
+        loader = YamlTemplateLoader()
+        try:
+            self._templates[name] = loader.load(name)
+        except Exception:  # noqa: BLE001 -- invalid YAML after user edit; surface as warning, don't crash
+            self.notify(f'Template "{name}" has invalid YAML — changes ignored', severity='warning')
+            return
+        query = self.query_one('#search-input', Input).value.strip().lower()
+        self._rebuild_list(query)
+        # Restore highlight to the edited template
+        list_view = self.query_one('#template-list', _TemplateListView)
+        for idx, child in enumerate(list_view.children):
+            if isinstance(child, TemplateItem) and child.template_name == name:
+                list_view.index = idx
+                break
 
     def action_cycle_audio_mode(self) -> None:
         if not self._show_audio_mode:
