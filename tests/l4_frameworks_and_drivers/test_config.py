@@ -18,11 +18,11 @@ class TestBuildAppConfig:
         assert cfg.transcription.overlap == 1.0
         assert cfg.transcription.silence_threshold == 0.01
         assert cfg.transcription.pause_duration == 1.5
-        assert cfg.digest.model == 'gpt-oss:120b-cloud'
+        assert cfg.digest.model == 'gpt-oss:20b'
         assert cfg.digest.min_lines == 15
         assert cfg.digest.min_interval == 60.0
         assert cfg.digest.compact_token_threshold == 100_000
-        assert cfg.interactive.model == 'gpt-oss:20b-cloud'
+        assert cfg.interactive.model == 'gpt-oss:20b'
         assert cfg.output.directory == './output'
         assert cfg.output.save_audio is True
 
@@ -37,7 +37,7 @@ class TestBuildAppConfig:
         assert cfg.transcription.models == {'zh': 'breeze-q8', 'ja': 'ja-model'}
         assert cfg.transcription.chunk_duration == 25.0  # default preserved
         assert cfg.digest.min_lines == 5
-        assert cfg.digest.model == 'gpt-oss:120b-cloud'  # default preserved
+        assert cfg.digest.model == 'gpt-oss:20b'  # default preserved
 
     def test_build_does_not_mutate_defaults(self):
         import copy

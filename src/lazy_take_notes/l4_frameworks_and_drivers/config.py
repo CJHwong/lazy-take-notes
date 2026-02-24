@@ -19,13 +19,13 @@ APP_CONFIG_DEFAULTS: dict = {
         'pause_duration': 1.5,
     },
     'digest': {
-        'model': 'gpt-oss:120b-cloud',
+        'model': 'gpt-oss:20b',
         'min_lines': 15,
         'min_interval': 60.0,
         'compact_token_threshold': 100_000,
     },
     'interactive': {
-        'model': 'gpt-oss:20b-cloud',
+        'model': 'gpt-oss:20b',
     },
     'output': {
         'directory': './output',
