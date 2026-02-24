@@ -131,7 +131,7 @@ def record(ctx, label):
     base_dir = Path(output_dir or config.output.directory)
     out_dir = _make_session_dir(base_dir, label)
 
-    missing_digest, missing_interactive = _preflight_ollama(infra, config)
+    missing_digest, missing_interactive = _preflight_llm(infra, config)
     _preflight_microphone()
 
     from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
@@ -192,7 +192,7 @@ def transcribe(ctx, audio_file, label):
     base_dir = Path(output_dir or config.output.directory)
     out_dir = _make_session_dir(base_dir, label)
 
-    missing_digest, missing_interactive = _preflight_ollama(infra, config)
+    missing_digest, missing_interactive = _preflight_llm(infra, config)
 
     from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         TranscribeApp,
@@ -245,15 +245,28 @@ def view(ctx):
         app.run()
 
 
-def _preflight_ollama(infra, config) -> tuple[list[str], list[str]]:
-    from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: preflight only runs when starting a session
-        OllamaLLMClient,
+def _preflight_llm(infra, config) -> tuple[list[str], list[str]]:
+    from lazy_take_notes.l2_use_cases.ports.llm_client import (  # noqa: PLC0415 -- deferred: preflight only runs when starting a session
+        LLMClient,
     )
 
-    client = OllamaLLMClient(host=infra.ollama.host)
+    client: LLMClient
+    if infra.llm_provider == 'openai':
+        from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred: only loaded for openai provider
+            OpenAICompatLLMClient,
+        )
+
+        client = OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
+    else:
+        from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: only loaded for ollama provider
+            OllamaLLMClient,
+        )
+
+        client = OllamaLLMClient(host=infra.ollama.host)
+
     ok, err = client.check_connectivity()
     if not ok:
-        click.echo(f'Warning: Ollama not reachable ({err}). Digests will fail.', err=True)
+        click.echo(f'Warning: LLM provider not reachable ({err}). Digests will fail.', err=True)
         click.echo('Transcript-only mode: audio capture will still work.', err=True)
         return [], []
 

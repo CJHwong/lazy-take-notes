@@ -45,7 +45,14 @@ class OllamaProviderConfig(BaseModel):
     host: str = 'http://localhost:11434'
 
 
+class OpenAIProviderConfig(BaseModel):
+    api_key: str | None = None  # None → SDK reads OPENAI_API_KEY env
+    base_url: str = 'https://api.openai.com/v1'
+
+
 class InfraConfig(BaseModel):
     """Groups all provider-specific settings outside the domain layer."""
 
+    llm_provider: str = 'ollama'  # 'ollama' | 'openai'
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
+    openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)

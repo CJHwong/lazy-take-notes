@@ -18,7 +18,6 @@ from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import FilePersistenceGateway
 from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
-from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import OllamaLLMClient
 from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import SubprocessWhisperTranscriber
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader
@@ -43,7 +42,7 @@ class DependencyContainer:
 
         _infra = infra or InfraConfig()
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
-        self.llm_client: LLMClient = OllamaLLMClient(host=_infra.ollama.host)
+        self.llm_client: LLMClient = self._build_llm_client(_infra)
         self.transcriber: Transcriber = SubprocessWhisperTranscriber()
         self.audio_source: AudioSource | None = self._build_audio_source(audio_mode) if audio_mode is not None else None
         self.model_resolver: ModelResolver = HfModelResolver()
@@ -85,6 +84,21 @@ class DependencyContainer:
         )
 
         return MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())
+
+    @staticmethod
+    def _build_llm_client(infra: InfraConfig) -> LLMClient:
+        if infra.llm_provider == 'openai':
+            from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred: only loaded when provider is openai
+                OpenAICompatLLMClient,
+            )
+
+            return OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
+
+        from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: only loaded when provider is ollama
+            OllamaLLMClient,
+        )
+
+        return OllamaLLMClient(host=infra.ollama.host)
 
     @staticmethod
     def config_loader() -> ConfigLoader:

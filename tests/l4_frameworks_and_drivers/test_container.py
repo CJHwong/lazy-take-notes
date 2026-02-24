@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
-from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
+from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
 
 
@@ -25,6 +25,19 @@ class TestDependencyContainer:
         assert container.persistence is not None
         assert container.llm_client is not None
         assert container.controller is not None
+
+    @patch('lazy_take_notes.l4_frameworks_and_drivers.container.SubprocessWhisperTranscriber')
+    @patch('lazy_take_notes.l4_frameworks_and_drivers.container.SounddeviceAudioSource')
+    def test_openai_provider_creates_openai_client(self, mock_audio, mock_whisper, tmp_path: Path):
+        from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import OpenAICompatLLMClient
+
+        config = build_app_config({})
+        template = YamlTemplateLoader().load('default_zh_tw')
+        infra = InfraConfig(llm_provider='openai')
+
+        container = DependencyContainer(config, template, tmp_path, infra=infra)
+
+        assert isinstance(container.llm_client, OpenAICompatLLMClient)
 
     def test_config_loader_factory(self):
         loader = DependencyContainer.config_loader()

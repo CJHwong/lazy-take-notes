@@ -11,8 +11,8 @@ from click.testing import CliRunner
 from lazy_take_notes import __version__
 from lazy_take_notes.l4_frameworks_and_drivers.cli import (
     _make_session_dir,  # noqa: PLC2701 -- testing private helper
+    _preflight_llm,  # noqa: PLC2701 -- testing private helper
     _preflight_microphone,  # noqa: PLC2701 -- testing private helper
-    _preflight_ollama,  # noqa: PLC2701 -- testing private helper
     cli,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
@@ -50,8 +50,8 @@ class TestMakeSessionDir:
         assert result.exists()
 
 
-class TestPreflightOllama:
-    def test_unreachable_returns_empty_lists(self):
+class TestPreflightLLM:
+    def test_ollama_unreachable_returns_empty_lists(self):
         mock_client = MagicMock()
         mock_client.check_connectivity.return_value = (False, 'Connection refused')
         mock_cls = MagicMock(return_value=mock_client)
@@ -62,12 +62,12 @@ class TestPreflightOllama:
         ):
             infra = InfraConfig()
             config = build_app_config({})
-            missing_d, missing_i = _preflight_ollama(infra, config)
+            missing_d, missing_i = _preflight_llm(infra, config)
 
         assert missing_d == []
         assert missing_i == []
 
-    def test_all_models_present_returns_empty(self):
+    def test_ollama_all_models_present_returns_empty(self):
         mock_client = MagicMock()
         mock_client.check_connectivity.return_value = (True, '')
         mock_client.check_models.return_value = []
@@ -79,12 +79,12 @@ class TestPreflightOllama:
         ):
             infra = InfraConfig()
             config = build_app_config({})
-            missing_d, missing_i = _preflight_ollama(infra, config)
+            missing_d, missing_i = _preflight_llm(infra, config)
 
         assert missing_d == []
         assert missing_i == []
 
-    def test_missing_digest_model_returned(self):
+    def test_ollama_missing_digest_model_returned(self):
         config = build_app_config({})
 
         mock_client = MagicMock()
@@ -97,9 +97,42 @@ class TestPreflightOllama:
             mock_cls,
         ):
             infra = InfraConfig()
-            missing_d, _missing_i = _preflight_ollama(infra, config)
+            missing_d, _missing_i = _preflight_llm(infra, config)
 
         assert missing_d == [config.digest.model]
+
+    def test_openai_provider_checks_connectivity(self):
+        mock_client = MagicMock()
+        mock_client.check_connectivity.return_value = (True, '')
+        mock_client.check_models.return_value = []
+        mock_cls = MagicMock(return_value=mock_client)
+
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.OpenAICompatLLMClient',
+            mock_cls,
+        ):
+            infra = InfraConfig(llm_provider='openai')
+            config = build_app_config({})
+            missing_d, missing_i = _preflight_llm(infra, config)
+
+        assert missing_d == []
+        assert missing_i == []
+
+    def test_openai_provider_unreachable_returns_empty_lists(self):
+        mock_client = MagicMock()
+        mock_client.check_connectivity.return_value = (False, 'Auth failed')
+        mock_cls = MagicMock(return_value=mock_client)
+
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.OpenAICompatLLMClient',
+            mock_cls,
+        ):
+            infra = InfraConfig(llm_provider='openai')
+            config = build_app_config({})
+            missing_d, missing_i = _preflight_llm(infra, config)
+
+        assert missing_d == []
+        assert missing_i == []
 
 
 class TestPreflightMicrophone:
@@ -205,7 +238,7 @@ class TestRecordSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
             patch(f'{_CLI}._preflight_microphone'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
@@ -236,7 +269,7 @@ class TestRecordSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
             patch(f'{_CLI}._preflight_microphone'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
@@ -317,7 +350,7 @@ class TestTranscribeSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_ollama', return_value=([], [])),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
