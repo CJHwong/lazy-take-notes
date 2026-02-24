@@ -16,6 +16,7 @@
 /// The restart logic will detect the zeros and restart the stream, clearing the
 /// injection flag so real audio resumes — verifying the full recovery path.
 
+import Accelerate
 import AVFoundation
 import CoreMedia
 import Foundation
@@ -32,6 +33,9 @@ let maxRestarts = 10
 /// Testing hook: SIGUSR1 sets this to true, causing the audio callback to zero
 /// out the output buffer.  Cleared automatically after a successful restart.
 var forceZeros = false
+
+// 64 KB buffered stdout — eliminates per-callback syscalls; flushed on exit.
+setvbuf(stdout, nil, _IOFBF, 65536)
 
 signal(SIGTERM) { _ in shouldStop = true }
 signal(SIGINT)  { _ in shouldStop = true }
@@ -50,11 +54,17 @@ stdinWatcher.resume()
 
 let contentSema = DispatchSemaphore(value: 0)
 var shareableContent: SCShareableContent? = nil
-SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { result, _ in
+SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { result, error in
+    if let error = error {
+        fputs("coreaudio-tap: SCShareableContent query failed: \(error.localizedDescription)\n", stderr)
+    }
     shareableContent = result
     contentSema.signal()
 }
-contentSema.wait()
+if contentSema.wait(timeout: .now() + 5.0) == .timedOut {
+    fputs("coreaudio-tap: SCShareableContent query timed out after 5 s\n", stderr)
+    exit(1)
+}
 
 guard shareableContent != nil, shareableContent!.displays.first != nil else {
     fputs("""
@@ -88,10 +98,13 @@ final class AudioOutputHandler: NSObject, SCStreamOutput, SCStreamDelegate {
     private var hadAudio = false
 
     /// Reset converter state so the next callback re-detects the system format.
-    func resetForRestart() {
-        converter = nil
-        inputSampleRate = 0
-        consecutiveZeroCallbacks = 0
+    /// Must dispatch onto the audio queue to serialize with audio callbacks.
+    func resetForRestart(on queue: DispatchQueue) {
+        queue.sync {
+            converter = nil
+            inputSampleRate = 0
+            consecutiveZeroCallbacks = 0
+        }
     }
 
     func stream(
@@ -107,7 +120,11 @@ final class AudioOutputHandler: NSObject, SCStreamOutput, SCStreamDelegate {
         // Lazy converter setup on first audio callback.
         if converter == nil, let fmtDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
             let inputFormat = AVAudioFormat(cmAudioFormatDescription: fmtDesc)
-            converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+            guard let conv = AVAudioConverter(from: inputFormat, to: outputFormat) else {
+                fputs("coreaudio-tap: AVAudioConverter init failed for \(inputFormat)\n", stderr)
+                return
+            }
+            converter = conv
             inputSampleRate = inputFormat.sampleRate
             fputs("coreaudio-tap: \(Int(inputFormat.sampleRate)) Hz \(inputFormat.channelCount)ch → 16000 Hz 1ch\n", stderr)
         }
@@ -130,11 +147,16 @@ final class AudioOutputHandler: NSObject, SCStreamOutput, SCStreamDelegate {
         else { return }
 
         var inputConsumed = false
-        _ = conv.convert(to: dstBuf, error: nil) { _, status in
+        var convertError: NSError? = nil
+        let convertStatus = conv.convert(to: dstBuf, error: &convertError) { _, status in
             if inputConsumed { status.pointee = .noDataNow; return nil }
             inputConsumed = true
             status.pointee = .haveData
             return srcBuf
+        }
+        if convertStatus == .error {
+            fputs("coreaudio-tap: convert failed: \(convertError?.localizedDescription ?? "unknown")\n", stderr)
+            return
         }
 
         guard dstBuf.frameLength > 0, let channelData = dstBuf.floatChannelData else { return }
@@ -145,27 +167,24 @@ final class AudioOutputHandler: NSObject, SCStreamOutput, SCStreamDelegate {
             for i in 0..<count { channelData[0][i] = 0 }
         }
 
-        // Write raw float32 bytes to stdout.
+        // Write raw float32 bytes to stdout (uses the 64 KB setvbuf buffer).
         let byteCount = Int(dstBuf.frameLength) * MemoryLayout<Float>.size
-        channelData[0].withMemoryRebound(to: UInt8.self, capacity: byteCount) { ptr in
-            FileHandle.standardOutput.write(Data(bytes: ptr, count: byteCount))
-        }
+        fwrite(channelData[0], 1, byteCount, stdout)
 
         // --- Dead-audio detection ---
-        // Find the peak absolute amplitude in the output buffer.
+        // SIMD peak absolute amplitude via Accelerate.
         var maxAmp: Float = 0
-        let frameCount = Int(dstBuf.frameLength)
-        for i in 0..<frameCount {
-            let a = abs(channelData[0][i])
-            if a > maxAmp { maxAmp = a }
-        }
+        let frameCount = vDSP_Length(dstBuf.frameLength)
+        vDSP_maxmgv(channelData[0], 1, &maxAmp, frameCount)
 
         if maxAmp < 1e-7 {
             consecutiveZeroCallbacks += 1
-            if hadAudio && consecutiveZeroCallbacks >= zeroThreshold && restartCount < maxRestarts {
-                fputs("coreaudio-tap: dead audio (\(consecutiveZeroCallbacks) zero callbacks) — restart \(restartCount + 1)/\(maxRestarts)\n", stderr)
-                shouldRestart = true
-                consecutiveZeroCallbacks = 0
+            if hadAudio && consecutiveZeroCallbacks >= zeroThreshold {
+                if restartCount < maxRestarts {
+                    fputs("coreaudio-tap: dead audio (\(consecutiveZeroCallbacks) zero callbacks) — restart \(restartCount + 1)/\(maxRestarts)\n", stderr)
+                    shouldRestart = true
+                }
+                consecutiveZeroCallbacks = 0  // always reset to prevent unbounded growth
             }
         } else {
             if consecutiveZeroCallbacks > 0 {
@@ -195,11 +214,17 @@ func createCaptureStream(
     // Query current display layout (may have changed since last start).
     let sema = DispatchSemaphore(value: 0)
     var content: SCShareableContent? = nil
-    SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { result, _ in
+    SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { result, error in
+        if let error = error {
+            fputs("coreaudio-tap: SCShareableContent query failed: \(error.localizedDescription)\n", stderr)
+        }
         content = result
         sema.signal()
     }
-    sema.wait()
+    if sema.wait(timeout: .now() + 5.0) == .timedOut {
+        fputs("coreaudio-tap: SCShareableContent query timed out in createCaptureStream\n", stderr)
+        return nil
+    }
 
     guard let c = content, let display = c.displays.first else {
         fputs("coreaudio-tap: no display found during stream creation\n", stderr)
@@ -236,7 +261,10 @@ func createCaptureStream(
         startErr = err
         startSema.signal()
     }
-    startSema.wait()
+    if startSema.wait(timeout: .now() + 5.0) == .timedOut {
+        fputs("coreaudio-tap: startCapture timed out after 5 s\n", stderr)
+        return nil
+    }
 
     if let err = startErr {
         fputs("coreaudio-tap: startCapture failed: \(err)\n", stderr)
@@ -269,15 +297,17 @@ while !shouldStop {
         restartCount += 1
         fputs("coreaudio-tap: restarting stream (attempt \(restartCount)/\(maxRestarts))\n", stderr)
 
-        // Tear down the dead stream.
+        // Tear down the dead stream (proceed even if stop hangs).
         let stopSema = DispatchSemaphore(value: 0)
         captureStream.stopCapture { _ in stopSema.signal() }
-        stopSema.wait()
+        if stopSema.wait(timeout: .now() + 3.0) == .timedOut {
+            fputs("coreaudio-tap: stopCapture timed out during restart — proceeding\n", stderr)
+        }
 
         // Create a fresh stream — reconnects to the (still alive) system audio.
         if let newStream = createCaptureStream(handler: audioHandler, queue: audioQueue) {
             captureStream = newStream
-            audioHandler.resetForRestart()
+            audioHandler.resetForRestart(on: audioQueue)
             forceZeros = false  // clear test injection after successful restart
             fputs("coreaudio-tap: stream restarted successfully\n", stderr)
         } else {
@@ -290,6 +320,12 @@ while !shouldStop {
 
 // MARK: - Cleanup
 
-let stopSema = DispatchSemaphore(value: 0)
-captureStream.stopCapture { _ in stopSema.signal() }
-stopSema.wait()
+stdinWatcher.cancel()
+
+let finalStopSema = DispatchSemaphore(value: 0)
+captureStream.stopCapture { _ in finalStopSema.signal() }
+if finalStopSema.wait(timeout: .now() + 3.0) == .timedOut {
+    fputs("coreaudio-tap: final stopCapture timed out — exiting anyway\n", stderr)
+}
+
+fflush(stdout)
