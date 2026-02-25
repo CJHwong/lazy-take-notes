@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pyperclip
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
@@ -51,7 +52,7 @@ class QueryModal(ModalScreen[None]):
     }
     """
 
-    BINDINGS = [('escape', 'dismiss', 'Close')]
+    BINDINGS = [('escape', 'dismiss', 'Close'), ('c', 'copy_body', 'Copy')]
 
     def __init__(self, title: str, body: str, is_error: bool = False, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -63,8 +64,13 @@ class QueryModal(ModalScreen[None]):
         if self._is_error:
             self.add_class('error')
 
+    def action_copy_body(self) -> None:
+        """Copy the raw markdown body to system clipboard."""
+        pyperclip.copy(self._body)
+        self.app.notify('Copied to clipboard', timeout=2)
+
     def compose(self) -> ComposeResult:
         with VerticalScroll():
             yield Static(self._title, id='query-title')
             yield Markdown(self._body, id='query-body')
-            yield Static('Press Escape to close', id='query-hint')
+            yield Static('[Esc] Close  [c] Copy', id='query-hint')
