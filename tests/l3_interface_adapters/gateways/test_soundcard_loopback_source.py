@@ -247,7 +247,7 @@ class TestSoundCardLoopbackSource:
 class TestPatchSoundcardNumpy2Compat:
     """Tests for the numpy 2.x monkey-patch on soundcard's mediafoundation backend."""
 
-    def test_shim_redirects_fromstring_to_frombuffer_on_win32(self, monkeypatch):
+    def test_shim_redirects_fromstring_with_copy_on_win32(self, monkeypatch):
         monkeypatch.setattr(sys, 'platform', 'win32')
 
         fake_mf = MagicMock()
@@ -260,11 +260,18 @@ class TestPatchSoundcardNumpy2Compat:
         _patch_soundcard_numpy2_compat()
 
         shim = fake_mf.numpy
-        # fromstring should now be frombuffer
-        assert shim.fromstring is np.frombuffer
         # other attributes pass through unchanged
         assert shim.array is np.array
         assert shim.float32 is np.float32
+
+        # fromstring must return a COPY (not a view) — frombuffer returns a view
+        # into the original buffer, but fromstring always copied.  Without .copy(),
+        # WASAPI capture buffers become dangling pointers after _capture_release().
+        raw = b'\x00\x00\x80\x3f\x00\x00\x00\x40'  # [1.0, 2.0] as float32
+        compat_fromstring = shim.fromstring
+        result = compat_fromstring(raw, dtype='float32')  # type: ignore[no-matching-overload]  -- shim, not real numpy
+        np.testing.assert_array_equal(result, np.array([1.0, 2.0], dtype=np.float32))
+        assert result.flags.owndata  # must own its data (copy, not view)
 
     def test_noop_on_non_windows(self, monkeypatch):
         monkeypatch.setattr(sys, 'platform', 'linux')
