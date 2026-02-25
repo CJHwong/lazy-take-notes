@@ -34,6 +34,12 @@ class TestRmsToChar:
         # ~0.3 RMS ≈ -10 dB → highest bar
         assert _rms_to_char(0.3) == '█'
 
+    def test_nan_returns_lowest_bar(self):
+        assert _rms_to_char(float('nan')) == '▁'
+
+    def test_inf_returns_highest_bar(self):
+        assert _rms_to_char(float('inf')) == '█'
+
     def test_monotonically_increasing(self):
         levels = [0.001, 0.01, 0.05, 0.1, 0.3]
         chars = [_rms_to_char(r) for r in levels]

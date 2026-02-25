@@ -19,8 +19,10 @@ _DB_RANGE = 49.0  # -60 to -11
 
 
 def _rms_to_char(rms: float) -> str:
-    if rms < 1e-7:
+    if math.isnan(rms) or rms < 1e-7:
         return _WAVE_CHARS[0]
+    if math.isinf(rms):
+        return _WAVE_CHARS[7]
     db = 20.0 * math.log10(rms)
     idx = int((db - _DB_FLOOR) / _DB_RANGE * 7)
     return _WAVE_CHARS[min(max(idx, 0), 7)]

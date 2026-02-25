@@ -319,6 +319,8 @@ def run_audio_worker(
                 if now_abs - _last_level_post >= 0.1:
                     window = np.concatenate(_level_accum)
                     rms = float(np.sqrt(np.mean(window**2)))
+                    if not np.isfinite(rms):
+                        rms = 0.0
                     _level_accum.clear()
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs

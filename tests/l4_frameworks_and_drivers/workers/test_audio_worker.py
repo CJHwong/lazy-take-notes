@@ -657,6 +657,33 @@ class TestAudioWorkerTranscription:
         warnings = [s for s in statuses if s.status == 'warning']
         assert len(warnings) == 2  # fired twice: once per zero run
 
+    def test_nan_audio_posts_zero_level(self):
+        """NaN audio data should result in AudioLevel(rms=0.0), not crash or propagate NaN."""
+        fake_transcriber = FakeTranscriber()
+        nan_chunk = np.full(1600, float('nan'), dtype=np.float32)
+        fake_source = FakeAudioSource(chunks=[nan_chunk])
+
+        messages: list = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 2
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        level_msgs = [m for m in messages if isinstance(m, AudioLevel)]
+        assert len(level_msgs) >= 1
+        assert level_msgs[0].rms == 0.0
+
     def test_prolonged_no_data_logs_warning(self):
         """When read() returns None for 5+ seconds, worker should log a warning."""
         fake_transcriber = FakeTranscriber()
