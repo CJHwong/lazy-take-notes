@@ -30,9 +30,8 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.0",
     "sounddevice>=0.5.0",
-    # TODO: revert to soundcard>=0.4.0 once PyPI release includes numpy 2.x fix
-    # (mediafoundation.py uses removed numpy.fromstring binary mode; fixed on master, unreleased)
-    "soundcard @ git+https://github.com/bastibe/SoundCard.git@045e65a96112111f2cc86a033761645784197486",
+    # TODO: remove _patch_soundcard_numpy2_compat() when soundcard >0.4.5 ships the numpy 2.x fix
+    "soundcard>=0.4.5",
     "numpy>=1.24.0",
     "huggingface_hub>=0.20.0",
     "pyperclip>=1.8",
@@ -55,9 +54,6 @@ dev = [
     "textual-dev>=1.0",
     "import-linter>=2.0",
 ]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lazy_take_notes"]

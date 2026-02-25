@@ -11,6 +11,38 @@ import soundcard as sc  # noqa: PLC0415 -- top-level import for L3 adapter; forb
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 
+
+def _patch_soundcard_numpy2_compat() -> None:
+    """Monkey-patch soundcard 0.4.5 for numpy 2.x on Windows.
+
+    mediafoundation.py calls numpy.fromstring(buf, dtype='float32') which was
+    removed in numpy 2.0.  Upstream fix exists on master but is unreleased.
+    This shim redirects the call to numpy.frombuffer.
+
+    Remove when soundcard ships a PyPI release with the fix (>0.4.5).
+    """
+    if sys.platform != 'win32':
+        return
+    try:
+        from soundcard import mediafoundation as _mf  # noqa: PLC0415 -- deferred: Windows only
+    except ImportError:
+        return
+
+    _real_numpy = _mf.numpy
+
+    class _Numpy2CompatShim:
+        __slots__ = ()
+
+        def __getattr__(self, name: str) -> object:
+            if name == 'fromstring':
+                return _real_numpy.frombuffer
+            return getattr(_real_numpy, name)
+
+    _mf.numpy = _Numpy2CompatShim()
+
+
+_patch_soundcard_numpy2_compat()
+
 _CHUNK_FRAMES = SAMPLE_RATE // 10  # 100ms chunks — matches CoreAudioTapSource cadence
 
 

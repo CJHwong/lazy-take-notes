@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 import time
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -19,6 +20,7 @@ sys.modules.setdefault('soundcard.pulseaudio', _sc_stub)
 import lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source as loopback_mod  # noqa: E402 -- must follow soundcard stub
 from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import (  # noqa: E402 -- must follow soundcard stub
     SoundCardLoopbackSource,
+    _patch_soundcard_numpy2_compat,  # noqa: PLC2701 -- testing private patch function
 )
 
 
@@ -240,3 +242,49 @@ class TestSoundCardLoopbackSource:
         # close() calls _win_com_uninit (com_owner), reader finally calls _win_com_uninit
         assert mock_ole32.CoUninitialize.call_count >= 2
         assert src._com_owner is False
+
+
+class TestPatchSoundcardNumpy2Compat:
+    """Tests for the numpy 2.x monkey-patch on soundcard's mediafoundation backend."""
+
+    def test_shim_redirects_fromstring_to_frombuffer_on_win32(self, monkeypatch):
+        monkeypatch.setattr(sys, 'platform', 'win32')
+
+        fake_mf = MagicMock()
+        fake_mf.numpy = np  # real numpy — the patch wraps it
+        # `from soundcard import mediafoundation` resolves via getattr on the
+        # parent MagicMock, NOT sys.modules — so we must set both.
+        monkeypatch.setattr(_sc_stub, 'mediafoundation', fake_mf)
+        monkeypatch.setitem(sys.modules, 'soundcard.mediafoundation', fake_mf)
+
+        _patch_soundcard_numpy2_compat()
+
+        shim = fake_mf.numpy
+        # fromstring should now be frombuffer
+        assert shim.fromstring is np.frombuffer
+        # other attributes pass through unchanged
+        assert shim.array is np.array
+        assert shim.float32 is np.float32
+
+    def test_noop_on_non_windows(self, monkeypatch):
+        monkeypatch.setattr(sys, 'platform', 'linux')
+
+        fake_mf = MagicMock()
+        original_numpy = fake_mf.numpy
+        monkeypatch.setattr(_sc_stub, 'mediafoundation', fake_mf)
+        monkeypatch.setitem(sys.modules, 'soundcard.mediafoundation', fake_mf)
+
+        _patch_soundcard_numpy2_compat()
+
+        # numpy attribute must not be replaced
+        assert fake_mf.numpy is original_numpy
+
+    def test_survives_missing_mediafoundation(self, monkeypatch):
+        monkeypatch.setattr(sys, 'platform', 'win32')
+
+        # Replace MagicMock stub with a bare module that genuinely lacks mediafoundation
+        bare_sc = types.ModuleType('soundcard')
+        monkeypatch.setitem(sys.modules, 'soundcard', bare_sc)
+
+        # Must not raise — graceful no-op when mediafoundation isn't installed
+        _patch_soundcard_numpy2_compat()
