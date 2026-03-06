@@ -177,7 +177,7 @@ def record(ctx, label):
 
 
 @cli.command()
-@click.argument('audio_file', type=click.Path(exists=True, dir_okay=False))
+@click.argument('audio_file', type=click.Path(dir_okay=False), required=False, default=None)
 @click.option(
     '-l',
     '--label',
@@ -187,6 +187,16 @@ def record(ctx, label):
 @click.pass_context
 def transcribe(ctx, audio_file, label):
     """Transcribe an audio file with streaming TUI and generate a final digest."""
+    if audio_file is None:
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import FilePicker  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        selected = FilePicker().run()
+        if selected is None:
+            return
+        audio_file = str(selected)
+    if not Path(audio_file).is_file():
+        click.echo(f'Error: {audio_file!r} is not a valid file.', err=True)
+        sys.exit(1)
+
     from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         TemplatePicker,
     )
