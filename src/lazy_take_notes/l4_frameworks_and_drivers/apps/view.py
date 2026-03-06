@@ -6,11 +6,13 @@ import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager laun
 import sys
 from pathlib import Path
 
+from textual import work
 from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Label, Static
 
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
@@ -21,6 +23,53 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import T
 CSS_PATH = 'app.tcss'
 
 
+class DeleteConfirmModal(ModalScreen[bool]):
+    """Confirmation dialog before deleting a session."""
+
+    CSS = """
+    DeleteConfirmModal {
+        align: center middle;
+    }
+    #confirm-box {
+        width: 50;
+        height: auto;
+        padding: 1 2;
+        border: solid $error;
+        background: $surface;
+    }
+    #confirm-buttons { height: auto; }
+    """
+
+    BINDINGS = [
+        Binding('y', 'confirm', 'Delete', show=True),
+        Binding('n', 'cancel_modal', 'Cancel', show=True),
+        Binding('escape', 'cancel_modal', 'Cancel', show=False),
+    ]
+
+    def __init__(self, session_name: str) -> None:
+        super().__init__()
+        self._session_name = session_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id='confirm-box'):
+            yield Label(
+                f'Delete session\n[bold]{self._session_name}[/bold]?\nThis cannot be undone.\n[dim]\\[y] Delete  \\[n] Cancel[/dim]',
+                markup=True,
+            )
+            with Horizontal(id='confirm-buttons'):
+                yield Button('Delete', variant='error', id='btn-delete')
+                yield Button('Cancel', id='btn-cancel')
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == 'btn-delete')
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel_modal(self) -> None:
+        self.dismiss(False)
+
+
 class ViewApp(TextualApp):
     """Read-only TUI for browsing a saved session's transcript and digest."""
 
@@ -29,6 +78,7 @@ class ViewApp(TextualApp):
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
         Binding('o', 'open_session_dir', 'Open', show=False),
+        Binding('d', 'delete_session', 'Delete', show=False),
         Binding('tab', 'focus_next', 'Switch Panel', show=False),
     ]
 
@@ -48,7 +98,7 @@ class ViewApp(TextualApp):
     def on_mount(self) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'View'
-        bar.keybinding_hints = r'\[c] copy  \[o] open  \[Tab] switch  \[q] back'
+        bar.keybinding_hints = r'\[c] copy  \[o] open  \[d] delete  \[Tab] switch  \[q] back'
 
         # Load transcript — write raw lines directly; the saved file already
         # contains timestamps so we must NOT go through append_segments()
@@ -81,6 +131,16 @@ class ViewApp(TextualApp):
         else:
             opener = 'xdg-open'
         subprocess.Popen([opener, str(self._session_dir)])  # noqa: S603 -- fixed arg list, not shell=True
+
+    @work
+    async def action_delete_session(self) -> None:
+        confirmed = await self.push_screen_wait(
+            DeleteConfirmModal(self._session_dir.name)
+        )
+        if confirmed:
+            import shutil
+            shutil.rmtree(self._session_dir)
+            self.exit()
 
     def action_quit_app(self) -> None:
         self.exit()

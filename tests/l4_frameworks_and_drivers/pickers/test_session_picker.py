@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from textual.widgets import Static
+
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (
+    DeleteConfirmModal,
     SessionPicker,
     discover_sessions,
 )
@@ -203,3 +206,112 @@ class TestSessionPicker:
 
             md = picker.query_one('#session-preview-md', Markdown)
             assert md is not None
+
+
+class TestSessionPickerFooter:
+    @pytest.mark.asyncio
+    async def test_footer_includes_delete_hint(self, tmp_path: Path):
+        _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            footer = picker.query_one('#session-footer', Static)
+            assert 'Delete' in str(footer.render())
+
+
+class TestDeleteSession:
+    @pytest.mark.asyncio
+    async def test_d_opens_confirm_modal(self, tmp_path: Path):
+        _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            # Focus the list first (search input has focus by default)
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            assert isinstance(picker.screen, DeleteConfirmModal)
+
+    @pytest.mark.asyncio
+    async def test_delete_confirmed_removes_dir_and_updates_list(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.click('#btn-delete')
+            await pilot.pause()
+            assert not session_dir.exists()
+            assert picker._sessions == []
+
+    @pytest.mark.asyncio
+    async def test_delete_cancelled_keeps_dir(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.click('#btn-cancel')
+            await pilot.pause()
+            assert session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_y_confirms_delete(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('y')
+            await pilot.pause()
+            assert not session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_n_cancels_delete(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            assert session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_escape_cancels_delete(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('escape')
+            await pilot.pause()
+            assert session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_d_with_no_session_is_noop(self, tmp_path: Path):
+        picker = SessionPicker(sessions_dir=tmp_path)  # empty dir
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            # No modal should appear — still on the base screen
+            assert not isinstance(picker.screen, DeleteConfirmModal)

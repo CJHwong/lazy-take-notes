@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lazy_take_notes.l4_frameworks_and_drivers.apps.view import ViewApp
+from lazy_take_notes.l4_frameworks_and_drivers.apps.view import DeleteConfirmModal, ViewApp
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -160,3 +160,86 @@ class TestViewAppStatusBar:
             await pilot.pause()
             bar = app.query_one('#status-bar', StatusBar)
             assert 'back' in bar.keybinding_hints
+
+    @pytest.mark.asyncio
+    async def test_status_bar_hints_include_delete(self, tmp_path):
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            bar = app.query_one('#status-bar', StatusBar)
+            assert 'delete' in bar.keybinding_hints
+
+
+class TestDeleteSession:
+    @pytest.mark.asyncio
+    async def test_d_opens_confirm_modal(self, tmp_path):
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            assert isinstance(app.screen, DeleteConfirmModal)
+
+    @pytest.mark.asyncio
+    async def test_delete_confirmed_removes_dir(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='Hello\n', digest='# Notes')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            # Click the Delete button in the modal
+            await pilot.click('#btn-delete')
+            await pilot.pause()
+        assert not session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_delete_cancelled_keeps_dir(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='Hello\n', digest='# Notes')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            # Click the Cancel button in the modal
+            await pilot.click('#btn-cancel')
+            await pilot.pause()
+            assert session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_y_confirms_delete(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='Hello\n', digest='# Notes')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('y')
+            await pilot.pause()
+        assert not session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_n_cancels_delete(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='Hello\n', digest='# Notes')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('n')
+            await pilot.pause()
+            assert session_dir.exists()
+
+    @pytest.mark.asyncio
+    async def test_escape_cancels_delete(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='Hello\n', digest='# Notes')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('d')
+            await pilot.pause()
+            await pilot.press('escape')
+            await pilot.pause()
+            assert session_dir.exists()

@@ -4,11 +4,60 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
-from textual.widgets import Input, ListItem, ListView, Markdown, Static
+from textual.screen import ModalScreen
+from textual.widgets import Button, Input, Label, ListItem, ListView, Markdown, Static
+
+
+class DeleteConfirmModal(ModalScreen[bool]):
+    """Confirmation dialog before deleting a session."""
+
+    CSS = """
+    DeleteConfirmModal {
+        align: center middle;
+    }
+    #confirm-box {
+        width: 50;
+        height: auto;
+        padding: 1 2;
+        border: solid $error;
+        background: $surface;
+    }
+    #confirm-buttons { height: auto; }
+    """
+
+    BINDINGS = [
+        Binding('y', 'confirm', 'Delete', show=True),
+        Binding('n', 'cancel_modal', 'Cancel', show=True),
+        Binding('escape', 'cancel_modal', 'Cancel', show=False),
+    ]
+
+    def __init__(self, session_name: str) -> None:
+        super().__init__()
+        self._session_name = session_name
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id='confirm-box'):
+            yield Label(
+                f'Delete session\n[bold]{self._session_name}[/bold]?\nThis cannot be undone.\n[dim]\\[y] Delete  \\[n] Cancel[/dim]',
+                markup=True,
+            )
+            with Horizontal(id='confirm-buttons'):
+                yield Button('Delete', variant='error', id='btn-delete')
+                yield Button('Cancel', id='btn-cancel')
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == 'btn-delete')
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel_modal(self) -> None:
+        self.dismiss(False)
 
 
 def discover_sessions(sessions_dir: Path) -> list[dict]:
@@ -119,6 +168,7 @@ class SessionPicker(App[Path | None]):
         Binding('escape', 'cancel', 'Cancel', priority=True),
         Binding('q', 'cancel', 'Cancel'),
         Binding('enter', 'select_session', 'Select', priority=True),
+        Binding('d', 'delete_session', 'Delete', show=False),
     ]
 
     def __init__(self, sessions_dir: Path, **kwargs):
@@ -136,7 +186,7 @@ class SessionPicker(App[Path | None]):
                 yield _SessionListView(id='session-list')
             with VerticalScroll(id='session-preview', can_focus=False):
                 yield Markdown('', id='session-preview-md')
-        yield Static('\\[Enter] Select  \\[\u2191/\u2193] Navigate  \\[Esc] Cancel', id='session-footer', markup=True)
+        yield Static('\\[Enter] Select  \\[\u2191/\u2193] Navigate  \\[d] Delete  \\[Esc] Cancel', id='session-footer', markup=True)
 
     def on_mount(self) -> None:
         self._rebuild_list()
@@ -211,6 +261,20 @@ class SessionPicker(App[Path | None]):
         if self._current_session is None:
             return
         self.exit(self._current_session)
+
+    @work
+    async def action_delete_session(self) -> None:
+        if self._current_session is None:
+            return
+        session_dir = self._current_session
+        confirmed = await self.push_screen_wait(
+            DeleteConfirmModal(session_dir.name)
+        )
+        if confirmed:
+            import shutil
+            shutil.rmtree(session_dir)
+            self._sessions = [s for s in self._sessions if s['dir'] != session_dir]
+            self._rebuild_list()
 
     def action_cancel(self) -> None:
         self.exit(None)
