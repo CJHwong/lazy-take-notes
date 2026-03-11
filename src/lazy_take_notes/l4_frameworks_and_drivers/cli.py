@@ -159,7 +159,7 @@ def record(ctx, label):
 
 
 @cli.command()
-@click.argument('audio_file', type=click.Path(exists=True, dir_okay=False))
+@click.argument('audio_file')
 @click.option(
     '-l',
     '--label',
@@ -168,7 +168,14 @@ def record(ctx, label):
 )
 @click.pass_context
 def transcribe(ctx, audio_file, label):
-    """Transcribe an audio file with streaming TUI and generate a final digest."""
+    """Transcribe an audio file or YouTube URL with streaming TUI and generate a final digest."""
+    import shutil  # noqa: PLC0415 -- deferred: only needed for YouTube temp cleanup
+    import tempfile  # noqa: PLC0415 -- deferred: only needed for YouTube temp dir
+
+    from lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader import (  # noqa: PLC0415 -- deferred: only loaded for YouTube downloads
+        download_youtube_audio,
+        is_url,
+    )
     from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
         TemplatePicker,
     )
@@ -189,33 +196,59 @@ def transcribe(ctx, audio_file, label):
         click.echo(f'Error: {e}', err=True)
         sys.exit(1)
 
-    base_dir = Path(output_dir or config.output.directory)
-    out_dir = _make_session_dir(base_dir, label)
+    tmp_dir = None
+    resolved_label = label
+    if is_url(audio_file):
+        tmp_dir = tempfile.mkdtemp(prefix='ltn_yt_')
+        try:
+            click.echo('Downloading audio from YouTube...', err=True)
+            audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
+            if resolved_label is None and video_title:
+                resolved_label = video_title
+        except RuntimeError as exc:
+            click.echo(f'Error: {exc}', err=True)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            sys.exit(1)
+    else:
+        audio_path = Path(audio_file)
+        if not audio_path.exists():
+            click.echo(f'Error: Audio file not found: {audio_file}', err=True)
+            sys.exit(1)
+        if not audio_path.is_file():
+            click.echo(f'Error: Not a file: {audio_file}', err=True)
+            sys.exit(1)
 
-    missing_digest, missing_interactive = _preflight_llm(infra, config)
+    try:
+        base_dir = Path(output_dir or config.output.directory)
+        out_dir = _make_session_dir(base_dir, resolved_label)
 
-    from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        TranscribeApp,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        DependencyContainer,
-    )
+        missing_digest, missing_interactive = _preflight_llm(infra, config)
 
-    _pre_init_resource_tracker()
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+            TranscribeApp,
+        )
+        from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+            DependencyContainer,
+        )
 
-    container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=None)
-    app = TranscribeApp(
-        config=config,
-        template=template,
-        output_dir=out_dir,
-        controller=container.controller,
-        audio_path=Path(audio_file),
-        transcriber=container.transcriber,
-        missing_digest_models=missing_digest,
-        missing_interactive_models=missing_interactive,
-        label=label or '',
-    )
-    app.run()
+        _pre_init_resource_tracker()
+
+        container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=None)
+        app = TranscribeApp(
+            config=config,
+            template=template,
+            output_dir=out_dir,
+            controller=container.controller,
+            audio_path=audio_path,
+            transcriber=container.transcriber,
+            missing_digest_models=missing_digest,
+            missing_interactive_models=missing_interactive,
+            label=resolved_label or '',
+        )
+        app.run()
+    finally:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 @cli.command()
