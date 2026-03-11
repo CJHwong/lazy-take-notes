@@ -104,14 +104,17 @@ def cli(ctx, config_path, output_dir):
         WelcomePicker,
     )
 
-    mode = WelcomePicker().run()
-    if mode == 'record':
-        ctx.invoke(record)
-    elif mode == 'transcribe':
-        audio_file = click.prompt('Audio file path', type=click.Path(exists=True, dir_okay=False))
-        ctx.invoke(transcribe, audio_file=audio_file)
-    elif mode == 'view':
-        ctx.invoke(view)
+    while True:
+        mode = WelcomePicker().run()
+        if mode is None:
+            break
+        if mode == 'record':
+            ctx.invoke(record)
+        elif mode == 'transcribe':
+            audio_file = click.prompt('Audio file path', type=click.Path(exists=True, dir_okay=False))
+            ctx.invoke(transcribe, audio_file=audio_file)
+        elif mode == 'view':
+            ctx.invoke(view)
 
 
 @cli.command()
