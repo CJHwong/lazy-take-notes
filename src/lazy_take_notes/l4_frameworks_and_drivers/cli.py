@@ -204,6 +204,8 @@ def transcribe(ctx, audio_file, label):
     resolved_label = label
     audio_path: Path | None = None
     subtitle_segments = None
+    youtube_url: str | None = None
+    video_title = ''
     if is_url(audio_file):
         tmp_dir = tempfile.mkdtemp(prefix='ltn_yt_')
         try:
@@ -216,6 +218,7 @@ def transcribe(ctx, audio_file, label):
             else:
                 click.echo('No subtitles found. Downloading audio...', err=True)
                 audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
+            youtube_url = audio_file
             if resolved_label is None and video_title:
                 resolved_label = video_title
         except RuntimeError as exc:
@@ -233,7 +236,18 @@ def transcribe(ctx, audio_file, label):
 
     try:
         base_dir = Path(output_dir or config.output.directory)
-        out_dir = _make_session_dir(base_dir, resolved_label)
+        if youtube_url and resolved_label:
+            safe_title = re.sub(r'[^\w\-]', '_', resolved_label)
+            out_dir = base_dir / safe_title
+            out_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            out_dir = _make_session_dir(base_dir, resolved_label)
+
+        if youtube_url:
+            (out_dir / 'transcript_raw.txt').write_text(
+                f'YouTube: {youtube_url}\nTitle: {video_title}\n---\n',
+                encoding='utf-8',
+            )
 
         missing_digest, missing_interactive = _preflight_llm(infra, config)
 
