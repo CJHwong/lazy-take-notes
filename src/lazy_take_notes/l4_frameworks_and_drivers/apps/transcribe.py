@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from typing import ClassVar
 
 from textual.binding import Binding
 
@@ -20,6 +21,8 @@ log = logging.getLogger('ltn.app')
 
 class TranscribeApp(BaseApp):
     """File transcription TUI — streams transcription from an audio file, then digests."""
+
+    auto_digest: ClassVar[bool] = False
 
     BINDINGS = [
         Binding('s', 'stop_transcription', 'Stop', priority=True),
@@ -115,6 +118,7 @@ class TranscribeApp(BaseApp):
             bar.recording = True
             bar.stopped = False
             self._update_hints('recording')
+            self.notify('Press d to digest manually', timeout=5)
         elif message.status == 'stopped':
             bar.recording = False
             bar.stopped = True

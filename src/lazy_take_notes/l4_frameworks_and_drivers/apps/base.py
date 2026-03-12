@@ -8,6 +8,7 @@ import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager laun
 import sys
 import time
 from pathlib import Path
+from typing import ClassVar
 
 from textual.app import App as TextualApp
 from textual.app import ComposeResult
@@ -42,6 +43,7 @@ class BaseApp(TextualApp):
     """Shared TUI shell — compose, digest/query routing, session management."""
 
     CSS_PATH = 'app.tcss'
+    auto_digest: ClassVar[bool] = True
 
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
@@ -180,7 +182,7 @@ class BaseApp(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_count = len(self._controller.digest_state.buffer)
 
-        if should_digest and not self._digest_running:
+        if self.auto_digest and should_digest and not self._digest_running:
             self._run_digest_worker()
 
     def _dismiss_download_modal(self) -> None:

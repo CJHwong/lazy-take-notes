@@ -300,6 +300,34 @@ class TestTranscribeAppDownloadModal:
                     mock_switch.assert_called_once()
 
 
+class TestTranscribeAppAutoDigestDisabled:
+    @pytest.mark.asyncio
+    async def test_no_auto_digest_even_when_should_digest(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app._digest_running = False
+                with (
+                    patch.object(app._controller, 'on_transcript_segments', return_value=True),
+                    patch.object(app, '_run_digest_worker') as mock_digest,
+                ):
+                    app.post_message(
+                        TranscriptChunk(segments=[TranscriptSegment(text='hello', wall_start=0.0, wall_end=1.0)])
+                    )
+                    await pilot.pause()
+                    mock_digest.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_notify_on_recording_start(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                with patch.object(app, 'notify') as mock_notify:
+                    app.post_message(AudioWorkerStatus(status='recording'))
+                    await pilot.pause()
+                    mock_notify.assert_any_call('Press d to digest manually', timeout=5)
+
+
 class TestTranscribeAppForceDigest:
     @pytest.mark.asyncio
     async def test_force_digest_calls_super(self, tmp_path):
