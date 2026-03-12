@@ -172,8 +172,12 @@ def transcribe(ctx, audio_file, label):
     import shutil  # noqa: PLC0415 -- deferred: only needed for YouTube temp cleanup
     import tempfile  # noqa: PLC0415 -- deferred: only needed for YouTube temp dir
 
+    from lazy_take_notes.l3_interface_adapters.gateways.subtitle_parser import (  # noqa: PLC0415 -- deferred: only loaded when subtitle path is taken
+        parse_vtt_to_segments,
+    )
     from lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader import (  # noqa: PLC0415 -- deferred: only loaded for YouTube downloads
         download_youtube_audio,
+        fetch_youtube_subtitles,
         is_url,
     )
     from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
@@ -198,11 +202,20 @@ def transcribe(ctx, audio_file, label):
 
     tmp_dir = None
     resolved_label = label
+    audio_path: Path | None = None
+    subtitle_segments = None
     if is_url(audio_file):
         tmp_dir = tempfile.mkdtemp(prefix='ltn_yt_')
         try:
-            click.echo('Downloading audio from YouTube...', err=True)
-            audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
+            click.echo('Checking for YouTube subtitles...', err=True)
+            subtitle_result = fetch_youtube_subtitles(audio_file, Path(tmp_dir))
+            if subtitle_result is not None:
+                vtt_path, video_title = subtitle_result
+                click.echo('Subtitles found, skipping audio download.', err=True)
+                subtitle_segments = parse_vtt_to_segments(vtt_path)
+            else:
+                click.echo('No subtitles found. Downloading audio...', err=True)
+                audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
             if resolved_label is None and video_title:
                 resolved_label = video_title
         except RuntimeError as exc:
@@ -240,6 +253,7 @@ def transcribe(ctx, audio_file, label):
             output_dir=out_dir,
             controller=container.controller,
             audio_path=audio_path,
+            subtitle_segments=subtitle_segments,
             transcriber=container.transcriber,
             missing_digest_models=missing_digest,
             missing_interactive_models=missing_interactive,

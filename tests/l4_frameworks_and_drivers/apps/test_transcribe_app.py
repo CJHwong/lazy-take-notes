@@ -21,19 +21,23 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusB
 from tests.conftest import FakeLLMClient, FakePersistence
 
 
-def make_app(tmp_path: Path) -> TranscribeApp:
-    config = build_app_config({})
-    template = YamlTemplateLoader().load('default_zh_tw')
-    output_dir = tmp_path / 'output'
-    output_dir.mkdir()
+def _make_controller(config, template, output_dir):
     fake_llm = FakeLLMClient()
     fake_persist = FakePersistence(output_dir)
-    controller = SessionController(
+    return SessionController(
         config=config,
         template=template,
         llm_client=fake_llm,
         persistence=fake_persist,
     )
+
+
+def make_app(tmp_path: Path) -> TranscribeApp:
+    config = build_app_config({})
+    template = YamlTemplateLoader().load('default_zh_tw')
+    output_dir = tmp_path / 'output'
+    output_dir.mkdir()
+    controller = _make_controller(config, template, output_dir)
     audio_file = tmp_path / 'audio.wav'
     audio_file.touch()
     return TranscribeApp(
@@ -42,6 +46,22 @@ def make_app(tmp_path: Path) -> TranscribeApp:
         output_dir=output_dir,
         controller=controller,
         audio_path=audio_file,
+    )
+
+
+def make_subtitle_app(tmp_path: Path) -> TranscribeApp:
+    config = build_app_config({})
+    template = YamlTemplateLoader().load('default_zh_tw')
+    output_dir = tmp_path / 'output'
+    output_dir.mkdir()
+    controller = _make_controller(config, template, output_dir)
+    segments = [TranscriptSegment(text='Hello', wall_start=0.0, wall_end=1.0)]
+    return TranscribeApp(
+        config=config,
+        template=template,
+        output_dir=output_dir,
+        controller=controller,
+        subtitle_segments=segments,
     )
 
 
@@ -317,3 +337,40 @@ class TestTranscribeAppForceDigest:
                     await pilot.press('d')
                     await pilot.pause()
                     mock_digest.assert_called_once()
+
+
+class TestTranscribeAppSubtitleMode:
+    def test_no_audio_and_no_subtitles_raises(self, tmp_path):
+        config = build_app_config({})
+        template = YamlTemplateLoader().load('default_zh_tw')
+        output_dir = tmp_path / 'output'
+        output_dir.mkdir()
+        controller = _make_controller(config, template, output_dir)
+        with pytest.raises(ValueError, match='audio_path or subtitle_segments'):
+            TranscribeApp(
+                config=config,
+                template=template,
+                output_dir=output_dir,
+                controller=controller,
+            )
+
+    @pytest.mark.asyncio
+    async def test_subtitle_mode_starts_replay_thread(self, tmp_path):
+        app = make_subtitle_app(tmp_path)
+        with patch.object(app, '_subtitle_replay_thread') as mock_thread:
+            with patch.object(app, 'run_worker') as mock_run_worker:
+                with patch.object(app, '_start_file_worker', wraps=app._start_file_worker):
+                    async with app.run_test():
+                        mock_run_worker.assert_called_once_with(
+                            mock_thread,
+                            thread=True,
+                            group='file-transcription',
+                        )
+
+    @pytest.mark.asyncio
+    async def test_subtitle_mode_has_required_widgets(self, tmp_path):
+        app = make_subtitle_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test():
+                assert app.query_one('#transcript-panel')
+                assert app.query_one('#digest-panel')

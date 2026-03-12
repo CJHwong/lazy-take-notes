@@ -8,6 +8,7 @@ from pathlib import Path
 
 from textual.binding import Binding
 
+from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
@@ -29,12 +30,16 @@ class TranscribeApp(BaseApp):
     def __init__(
         self,
         *args,
-        audio_path: Path,
+        audio_path: Path | None = None,
+        subtitle_segments: list[TranscriptSegment] | None = None,
         transcriber: Transcriber | None = None,
         **kwargs,
     ) -> None:
+        if audio_path is None and subtitle_segments is None:
+            raise ValueError('TranscribeApp requires either audio_path or subtitle_segments')
         super().__init__(*args, **kwargs)
         self._audio_path = audio_path
+        self._subtitle_segments = subtitle_segments
         self._transcriber = transcriber
         self._file_shutdown = threading.Event()
         self._worker_done = False
@@ -65,14 +70,32 @@ class TranscribeApp(BaseApp):
         self._start_file_worker()
 
     def _start_file_worker(self) -> None:  # pragma: no cover -- thin thread launcher; patched out in tests
-        tc = self._config.transcription
-        locale = self._template.metadata.locale
-        self._model_name = tc.model_for_locale(locale)
-        self._language = locale.split('-')[0].lower()
-        self.run_worker(
-            self._file_worker_thread,
-            thread=True,
-            group='file-transcription',
+        if self._subtitle_segments is not None:
+            self.run_worker(
+                self._subtitle_replay_thread,
+                thread=True,
+                group='file-transcription',
+            )
+        else:
+            tc = self._config.transcription
+            locale = self._template.metadata.locale
+            self._model_name = tc.model_for_locale(locale)
+            self._language = locale.split('-')[0].lower()
+            self.run_worker(
+                self._file_worker_thread,
+                thread=True,
+                group='file-transcription',
+            )
+
+    def _subtitle_replay_thread(self):  # pragma: no cover -- thread body; tested independently
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import (  # noqa: PLC0415 -- deferred: loaded only when session starts
+            run_subtitle_replay,
+        )
+
+        return run_subtitle_replay(
+            post_message=self.post_message,
+            is_cancelled=lambda: self._file_shutdown.is_set(),
+            segments=self._subtitle_segments or [],
         )
 
     def _file_worker_thread(self):  # pragma: no cover -- thread body; tested independently

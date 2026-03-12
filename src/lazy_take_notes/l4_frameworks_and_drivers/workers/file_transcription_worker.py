@@ -129,3 +129,24 @@ def run_file_transcription(
     transcriber.close()
     post_message(AudioWorkerStatus(status='stopped'))
     return all_segments
+
+
+def run_subtitle_replay(
+    post_message: Callable,
+    is_cancelled: Callable[[], bool],
+    segments: list[TranscriptSegment],
+) -> list[TranscriptSegment]:
+    """Replay pre-parsed subtitle segments as TUI messages.
+
+    Designed to run inside a Textual @work(thread=True) worker.
+    No whisper inference — subtitles are already text.
+    """
+    if is_cancelled():
+        post_message(AudioWorkerStatus(status='stopped'))
+        return []
+
+    post_message(AudioWorkerStatus(status='recording'))
+    if segments:
+        post_message(TranscriptChunk(segments=segments))
+    post_message(AudioWorkerStatus(status='stopped'))
+    return segments

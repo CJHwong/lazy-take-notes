@@ -14,7 +14,10 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     TranscriptChunk,
     TranscriptionStatus,
 )
-from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import run_file_transcription
+from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import (
+    run_file_transcription,
+    run_subtitle_replay,
+)
 
 # Patch at SOURCE module level — deferred imports inside run_file_transcription
 # create local bindings, so patches must target the original modules.
@@ -204,3 +207,45 @@ class TestRunFileTranscription:
 
         # Transcriber.transcribe called at least once
         assert mock_transcriber.transcribe.call_count >= 1
+
+
+class TestRunSubtitleReplay:
+    def _run(self, segments, is_cancelled=lambda: False):
+        messages: list = []
+        result = run_subtitle_replay(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            segments=segments,
+        )
+        return result, messages
+
+    def test_happy_path_posts_recording_chunk_stopped(self):
+        result, messages = self._run(_FAKE_SEGMENTS)
+
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses == ['recording', 'stopped']
+
+        chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
+        assert len(chunks) == 1
+        assert chunks[0].segments == _FAKE_SEGMENTS
+        assert result == _FAKE_SEGMENTS
+
+    def test_empty_segments_no_chunk_message(self):
+        result, messages = self._run([])
+
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses == ['recording', 'stopped']
+
+        chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
+        assert len(chunks) == 0
+        assert result == []
+
+    def test_cancelled_only_posts_stopped(self):
+        result, messages = self._run(_FAKE_SEGMENTS, is_cancelled=lambda: True)
+
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses == ['stopped']
+
+        chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
+        assert len(chunks) == 0
+        assert result == []
