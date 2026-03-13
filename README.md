@@ -15,6 +15,18 @@ Terminal app for live transcription and note-taking. Records your mic, transcrib
 
 ## Install
 
+### Quick setup (macOS)
+
+Run this in Terminal — it installs everything and sets up a `take-note` shortcut:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash
+```
+
+Then open a new terminal window and run `take-note record`.
+
+### Manual install
+
 ```bash
 # try without installing (uv required)
 uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git lazy-take-notes
