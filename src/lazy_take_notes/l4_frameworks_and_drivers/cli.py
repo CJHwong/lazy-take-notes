@@ -97,6 +97,8 @@ def cli(ctx, config_path, output_dir):
     ctx.obj['config_path'] = config_path
     ctx.obj['output_dir'] = output_dir
 
+    _pre_init_resource_tracker()
+
     if ctx.invoked_subcommand is not None:
         return
 
@@ -155,8 +157,6 @@ def record(ctx, label):
     from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         DependencyContainer,
     )
-
-    _pre_init_resource_tracker()
 
     container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=audio_mode)
     app = RecordApp(
@@ -228,8 +228,6 @@ def transcribe(ctx, audio_file, label):
     from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         DependencyContainer,
     )
-
-    _pre_init_resource_tracker()
 
     container = DependencyContainer(config, template, out_dir, infra=infra, audio_mode=None)
     app = TranscribeApp(
