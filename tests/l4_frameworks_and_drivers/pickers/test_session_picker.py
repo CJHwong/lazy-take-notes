@@ -104,7 +104,7 @@ class TestSessionPicker:
         async with picker.run_test() as pilot:
             from textual.widgets import Input
 
-            search_input = picker.query_one('#session-search', Input)
+            search_input = picker.query_one('#sp-search', Input)
             search_input.value = 'retro'
             await pilot.pause()
             await pilot.press('down')
@@ -133,7 +133,7 @@ class TestSessionPicker:
             # The preview should be populated by on_mount
             from textual.widgets import Markdown
 
-            md = picker.query_one('#session-preview-md', Markdown)
+            md = picker.query_one('#sp-preview-md', Markdown)
             # Markdown widget has content (we can't easily check render, but update was called)
             assert md is not None
 
@@ -149,7 +149,7 @@ class TestSessionPicker:
             await pilot.press('right')
             await pilot.pause()
             # List should still be focused (no crash, no side effect)
-            assert picker.focused is picker.query_one('#session-list')
+            assert picker.focused is picker.query_one('#sp-list')
 
     @pytest.mark.asyncio
     async def test_up_arrow_on_first_item_focuses_search(self, tmp_path: Path):
@@ -164,7 +164,7 @@ class TestSessionPicker:
             await pilot.pause()
             from textual.widgets import Input
 
-            assert picker.focused is picker.query_one('#session-search', Input)
+            assert picker.focused is picker.query_one('#sp-search', Input)
 
     @pytest.mark.asyncio
     async def test_preview_long_transcript_shows_more_lines(self, tmp_path: Path):
@@ -175,7 +175,7 @@ class TestSessionPicker:
             await pilot.pause()
             from textual.widgets import Markdown
 
-            md = picker.query_one('#session-preview-md', Markdown)
+            md = picker.query_one('#sp-preview-md', Markdown)
             # The update call includes "more lines" text — verify via _markdown attr
             assert md is not None
 
@@ -188,7 +188,7 @@ class TestSessionPicker:
             # Should not crash, preview shows empty state
             from textual.widgets import Markdown
 
-            md = picker.query_one('#session-preview-md', Markdown)
+            md = picker.query_one('#sp-preview-md', Markdown)
             assert md is not None
 
     @pytest.mark.asyncio
@@ -201,5 +201,5 @@ class TestSessionPicker:
             await pilot.pause()
             from textual.widgets import Markdown
 
-            md = picker.query_one('#session-preview-md', Markdown)
+            md = picker.query_one('#sp-preview-md', Markdown)
             assert md is not None

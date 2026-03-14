@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.events import Key
-from textual.widgets import Input, ListItem, ListView, Markdown, Static
+from textual.app import ComposeResult
+from textual.widgets import ListItem, Markdown, Static
+
+from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
+    PickerListView,
+    SearchablePicker,
+)
 
 
 def discover_sessions(sessions_dir: Path) -> list[dict]:
@@ -50,76 +52,18 @@ class SessionItem(ListItem):
         yield Static(self._label_text, markup=True)
 
 
-class _SessionListView(ListView):
-    """ListView that pops focus back to the filter input when up is pressed on the first item."""
+class _SessionListView(PickerListView):
+    """ListView that pops focus back to #sp-search when ↑ is pressed on the first item."""
 
-    def on_key(self, event: Key) -> None:
-        if event.key != 'up':
-            return
-        first_selectable = next(
-            (i for i, child in enumerate(self.children) if isinstance(child, SessionItem)),
-            None,
-        )
-        if first_selectable is not None and self.index == first_selectable:
-            self.app.query_one('#session-search', Input).focus()
-            event.prevent_default()
+    _selectable_type = SessionItem
 
 
-class SessionPicker(App[Path | None]):
+class SessionPicker(SearchablePicker):
     CSS = """
-    #session-header {
-        dock: top;
-        height: 1;
-        background: $primary;
-        color: $text;
-        text-align: center;
-        text-style: bold;
-        padding: 0 1;
-    }
-    #session-footer {
-        dock: bottom;
-        height: 1;
-        background: $surface;
-        color: $text-muted;
-        text-align: center;
-        padding: 0 1;
-    }
-    #session-layout {
-        height: 1fr;
-    }
-    #session-list-pane {
-        width: 1fr;
-        min-width: 24;
-        max-width: 48;
-    }
-    #session-search {
-        dock: top;
-        margin: 0 0 1 0;
-    }
-    #session-list {
-        border: solid $primary;
-        scrollbar-size: 1 1;
-    }
-    #session-preview {
-        width: 3fr;
-        border: solid $secondary;
-        padding: 1 2;
-        scrollbar-size: 1 1;
-    }
-    #session-preview-md {
-        height: auto;
-    }
-    #session-list Static {
-        overflow: hidden hidden;
-        height: 1;
-    }
+    #sp-list-pane { max-width: 48; }
+    #sp-list Static { overflow: hidden hidden; height: 1; }
+    #sp-preview-md { height: auto; }
     """
-
-    BINDINGS = [
-        Binding('escape', 'cancel', 'Cancel', priority=True),
-        Binding('q', 'cancel', 'Cancel'),
-        Binding('enter', 'select_session', 'Select', priority=True),
-    ]
 
     def __init__(self, sessions_dir: Path, **kwargs):
         super().__init__(**kwargs)
@@ -127,35 +71,26 @@ class SessionPicker(App[Path | None]):
         self._sessions = discover_sessions(sessions_dir)
         self._current_session: Path | None = None
 
-    def compose(self) -> ComposeResult:
-        count = len(self._sessions)
-        yield Static(f'  Select a session ({count} found)', id='session-header')
-        with Horizontal(id='session-layout'):
-            with Vertical(id='session-list-pane'):
-                yield Input(placeholder='Filter sessions...', id='session-search')
-                yield _SessionListView(id='session-list')
-            with VerticalScroll(id='session-preview', can_focus=False):
-                yield Markdown('', id='session-preview-md')
-        yield Static('\\[Enter] Select  \\[\u2191/\u2193] Navigate  \\[Esc] Cancel', id='session-footer', markup=True)
+    def _make_list_view(self) -> _SessionListView:
+        return _SessionListView(id='sp-list')
 
-    def on_mount(self) -> None:
-        self._rebuild_list()
-        self.query_one('#session-search', Input).focus()
+    def _compose_preview(self) -> ComposeResult:
+        yield Markdown('', id='sp-preview-md')
 
-    def on_key(self, event: Key) -> None:
-        if event.key == 'down' and self.focused is self.query_one('#session-search', Input):
-            self.query_one('#session-list', _SessionListView).focus()
-            event.prevent_default()
+    def _header_text(self) -> str:
+        return f'  Select a session ({len(self._sessions)} found)'
 
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._rebuild_list(event.value.strip().lower())
+    def _footer_text(self) -> str:
+        return r'\[Enter] Select  \[↑/↓] Navigate  \[Esc] Cancel'
+
+    def _search_placeholder(self) -> str:
+        return 'Filter sessions...'
 
     def _rebuild_list(self, query: str = '') -> None:
-        list_view = self.query_one('#session-list', _SessionListView)
+        list_view = self.query_one('#sp-list', _SessionListView)
         list_view.clear()
 
         first_item: SessionItem | None = None
-        insert_idx: int = 0
         for session in self._sessions:
             if query and query not in session['name'].lower():
                 continue
@@ -163,7 +98,6 @@ class SessionPicker(App[Path | None]):
             list_view.append(item)
             if first_item is None:
                 first_item = item
-            insert_idx += 1
 
         if first_item is not None:
             list_view.index = 0
@@ -171,12 +105,12 @@ class SessionPicker(App[Path | None]):
             self._show_preview(first_item.session_dir)
         else:
             self._current_session = None
-            self.query_one('#session-preview-md', Markdown).update('*No sessions found*')
+            self.query_one('#sp-preview-md', Markdown).update('*No sessions found*')
 
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if isinstance(event.item, SessionItem):
-            self._current_session = event.item.session_dir
-            self._show_preview(event.item.session_dir)
+    def _on_item_highlighted(self, item: ListItem) -> None:
+        if isinstance(item, SessionItem):
+            self._current_session = item.session_dir
+            self._show_preview(item.session_dir)
 
     def _show_preview(self, session_dir: Path) -> None:
         lines = [f'## {session_dir.name}', '']
@@ -205,12 +139,9 @@ class SessionPicker(App[Path | None]):
             else:
                 lines.append('*Empty digest*')
 
-        self.query_one('#session-preview-md', Markdown).update('\n'.join(lines))
+        self.query_one('#sp-preview-md', Markdown).update('\n'.join(lines))
 
-    def action_select_session(self) -> None:
+    def action_select_item(self) -> None:
         if self._current_session is None:
             return
         self.exit(self._current_session)
-
-    def action_cancel(self) -> None:
-        self.exit(None)

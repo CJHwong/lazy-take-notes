@@ -170,6 +170,63 @@ class TestCliGroup:
         assert result.exit_code == 0
         mock_welcome.run.assert_called_once()
 
+    def test_welcome_picker_transcribe_cancel_exits_cleanly(self):
+        """WelcomePicker selects transcribe; FilePicker cancelled → clean exit."""
+        runner = CliRunner()
+        mock_welcome = MagicMock()
+        mock_welcome.run.return_value = 'transcribe'
+        mock_file_picker = MagicMock()
+        mock_file_picker.run.return_value = None  # user cancels
+
+        with (
+            patch(_WELCOME_PICKER, return_value=mock_welcome),
+            patch(_FILE_PICKER, return_value=mock_file_picker),
+        ):
+            result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0
+        mock_file_picker.run.assert_called_once()
+
+    def test_welcome_picker_transcribe_proceeds_to_app(self, tmp_path: Path):
+        """WelcomePicker selects transcribe; FilePicker picks file → TranscribeApp runs."""
+        runner = CliRunner()
+        audio_file = tmp_path / 'audio.wav'
+        audio_file.touch()
+
+        mock_welcome = MagicMock()
+        mock_welcome.run.return_value = 'transcribe'
+        mock_file_picker = MagicMock()
+        mock_file_picker.run.return_value = audio_file
+
+        mock_template_picker = MagicMock()
+        mock_template_picker.run.return_value = ('default_en', MagicMock())
+
+        mock_template_loader = MagicMock()
+        mock_template_loader.load.return_value = MagicMock(
+            metadata=MagicMock(locale='en-US'),
+            quick_actions=[],
+            recognition_hints=[],
+        )
+
+        with (
+            patch(_WELCOME_PICKER, return_value=mock_welcome),
+            patch(_FILE_PICKER, return_value=mock_file_picker),
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL, return_value=mock_template_loader),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_template_picker),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0
+        mock_app_cls.return_value.run.assert_called_once()
+
     def test_config_file_not_found_exits_1(self):
         runner = CliRunner()
 

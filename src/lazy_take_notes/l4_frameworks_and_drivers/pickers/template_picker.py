@@ -8,12 +8,12 @@ import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell command
 import sys
 from collections import defaultdict
 
-from textual.app import App, ComposeResult, SuspendNotSupported
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
-from textual.containers import Center, Horizontal, Vertical, VerticalScroll
+from textual.containers import Center, Vertical
 from textual.events import AppFocus, Key
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, ListItem, ListView, Markdown, Static
+from textual.widgets import Button, Input, ListItem, Markdown, Static
 
 from lazy_take_notes.l1_entities.audio_mode import AudioMode
 from lazy_take_notes.l1_entities.template import SessionTemplate
@@ -24,6 +24,10 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
     delete_user_template,
     ensure_user_copy,
     user_template_names,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
+    PickerListView,
+    SearchablePicker,
 )
 
 
@@ -46,7 +50,7 @@ def resolve_editor() -> list[str] | None:
     return fallbacks.get(plat)
 
 
-class _ConfirmDeleteScreen(ModalScreen[bool]):
+class _ConfirmDeleteScreen(ModalScreen):
     """Modal yes/no dialog for template deletion — overlays the picker."""
 
     CSS = """
@@ -147,72 +151,16 @@ class TemplateItem(ListItem):
         yield Static(self._label_text, markup=True)
 
 
-class _TemplateListView(ListView):
-    """ListView that pops focus back to the filter input when up is pressed on the first item."""
+class _TemplateListView(PickerListView):
+    """ListView that pops focus back to #sp-search when ↑ is pressed on the first TemplateItem."""
 
-    def on_key(self, event: Key) -> None:
-        if event.key != 'up':
-            return
-        first_selectable = next(
-            (i for i, child in enumerate(self.children) if isinstance(child, TemplateItem)),
-            None,
-        )
-        if first_selectable is not None and self.index == first_selectable:
-            self.app.query_one('#search-input', Input).focus()
-            event.prevent_default()
+    _selectable_type = TemplateItem
 
 
-class TemplatePicker(App[tuple[str, AudioMode] | None]):
+class TemplatePicker(SearchablePicker):
     CSS = """
-    #picker-header {
-        dock: top;
-        height: 1;
-        background: $primary;
-        color: $text;
-        text-align: center;
-        text-style: bold;
-        padding: 0 1;
-    }
-    #picker-footer {
-        dock: bottom;
-        height: 1;
-        background: $surface;
-        color: $text-muted;
-        text-align: center;
-        padding: 0 1;
-    }
-    #picker-layout {
-        height: 1fr;
-    }
-    #list-pane {
-        width: 1fr;
-        min-width: 24;
-        max-width: 40;
-    }
-    #search-input {
-        dock: top;
-        margin: 0 0 1 0;
-    }
-    #template-list {
-        border: solid $primary;
-        scrollbar-size: 1 1;
-    }
-    #template-preview {
-        width: 3fr;
-        border: solid $secondary;
-        padding: 1 2;
-        scrollbar-size: 1 1;
-    }
-    #preview-md {
-        height: auto;
-    }
+    #sp-list-pane { max-width: 40; }
     """
-
-    BINDINGS = [
-        Binding('escape', 'cancel', 'Cancel', priority=True),
-        Binding('q', 'cancel', 'Cancel'),
-        Binding('enter', 'select_template', 'Select', priority=True),
-    ]
 
     def __init__(self, show_audio_mode: bool = True, **kwargs):
         super().__init__(**kwargs)
@@ -229,16 +177,14 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         # when the user switches back to the terminal.
         self._pending_reload_name: str | None = None
 
-    def compose(self) -> ComposeResult:
-        count = len(self._templates)
-        yield Static(f'  Select a template ({count} available)', id='picker-header')
-        with Horizontal(id='picker-layout'):
-            with Vertical(id='list-pane'):
-                yield Input(placeholder='Filter templates...', id='search-input')
-                yield _TemplateListView(id='template-list')
-            with VerticalScroll(id='template-preview', can_focus=False):
-                yield Markdown('', id='preview-md')
-        yield Static(self._footer_text(), id='picker-footer', markup=True)
+    def _make_list_view(self) -> _TemplateListView:
+        return _TemplateListView(id='sp-list')
+
+    def _compose_preview(self) -> ComposeResult:
+        yield Markdown('', id='sp-preview-md')
+
+    def _header_text(self) -> str:
+        return f'  Select a template ({len(self._templates)} available)'
 
     def _footer_text(self) -> str:
         base = r'\[Enter] Select  \[↑/↓] Navigate'
@@ -250,18 +196,16 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         base += r'  \[e] Edit  \[x] Delete  \[Esc] Cancel'
         return base
 
-    def on_mount(self) -> None:
-        self._rebuild_list()
-        self.query_one('#search-input', Input).focus()
+    def _search_placeholder(self) -> str:
+        return 'Filter templates...'
 
     def on_key(self, event: Key) -> None:
         # [d] cycles audio mode only when the list (not the search Input) has focus.
         # Input swallows printable keys before bindings fire, so we guard here.
-        if event.key == 'd' and self._show_audio_mode:
-            if not isinstance(self.focused, Input):
-                self.action_cycle_audio_mode()
-                event.prevent_default()
-                return
+        if event.key == 'd' and self._show_audio_mode and not isinstance(self.focused, Input):
+            self.action_cycle_audio_mode()
+            event.prevent_default()
+            return
         if event.key == 'e' and not isinstance(self.focused, Input):
             self.action_edit_template()
             event.prevent_default()
@@ -270,16 +214,11 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             self.action_delete_template()
             event.prevent_default()
             return
-        if event.key == 'down' and self.focused is self.query_one('#search-input', Input):
-            self.query_one('#template-list', _TemplateListView).focus()
-            event.prevent_default()
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._rebuild_list(event.value.strip().lower())
+        super().on_key(event)
 
     def _rebuild_list(self, query: str = '') -> None:
         """Rebuild the ListView contents, optionally filtered by *query*."""
-        list_view = self.query_one('#template-list', _TemplateListView)
+        list_view = self.query_one('#sp-list', _TemplateListView)
         list_view.clear()
 
         # Group templates by locale.
@@ -314,12 +253,12 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             self._show_preview(first_item.template_name)
         else:
             self._current_name = None
-            self.query_one('#preview-md', Markdown).update('*No matching templates*')
+            self.query_one('#sp-preview-md', Markdown).update('*No matching templates*')
 
-    def on_list_view_highlighted(self, event: ListView.Highlighted) -> None:
-        if isinstance(event.item, TemplateItem):
-            self._current_name = event.item.template_name
-            self._show_preview(event.item.template_name)
+    def _on_item_highlighted(self, item: ListItem) -> None:
+        if isinstance(item, TemplateItem):
+            self._current_name = item.template_name
+            self._show_preview(item.template_name)
 
     def _show_preview(self, name: str) -> None:
         tmpl = self._templates[name]
@@ -344,7 +283,7 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         lines += ['', '---', '', '### System Prompt', '']
         lines.append(tmpl.system_prompt)
 
-        self.query_one('#preview-md', Markdown).update('\n'.join(lines))
+        self.query_one('#sp-preview-md', Markdown).update('\n'.join(lines))
 
     def action_edit_template(self) -> None:
         """Open the highlighted template in $EDITOR (copies built-in to user dir first)."""
@@ -401,7 +340,7 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             self._templates[name] = YamlTemplateLoader().load(name)
         else:
             del self._templates[name]
-        query = self.query_one('#search-input', Input).value.strip().lower()
+        query = self.query_one('#sp-search', Input).value.strip().lower()
         self._rebuild_list(query)
         self.notify(f'Deleted user template "{name}"')
 
@@ -414,10 +353,10 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
         except Exception:  # noqa: BLE001 -- invalid YAML after user edit; surface as warning, don't crash
             self.notify(f'Template "{name}" has invalid YAML — changes ignored', severity='warning')
             return
-        query = self.query_one('#search-input', Input).value.strip().lower()
+        query = self.query_one('#sp-search', Input).value.strip().lower()
         self._rebuild_list(query)
         # Restore highlight to the edited template
-        list_view = self.query_one('#template-list', _TemplateListView)
+        list_view = self.query_one('#sp-list', _TemplateListView)
         for idx, child in enumerate(list_view.children):
             if isinstance(child, TemplateItem) and child.template_name == name:
                 list_view.index = idx
@@ -428,12 +367,9 @@ class TemplatePicker(App[tuple[str, AudioMode] | None]):
             return
         idx = _MODE_CYCLE.index(self._audio_mode)
         self._audio_mode = _MODE_CYCLE[(idx + 1) % len(_MODE_CYCLE)]
-        self.query_one('#picker-footer', Static).update(self._footer_text())
+        self.query_one('#sp-footer', Static).update(self._footer_text())
 
-    def action_select_template(self) -> None:
+    def action_select_item(self) -> None:
         if self._current_name is None:
             return
         self.exit((self._current_name, self._audio_mode))
-
-    def action_cancel(self) -> None:
-        self.exit(None)

@@ -29,7 +29,7 @@ class TestTemplatePicker:
     async def test_picker_shows_all_templates(self):
         picker = TemplatePicker()
         async with picker.run_test():
-            items = picker.query('#template-list TemplateItem')
+            items = picker.query('#sp-list TemplateItem')
             assert len(items) == len(all_template_names())
 
     @pytest.mark.asyncio
@@ -129,7 +129,7 @@ class TestTemplatePicker:
     async def test_preview_updates_on_highlight(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            preview = picker.query_one('#preview-md', Markdown)
+            preview = picker.query_one('#sp-preview-md', Markdown)
             await pilot.press('tab')
             await pilot.pause()
             await pilot.press('down')
@@ -140,21 +140,21 @@ class TestTemplatePicker:
     async def test_locale_headers_present(self):
         picker = TemplatePicker()
         async with picker.run_test():
-            headers = picker.query('#template-list LocaleHeader')
+            headers = picker.query('#sp-list LocaleHeader')
             assert len(headers) > 0
 
     @pytest.mark.asyncio
     async def test_search_filters_templates(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            total = len(picker.query('#template-list TemplateItem'))
-            search = picker.query_one('#search-input', Input)
+            total = len(picker.query('#sp-list TemplateItem'))
+            search = picker.query_one('#sp-search', Input)
             search.focus()
             await pilot.pause()
             # 'en' should match only the English template(s)
             await pilot.press(*'en')
             await pilot.pause()
-            filtered = len(picker.query('#template-list TemplateItem'))
+            filtered = len(picker.query('#sp-list TemplateItem'))
             assert filtered < total
             assert filtered > 0
 
@@ -162,21 +162,21 @@ class TestTemplatePicker:
     async def test_search_no_match_shows_empty(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            search = picker.query_one('#search-input', Input)
+            search = picker.query_one('#sp-search', Input)
             search.focus()
             await pilot.pause()
             for ch in 'xyznonexistent':
                 await pilot.press(ch)
             await pilot.pause()
-            items = picker.query('#template-list TemplateItem')
+            items = picker.query('#sp-list TemplateItem')
             assert len(items) == 0
 
     @pytest.mark.asyncio
     async def test_search_clear_restores_all(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            total = len(picker.query('#template-list TemplateItem'))
-            search = picker.query_one('#search-input', Input)
+            total = len(picker.query('#sp-list TemplateItem'))
+            search = picker.query_one('#sp-search', Input)
             search.focus()
             await pilot.pause()
             # Filter then clear
@@ -184,14 +184,14 @@ class TestTemplatePicker:
             await pilot.pause()
             search.value = ''
             await pilot.pause()
-            restored = len(picker.query('#template-list TemplateItem'))
+            restored = len(picker.query('#sp-list TemplateItem'))
             assert restored == total
 
     @pytest.mark.asyncio
     async def test_enter_after_search_returns_filtered_name(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            search = picker.query_one('#search-input', Input)
+            search = picker.query_one('#sp-search', Input)
             search.focus()
             await pilot.pause()
             for ch in 'default_en':
@@ -238,7 +238,7 @@ class TestTemplatePicker:
         picker = TemplatePicker()
         async with picker.run_test():
             picker._current_name = None
-            picker.action_select_template()
+            picker.action_select_item()
             # Should not exit — still running
             assert picker.return_value is None
 
@@ -447,7 +447,7 @@ class TestDeleteTemplate:
             await pilot.press('tab')
             await pilot.pause()
             # Find and highlight the user template
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -472,7 +472,7 @@ class TestDeleteTemplate:
         async with picker.run_test() as pilot:
             assert 'my_custom' in picker._user_names
             # Navigate to my_custom
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -500,7 +500,7 @@ class TestDeleteTemplate:
 
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -533,7 +533,7 @@ class TestDeleteTemplate:
             # The loaded template should be the user override
             assert picker._templates['default_en'].metadata.name == 'OVERRIDDEN'
 
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -570,7 +570,7 @@ class TestDeleteTemplate:
         async with picker.run_test() as pilot:
             await pilot.press('tab')
             await pilot.pause()
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -594,7 +594,7 @@ class TestDeleteTemplate:
 
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
@@ -623,7 +623,7 @@ class TestDeleteTemplate:
 
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            list_view = picker.query_one('#template-list', ListView)
+            list_view = picker.query_one('#sp-list', ListView)
             for idx, child in enumerate(list_view.children):
                 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
 
