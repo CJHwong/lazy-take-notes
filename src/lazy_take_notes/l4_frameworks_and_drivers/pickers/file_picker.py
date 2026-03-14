@@ -7,6 +7,7 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding
+from textual.message import Message
 from textual.widgets import Input, ListItem, Static
 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
@@ -73,10 +74,17 @@ class FilePicker(SearchablePicker):
         Binding('backspace', 'parent', 'Parent'),
     ]
 
+    class DirCountReady(Message):
+        def __init__(self, path: Path, label: str) -> None:
+            super().__init__()
+            self.path = path
+            self.label = label
+
     def __init__(self, start_dir: Path = Path.cwd(), audio_exts: frozenset[str] = AUDIO_EXTS, **kwargs) -> None:
         super().__init__(**kwargs)
         self._current_dir = start_dir.resolve()
         self._audio_exts = audio_exts
+        self._highlighted_dir: Path | None = None
 
     def on_mount(self) -> None:
         # Override base: focus the list instead of the search input
@@ -160,22 +168,38 @@ class FilePicker(SearchablePicker):
             parent = self._current_dir.parent
             self._set_info(f'[bold]..[/bold]\nParent directory\n{parent}')
         elif isinstance(item, DirItem):
-            try:
-                _CAP = 1000
-                count = 0
-                for _ in item.path.iterdir():
-                    count += 1
-                    if count > _CAP:
-                        break
-                label = f'{_CAP}+' if count > _CAP else str(count)
-                self._set_info(f'[bold]{item.path.name}/[/bold]\n{label} items')
-            except PermissionError:
-                self._set_info(f'[bold]{item.path.name}/[/bold]\nPermission denied')
+            self._highlighted_dir = item.path
+            self._set_info(f'[bold]{item.path.name}/[/bold]\n(counting…)')
+            path = item.path
+
+            def _count() -> None:
+                try:
+                    _CAP = 1000
+                    count = 0
+                    for _ in path.iterdir():
+                        count += 1
+                        if count > _CAP:
+                            break
+                    result_label = f'{_CAP}+' if count > _CAP else str(count)
+                except PermissionError:
+                    result_label = 'Permission denied'
+                self.post_message(FilePicker.DirCountReady(path, result_label))
+
+            self.run_worker(_count, thread=True, exclusive=True, group='dir-count')
         elif isinstance(item, FileItem):
             stat = item.path.stat()
             modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
             size = _human_size(stat.st_size)
             self._set_info(f'[bold]{item.path.name}[/bold]\nSize: {size}\nModified: {modified}')
+
+    def on_file_picker_dir_count_ready(self, msg: DirCountReady) -> None:
+        if msg.path != self._highlighted_dir:
+            return  # stale result — user has moved on
+        item_name = msg.path.name
+        if msg.label == 'Permission denied':
+            self._set_info(f'[bold]{item_name}/[/bold]\nPermission denied')
+        else:
+            self._set_info(f'[bold]{item_name}/[/bold]\n{msg.label} items')
 
     def _set_info(self, text: str) -> None:
         self.query_one('#sp-preview-info', Static).update(text)
