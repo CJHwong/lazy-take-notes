@@ -38,7 +38,18 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 # Note: REPO_ROOT is baked in at build time so the app knows where the project lives.
 cat > "$CONTENTS/MacOS/launcher" << LAUNCHER
 #!/bin/bash
+# Initialize a reasonable PATH (important for Finder launches)
+if [ -x /usr/libexec/path_helper ]; then
+    eval "\$(/usr/libexec/path_helper -s)"
+fi
+
 PROJECT_DIR="$REPO_ROOT"
+
+# Ensure the baked-in project directory still exists
+if [[ ! -d "\$PROJECT_DIR" ]]; then
+    osascript -e 'display dialog "The Lazy Take Notes project directory could not be found:\n\n\$PROJECT_DIR\n\nThis usually means the repository was moved, renamed, or the app bundle was copied from another machine.\n\nRebuild LazyTakeNotes.app from the current repository location, then try again." with title "Lazy Take Notes" buttons {"OK"} default button "OK" with icon stop'
+    exit 1
+fi
 
 # Resolve the uv binary (may not be on PATH when launched from Finder)
 if command -v uv &>/dev/null; then
@@ -47,6 +58,10 @@ elif [ -f "\$HOME/.local/bin/uv" ]; then
     UV="\$HOME/.local/bin/uv"
 elif [ -f "\$HOME/.cargo/bin/uv" ]; then
     UV="\$HOME/.cargo/bin/uv"
+elif [ -f "/opt/homebrew/bin/uv" ]; then
+    UV="/opt/homebrew/bin/uv"
+elif [ -f "/usr/local/bin/uv" ]; then
+    UV="/usr/local/bin/uv"
 else
     osascript -e 'display dialog "uv not found. Install it first:\n\ncurl -LsSf https://astral.sh/uv/install.sh | sh" with title "Lazy Take Notes" buttons {"OK"} default button "OK" with icon stop'
     exit 1
@@ -56,7 +71,7 @@ fi
 osascript <<EOF
 tell application "Terminal"
     activate
-    do script "cd \$PROJECT_DIR && \$UV run lazy-take-notes"
+    do script "cd \"\$PROJECT_DIR\" && \"\$UV\" run lazy-take-notes"
 end tell
 EOF
 LAUNCHER
