@@ -93,6 +93,18 @@ class TestParseVttToSegments:
         assert len(segments) == 1
         assert segments[0].wall_end == pytest.approx(3.0)
 
+    def test_timestamp_without_hours_parsed(self, tmp_path):
+        # WebVTT allows MM:SS.mmm when hours == 0
+        vtt = _write_vtt(
+            tmp_path,
+            'WEBVTT\n\n01:30.500 --> 02:00.000\nNo hours field\n\n',
+        )
+        segments = parse_vtt_to_segments(vtt)
+        assert len(segments) == 1
+        assert segments[0].text == 'No hours field'
+        assert segments[0].wall_start == pytest.approx(90.5)
+        assert segments[0].wall_end == pytest.approx(120.0)
+
     def test_empty_text_cues_skipped(self, tmp_path):
         vtt = _write_vtt(
             tmp_path,

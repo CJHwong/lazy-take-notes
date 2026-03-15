@@ -7,15 +7,18 @@ from pathlib import Path
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 
-# Matches:  HH:MM:SS.mmm --> HH:MM:SS.mmm  (with optional cue attributes like "align:start")
+# Matches WebVTT timestamps in either form:
+#   HH:MM:SS.mmm --> HH:MM:SS.mmm
+#   MM:SS.mmm    --> MM:SS.mmm      (hours field is optional per the WebVTT spec)
 _TIMESTAMP_RE = re.compile(
-    r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s+-->\s+'
-    r'(\d{2}):(\d{2}):(\d{2})\.(\d{3})'
+    r'(?:(?P<sh>\d{2}):)?(?P<sm>\d{2}):(?P<ss>\d{2})\.(?P<sms>\d{3})\s+-->\s+'
+    r'(?:(?P<eh>\d{2}):)?(?P<em>\d{2}):(?P<es>\d{2})\.(?P<ems>\d{3})'
 )
 
 
-def _to_seconds(h: str, m: str, s: str, ms: str) -> float:
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+def _to_seconds(h: str | None, m: str, s: str, ms: str) -> float:
+    hours = int(h) if h is not None else 0
+    return hours * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
 
 
 def _strip_inline_tags(text: str) -> str:
@@ -34,8 +37,8 @@ def parse_vtt_to_segments(vtt_path: Path) -> list[TranscriptSegment]:
     while idx < len(lines):
         match = _TIMESTAMP_RE.match(lines[idx])
         if match:
-            start = _to_seconds(match.group(1), match.group(2), match.group(3), match.group(4))
-            end = _to_seconds(match.group(5), match.group(6), match.group(7), match.group(8))
+            start = _to_seconds(match.group('sh'), match.group('sm'), match.group('ss'), match.group('sms'))
+            end = _to_seconds(match.group('eh'), match.group('em'), match.group('es'), match.group('ems'))
             idx += 1
             text_lines: list[str] = []
             while idx < len(lines) and lines[idx].strip():
