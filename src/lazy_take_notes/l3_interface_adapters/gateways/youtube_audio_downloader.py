@@ -17,6 +17,9 @@ def fetch_youtube_subtitles(url: str, dest_dir: Path) -> tuple[Path, str] | None
     """
     import yt_dlp  # noqa: PLC0415 -- deferred: only loaded for YouTube operations
 
+    # Ensure destination directory exists so yt-dlp can write subtitle files.
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
     ydl_opts = {
         'skip_download': True,
         'writesubtitles': True,
