@@ -128,3 +128,63 @@ def test_fetch_subtitles_returns_none_when_info_is_none(tmp_path):
         result = fetch_youtube_subtitles('https://youtube.com/watch?v=x', tmp_path)
 
     assert result is None
+
+
+# --- _pick_best_vtt unit tests ---
+
+
+def test_pick_best_vtt_prefers_manual_over_auto(tmp_path):
+    from lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader import _pick_best_vtt
+
+    auto_file = tmp_path / 'sub.en.vtt'
+    manual_file = tmp_path / 'sub.zh-TW.vtt'
+    auto_file.touch()
+    manual_file.touch()
+    assert _pick_best_vtt([auto_file, manual_file], manual_langs={'zh-TW'}) == manual_file
+
+
+def test_pick_best_vtt_auto_fallback_is_sorted(tmp_path):
+    from lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader import _pick_best_vtt
+
+    file_en = tmp_path / 'sub.en.vtt'
+    file_ja = tmp_path / 'sub.ja.vtt'
+    file_en.touch()
+    file_ja.touch()
+    assert _pick_best_vtt([file_ja, file_en], manual_langs=set()) == file_en
+
+
+def test_pick_best_vtt_returns_none_when_empty(tmp_path):
+    from lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader import _pick_best_vtt
+
+    assert _pick_best_vtt([], manual_langs={'en'}) is None
+
+
+# --- fetch_youtube_subtitles integration: subtitle selection ---
+
+
+def test_fetch_subtitles_manual_wins_over_auto(tmp_path):
+    auto_file = tmp_path / 'sub.en.vtt'
+    manual_file = tmp_path / 'sub.zh-TW.vtt'
+    auto_file.touch()
+    manual_file.touch()
+    fake_info = {'title': 'Bilingual Video', 'subtitles': {'zh-TW': []}}
+    mock_ydl = _make_ydl_mock(info=fake_info)
+
+    with patch('yt_dlp.YoutubeDL', return_value=mock_ydl):
+        result = fetch_youtube_subtitles('https://youtube.com/watch?v=x', tmp_path)
+
+    assert result == (manual_file, 'Bilingual Video')
+
+
+def test_fetch_subtitles_auto_fallback_is_deterministic(tmp_path):
+    file_en = tmp_path / 'sub.en.vtt'
+    file_ja = tmp_path / 'sub.ja.vtt'
+    file_en.touch()
+    file_ja.touch()
+    fake_info = {'title': 'Auto Only Video'}
+    mock_ydl = _make_ydl_mock(info=fake_info)
+
+    with patch('yt_dlp.YoutubeDL', return_value=mock_ydl):
+        result = fetch_youtube_subtitles('https://youtube.com/watch?v=x', tmp_path)
+
+    assert result == (file_en, 'Auto Only Video')

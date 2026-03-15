@@ -10,6 +10,27 @@ def is_url(value: str) -> bool:
     return value.startswith('http://') or value.startswith('https://')
 
 
+def _pick_best_vtt(vtt_files: list[Path], manual_langs: set[str]) -> Path | None:
+    """Return the best VTT file: manual subtitle preferred, auto-generated as fallback.
+
+    Selection within each tier is alphabetical for determinism.
+    Language code is the last dot-segment of the stem (e.g. 'sub.en.vtt' → 'en').
+    """
+    manual: list[Path] = []
+    auto: list[Path] = []
+    for vtt in vtt_files:
+        lang = vtt.stem.rsplit('.', 1)[-1]
+        if lang in manual_langs:
+            manual.append(vtt)
+        else:
+            auto.append(vtt)
+    if manual:
+        return sorted(manual)[0]
+    if auto:
+        return sorted(auto)[0]
+    return None
+
+
 def fetch_youtube_subtitles(url: str, dest_dir: Path) -> tuple[Path, str] | None:
     """Try to download YouTube subtitles (VTT), return (vtt_path, title) or None.
 
@@ -40,11 +61,12 @@ def fetch_youtube_subtitles(url: str, dest_dir: Path) -> tuple[Path, str] | None
         return None
 
     title = info.get('title', '')
+    manual_langs = set(info.get('subtitles', {}).keys())
     vtt_files = list(dest_dir.glob('*.vtt'))
-    if not vtt_files:
+    best = _pick_best_vtt(vtt_files, manual_langs)
+    if best is None:
         return None
-
-    return vtt_files[0], title
+    return best, title
 
 
 def download_youtube_audio(url: str, dest_dir: Path) -> tuple[Path, str]:
