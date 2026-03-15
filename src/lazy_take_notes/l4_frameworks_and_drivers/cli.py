@@ -238,8 +238,12 @@ def transcribe(ctx, audio_file, label):
         base_dir = Path(output_dir or config.output.directory)
         if youtube_url and resolved_label:
             safe_title = re.sub(r'[^\w\-]', '_', resolved_label)
-            out_dir = base_dir / safe_title
-            out_dir.mkdir(parents=True, exist_ok=True)
+            # If sanitization results in an empty or trivial name, fall back to a timestamped session dir
+            if not safe_title or not safe_title.strip('_'):
+                out_dir = _make_session_dir(base_dir, resolved_label)
+            else:
+                out_dir = base_dir / safe_title
+                out_dir.mkdir(parents=True, exist_ok=True)
         else:
             out_dir = _make_session_dir(base_dir, resolved_label)
 
