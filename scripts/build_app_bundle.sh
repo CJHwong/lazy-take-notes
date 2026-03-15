@@ -10,7 +10,23 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP_NAME="LazyTakeNotes"
 APP_DIR="$REPO_ROOT/build/${APP_NAME}.app"
 CONTENTS="$APP_DIR/Contents"
-VERSION="$(grep '^version' "$REPO_ROOT/pyproject.toml" | head -1 | sed 's/.*"\(.*\)"/\1/')"
+VERSION="$(python3 - <<PY
+import pathlib
+import sys
+import tomllib
+
+pyproject = pathlib.Path("$REPO_ROOT") / "pyproject.toml"
+try:
+    with pyproject.open("rb") as f:
+        data = tomllib.load(f)
+    version = data["project"]["version"]
+except (FileNotFoundError, KeyError) as exc:
+    sys.stderr.write(f"Error reading version from {pyproject}: {exc}\n")
+    sys.exit(1)
+else:
+    print(version, end="")
+PY
+)"
 
 echo "Building ${APP_NAME}.app v${VERSION}..."
 
