@@ -169,6 +169,7 @@ def record(ctx, label):
 @click.pass_context
 def transcribe(ctx, audio_file, label):
     """Transcribe an audio file or YouTube URL with streaming TUI and generate a final digest."""
+    import concurrent.futures  # noqa: PLC0415 -- deferred: only needed for YouTube parallel fetch
     import shutil  # noqa: PLC0415 -- deferred: only needed for YouTube temp cleanup
     import tempfile  # noqa: PLC0415 -- deferred: only needed for YouTube temp dir
 
@@ -188,53 +189,70 @@ def transcribe(ctx, audio_file, label):
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = _load_config(config_path, output_dir)
 
-    picker = TemplatePicker(show_audio_mode=False)
-    picker_result = picker.run()
-    if picker_result is None:
-        return
-    tmpl_ref, _audio_mode = picker_result
-
-    try:
-        template = template_loader.load(tmpl_ref)
-    except FileNotFoundError as e:
-        click.echo(f'Error: {e}', err=True)
-        sys.exit(1)
-
     tmp_dir = None
     resolved_label = label
     audio_path: Path | None = None
     subtitle_segments = None
     youtube_url: str | None = None
     video_title = ''
+    subtitle_future: concurrent.futures.Future | None = None
+    executor: concurrent.futures.ThreadPoolExecutor | None = None
+
     if is_url(audio_file):
         tmp_dir = tempfile.mkdtemp(prefix='ltn_yt_')
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix='ltn_yt_fetch')
+        subtitle_future = executor.submit(fetch_youtube_subtitles, audio_file, Path(tmp_dir))
+        click.echo('Fetching YouTube subtitles in background...', err=True)
+
+    picker = TemplatePicker(show_audio_mode=False)
+    picker_result = picker.run()
+    if picker_result is None:
+        if subtitle_future is not None:
+            subtitle_future.cancel()
+        if executor is not None:
+            executor.shutdown(wait=True)  # wait for thread before rmtree
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        return
+    tmpl_ref, _audio_mode = picker_result
+
+    try:
         try:
-            click.echo('Checking for YouTube subtitles...', err=True)
-            subtitle_result = fetch_youtube_subtitles(audio_file, Path(tmp_dir))
+            template = template_loader.load(tmpl_ref)
+        except FileNotFoundError as e:
+            click.echo(f'Error: {e}', err=True)
+            sys.exit(1)
+
+        if subtitle_future is not None:
+            try:
+                subtitle_result = subtitle_future.result()
+            except Exception as exc:
+                click.echo(f'Error: {exc}', err=True)
+                sys.exit(1)
+
             if subtitle_result is not None:
                 vtt_path, video_title = subtitle_result
                 click.echo('Subtitles found, skipping audio download.', err=True)
                 subtitle_segments = parse_vtt_to_segments(vtt_path)
             else:
                 click.echo('No subtitles found. Downloading audio...', err=True)
-                audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
+                try:
+                    audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
+                except RuntimeError as exc:
+                    click.echo(f'Error: {exc}', err=True)
+                    sys.exit(1)
             youtube_url = audio_file
             if resolved_label is None and video_title:
                 resolved_label = video_title
-        except RuntimeError as exc:
-            click.echo(f'Error: {exc}', err=True)
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            sys.exit(1)
-    else:
-        audio_path = Path(audio_file)
-        if not audio_path.exists():
-            click.echo(f'Error: Audio file not found: {audio_file}', err=True)
-            sys.exit(1)
-        if not audio_path.is_file():
-            click.echo(f'Error: Not a file: {audio_file}', err=True)
-            sys.exit(1)
+        else:
+            audio_path = Path(audio_file)
+            if not audio_path.exists():
+                click.echo(f'Error: Audio file not found: {audio_file}', err=True)
+                sys.exit(1)
+            if not audio_path.is_file():
+                click.echo(f'Error: Not a file: {audio_file}', err=True)
+                sys.exit(1)
 
-    try:
         base_dir = Path(output_dir or config.output.directory)
         out_dir = _make_session_dir(base_dir, resolved_label)
 
@@ -270,6 +288,8 @@ def transcribe(ctx, audio_file, label):
         )
         app.run()
     finally:
+        if executor is not None:
+            executor.shutdown(wait=False)  # thread already done at this point
         if tmp_dir is not None:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 

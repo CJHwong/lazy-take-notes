@@ -361,6 +361,137 @@ class TestTranscribeSubcommand:
         mock_app_cls.return_value.run.assert_called_once()
 
 
+_FETCH_SUBS = 'lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader.fetch_youtube_subtitles'
+_DL_AUDIO = 'lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader.download_youtube_audio'
+_IS_URL = 'lazy_take_notes.l3_interface_adapters.gateways.youtube_audio_downloader.is_url'
+_PARSE_VTT = 'lazy_take_notes.l3_interface_adapters.gateways.subtitle_parser.parse_vtt_to_segments'
+
+
+class TestTranscribeYouTubeParallel:
+    """YouTube URL cases — fetch runs in background thread while TemplatePicker is displayed."""
+
+    def _make_template_loader(self):
+        loader = MagicMock()
+        loader.load.return_value = MagicMock(
+            metadata=MagicMock(locale='en-US'),
+            quick_actions=[],
+            recognition_hints=[],
+        )
+        return loader
+
+    def test_youtube_with_subtitles_starts_transcribe_app_with_segments(self, tmp_path: Path):
+        runner = CliRunner()
+        vtt_file = tmp_path / 'subs.vtt'
+        vtt_file.touch()
+        fake_segments = [MagicMock()]
+
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = ('default_en', MagicMock())
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL, return_value=self._make_template_loader()),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+            patch(_IS_URL, return_value=True),
+            patch(_FETCH_SUBS, return_value=(vtt_file, 'Test Video')),
+            patch(_PARSE_VTT, return_value=fake_segments),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, ['transcribe', 'https://youtube.com/watch?v=test'])
+
+        assert result.exit_code == 0
+        mock_app_cls.return_value.run.assert_called_once()
+        call_kwargs = mock_app_cls.call_args[1]
+        assert call_kwargs['subtitle_segments'] == fake_segments
+        assert call_kwargs['audio_path'] is None
+
+    def test_youtube_no_subtitles_falls_back_to_audio_download(self, tmp_path: Path):
+        runner = CliRunner()
+        fake_audio = tmp_path / 'audio.wav'
+        fake_audio.touch()
+
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = ('default_en', MagicMock())
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL, return_value=self._make_template_loader()),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+            patch(_IS_URL, return_value=True),
+            patch(_FETCH_SUBS, return_value=None),
+            patch(_DL_AUDIO, return_value=(fake_audio, 'Downloaded Video')),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, ['transcribe', 'https://youtube.com/watch?v=test'])
+
+        assert result.exit_code == 0
+        mock_app_cls.return_value.run.assert_called_once()
+        call_kwargs = mock_app_cls.call_args[1]
+        assert call_kwargs['audio_path'] == fake_audio
+        assert call_kwargs['subtitle_segments'] is None
+
+    def test_youtube_picker_cancel_cleans_up_and_returns_zero(self, tmp_path: Path):
+        runner = CliRunner()
+
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = None  # user cancelled
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+            patch(_IS_URL, return_value=True),
+            patch(_FETCH_SUBS, return_value=None),
+            patch('shutil.rmtree') as mock_rmtree,
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock()
+            result = runner.invoke(cli, ['transcribe', 'https://youtube.com/watch?v=test'])
+
+        assert result.exit_code == 0
+        mock_rmtree.assert_called_once()
+
+    def test_youtube_audio_download_error_exits_1(self, tmp_path: Path):
+        runner = CliRunner()
+
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = ('default_en', MagicMock())
+
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL, return_value=self._make_template_loader()),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+            patch(_IS_URL, return_value=True),
+            patch(_FETCH_SUBS, return_value=None),
+            patch(_DL_AUDIO, side_effect=RuntimeError('yt-dlp failed')),
+            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp'),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, ['transcribe', 'https://youtube.com/watch?v=test'])
+
+        assert result.exit_code == 1
+        assert 'Error' in result.output
+
+
 class TestViewSubcommand:
     def test_picker_returns_none_exits_cleanly(self, tmp_path: Path):
         runner = CliRunner()
