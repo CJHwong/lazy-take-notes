@@ -6,7 +6,6 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import ListItem, ListView, Static
 
-
 _MODES = [
     ('record', 'Record', 'Live transcription with AI digest'),
     ('transcribe', 'Transcribe', 'Transcribe an existing audio file'),
@@ -18,7 +17,7 @@ _P = '#E8A820'  # pig body (golden yellow)
 _T = '#4A9E9E'  # teal headphones
 _D = '#2A1818'  # dark outline
 _S = '#C47A10'  # snout (amber-brown)
-_B = None       # terminal background (transparent)
+_B = None  # terminal background (transparent)
 
 _PIXEL_ROWS: list[list[str | None]] = [
     # rows 0-1: headphone arch

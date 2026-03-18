@@ -50,7 +50,7 @@ def resolve_editor() -> list[str] | None:
     return fallbacks.get(plat)
 
 
-class _ConfirmDeleteScreen(ModalScreen):
+class _ConfirmDeleteScreen(ModalScreen[bool]):
     """Modal yes/no dialog for template deletion — overlays the picker."""
 
     CSS = """

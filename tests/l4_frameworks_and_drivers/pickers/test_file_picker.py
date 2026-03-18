@@ -13,7 +13,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import (
     FileItem,
     FilePicker,
     ParentItem,
-    _human_size,
+    human_size,
 )
 
 # ── Fixture ───────────────────────────────────────────────────────────────────
@@ -49,16 +49,16 @@ def _preview_text(picker: FilePicker) -> str:
 
 class TestHumanSize:
     def test_bytes(self) -> None:
-        assert _human_size(500) == '500 B'
+        assert human_size(500) == '500 B'
 
     def test_kilobytes(self) -> None:
-        assert _human_size(1024) == '1 KB'
+        assert human_size(1024) == '1.0 KB'
 
     def test_megabytes(self) -> None:
-        assert _human_size(1024 * 1024) == '1 MB'
+        assert human_size(1024 * 1024) == '1.0 MB'
 
     def test_terabytes(self) -> None:
-        assert _human_size(1024**4) == '1.0 TB'
+        assert human_size(1024**4) == '1.0 TB'
 
 
 # ── 2. Mount & Initial State ──────────────────────────────────────────────────

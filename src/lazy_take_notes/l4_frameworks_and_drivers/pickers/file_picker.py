@@ -20,11 +20,12 @@ AUDIO_EXTS = frozenset({'.mp3', '.wav', '.m4a', '.mp4'})
 _DIR_COUNT_CAP = 1000
 
 
-def _human_size(n: int) -> str:
+def human_size(n: int) -> str:
     size = float(n)
     for unit in ('B', 'KB', 'MB', 'GB'):
         if size < 1024:
-            return f'{size:.0f} {unit}'
+            fmt = '.0f' if unit == 'B' else '.1f'
+            return f'{size:{fmt}} {unit}'
         size /= 1024
     return f'{size:.1f} TB'
 
@@ -67,7 +68,7 @@ class FileItem(ListItem):
             size_str = 'unknown'
         else:
             self._stat = stat_result
-            size_str = _human_size(stat_result.st_size)
+            size_str = human_size(stat_result.st_size)
         self._size_str = size_str
         self._label = f'{path.name}  [dim]{self._size_str}[/dim]'
 
@@ -101,9 +102,9 @@ class FilePicker(SearchablePicker[Path]):
             self.path = path
             self.label = label
 
-    def __init__(self, start_dir: Path = Path.cwd(), audio_exts: frozenset[str] = AUDIO_EXTS, **kwargs) -> None:
+    def __init__(self, start_dir: Path | None = None, audio_exts: frozenset[str] = AUDIO_EXTS, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._current_dir = start_dir.resolve()
+        self._current_dir = (start_dir or Path.cwd()).resolve()
         self._audio_exts = audio_exts
         self._highlighted_dir: Path | None = None
 
@@ -161,9 +162,10 @@ class FilePicker(SearchablePicker[Path]):
         for f in files:
             list_view.append(FileItem(f))
 
-        if list_view.children:
+        first_child = list_view.children[0] if list_view.children else None
+        if isinstance(first_child, ListItem):
             list_view.index = 0
-            self._update_info(list_view.children[0])
+            self._update_info(first_child)
 
     def _navigate_to(self, directory: Path) -> None:
         self._current_dir = directory
@@ -220,7 +222,7 @@ class FilePicker(SearchablePicker[Path]):
                 size = item._size_str
             else:
                 modified = datetime.fromtimestamp(stat_result.st_mtime).strftime('%Y-%m-%d %H:%M')
-                size = _human_size(stat_result.st_size)
+                size = human_size(stat_result.st_size)
             self._set_info(f'[bold]{item.path.name}[/bold]\nSize: {size}\nModified: {modified}')
 
     def _start_dir_count(self, path: Path) -> None:

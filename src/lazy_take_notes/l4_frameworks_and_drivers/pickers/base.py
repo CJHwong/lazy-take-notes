@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import ClassVar, TypeVar
 
-T = TypeVar('T')
-
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widgets import Input, ListItem, ListView, Static
+
+T = TypeVar('T')
 
 
 class PickerListView(ListView):
@@ -51,7 +51,10 @@ class SearchablePicker(App[T]):
     ]
 
     DEFAULT_CSS = """
-    #sp-header  { dock: top; height: 1; background: $primary; color: $text; text-align: center; text-style: bold; padding: 0 1; }
+    #sp-header  {
+        dock: top; height: 1; background: $primary;
+        color: $text; text-align: center; text-style: bold; padding: 0 1;
+    }
     #sp-footer  { dock: bottom; height: 1; background: $surface; color: $text-muted; text-align: center; padding: 0 1; }
     #sp-layout  { height: 1fr; }
     #sp-list-pane { width: 1fr; min-width: 24; }

@@ -185,8 +185,8 @@ def record(ctx, label):
 def transcribe(ctx, audio_file, label):
     """Transcribe an audio file with streaming TUI and generate a final digest."""
     if audio_file is None:
-        from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import (
-            FilePicker,  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+            FilePicker,
         )
 
         selected = FilePicker().run()
