@@ -45,18 +45,20 @@ else
   ok "Already installed"
 fi
 
-# 4. alias
-section "4 / 5  Shell alias"
-SHELL_RC="$HOME/.zshrc"
-ALIAS_LINE='alias take-note="uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git lazy-take-notes"'
+# 4. take-note command
+section "4 / 5  take-note command"
+BREW_BIN="$(brew --prefix)/bin"
+TAKE_NOTE_BIN="$BREW_BIN/take-note"
 
-if grep -q "alias take-note=" "$SHELL_RC" 2>/dev/null; then
-  ok "Already set in $SHELL_RC"
+if [ -f "$TAKE_NOTE_BIN" ]; then
+  ok "Already exists at $TAKE_NOTE_BIN"
 else
-  echo "" >> "$SHELL_RC"
-  echo "# lazy-take-notes" >> "$SHELL_RC"
-  echo "$ALIAS_LINE" >> "$SHELL_RC"
-  ok "Added 'take-note' alias to $SHELL_RC"
+  cat > "$TAKE_NOTE_BIN" << EOF
+#!/bin/bash
+exec "$BREW_BIN/uvx" --from git+https://github.com/CJHwong/lazy-meeting-note.git lazy-take-notes "\$@"
+EOF
+  chmod +x "$TAKE_NOTE_BIN"
+  ok "Created 'take-note' command at $TAKE_NOTE_BIN"
 fi
 
 # 5. config.yaml
@@ -83,5 +85,5 @@ echo -e "Sign in to Ollama to enable cloud models:\n"
 ollama signin
 
 echo -e "\n${GREEN}${BOLD}Setup complete!${RESET}"
-echo -e "Open a new terminal window and run:\n"
+echo -e "Run:\n"
 echo -e "  ${BOLD}take-note record${RESET}\n"
