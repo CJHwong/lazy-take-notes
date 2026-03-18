@@ -58,7 +58,7 @@ class _SessionListView(PickerListView):
     _selectable_type = SessionItem
 
 
-class SessionPicker(SearchablePicker):
+class SessionPicker(SearchablePicker[Path]):
     CSS = """
     #sp-list-pane { max-width: 48; }
     #sp-list Static { overflow: hidden hidden; height: 1; }

@@ -157,7 +157,7 @@ class _TemplateListView(PickerListView):
     _selectable_type = TemplateItem
 
 
-class TemplatePicker(SearchablePicker):
+class TemplatePicker(SearchablePicker[tuple[str, AudioMode]]):
     CSS = """
     #sp-list-pane { max-width: 40; }
     """

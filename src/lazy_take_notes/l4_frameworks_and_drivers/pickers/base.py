@@ -6,7 +6,9 @@ All pickers that display a filterable list alongside a preview pane
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, TypeVar
+
+T = TypeVar('T')
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -32,7 +34,7 @@ class PickerListView(ListView):
             event.prevent_default()
 
 
-class SearchablePicker(App):  # type: ignore[type-arg]
+class SearchablePicker(App[T]):
     """Abstract base for searchable pickers with a filter input and preview pane.
 
     Standardised widget IDs:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import os
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -81,7 +81,7 @@ class _FileListView(PickerListView):
     _selectable_type = ListItem  # ParentItem / DirItem / FileItem are all selectable
 
 
-class FilePicker(SearchablePicker):
+class FilePicker(SearchablePicker[Path]):
     CSS = """
     #sp-list-pane { width: 2fr; max-width: 9999; }
     #sp-preview   { width: 1fr; }
