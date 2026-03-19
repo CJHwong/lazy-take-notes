@@ -263,19 +263,22 @@ class TestCliGroup:
         mock_app_cls.return_value.run.assert_called_once()
 
     def test_welcome_picker_view_proceeds_to_app(self, tmp_path: Path):
-        """WelcomePicker selects view → ViewApp runs."""
+        """WelcomePicker selects view → ViewApp runs → loops back → Esc exits."""
         runner = CliRunner()
         session_dir = tmp_path / '2026-02-22_120000'
         session_dir.mkdir()
 
-        mock_welcome = MagicMock()
-        mock_welcome.run.return_value = 'view'
+        # First call returns 'view', second returns None (Esc) to exit loop
+        mock_welcome_1 = MagicMock()
+        mock_welcome_1.run.return_value = 'view'
+        mock_welcome_2 = MagicMock()
+        mock_welcome_2.run.return_value = None
 
         mock_session_picker = MagicMock()
         mock_session_picker.run.side_effect = [session_dir, None]
 
         with (
-            patch(_WELCOME_PICKER, return_value=mock_welcome),
+            patch(_WELCOME_PICKER, side_effect=[mock_welcome_1, mock_welcome_2]),
             patch(_YAML_CFG) as mock_config_cls,
             patch(_YAML_TPL),
             patch(_BUILD) as mock_build,

@@ -12,14 +12,14 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker import (
 
 class TestWelcomePicker:
     @pytest.mark.asyncio
-    async def test_shows_three_modes(self):
+    async def test_shows_all_modes(self):
         picker = WelcomePicker()
         async with picker.run_test() as pilot:
             await pilot.pause()
             items = picker.query(ModeItem)
-            assert len(items) == 3
+            assert len(items) == 5
             modes = [item.mode for item in items]
-            assert modes == ['record', 'transcribe', 'view']
+            assert modes == ['record', 'transcribe', 'view', 'create-template', 'config']
 
     @pytest.mark.asyncio
     async def test_escape_returns_none(self):

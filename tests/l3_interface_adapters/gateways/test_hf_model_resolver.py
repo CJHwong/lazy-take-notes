@@ -141,11 +141,9 @@ class TestProgressClass:
 
 class TestCacheHit:
     @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
-    def test_breeze_cache_hit_skips_download(self, mock_download, tmp_path):
-        # Pre-create the model file so the cache check passes
-        cache_dir = tmp_path / 'models' / 'breeze'
-        cache_dir.mkdir(parents=True)
-        (cache_dir / 'ggml-model-q8_0.bin').touch()
+    def test_breeze_always_delegates_to_hf_hub(self, mock_download, tmp_path):
+        """hf_hub_download handles its own caching with ETag validation — we always call it."""
+        mock_download.return_value = str(tmp_path / 'models' / 'breeze' / 'ggml-model-q8_0.bin')
 
         with patch(
             'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
@@ -154,14 +152,13 @@ class TestCacheHit:
             resolver = HfModelResolver()
             result = resolver.resolve('breeze-q8')
 
-        mock_download.assert_not_called()
+        mock_download.assert_called_once()
         assert 'ggml-model-q8_0.bin' in result
 
     @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
-    def test_whisper_cpp_cache_hit_skips_download(self, mock_download, tmp_path):
-        cache_dir = tmp_path / 'models' / 'whisper-cpp'
-        cache_dir.mkdir(parents=True)
-        (cache_dir / 'ggml-large-v3-turbo-q8_0.bin').touch()
+    def test_whisper_cpp_always_delegates_to_hf_hub(self, mock_download, tmp_path):
+        """hf_hub_download handles its own caching with ETag validation — we always call it."""
+        mock_download.return_value = str(tmp_path / 'models' / 'whisper-cpp' / 'ggml-large-v3-turbo-q8_0.bin')
 
         with patch(
             'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
@@ -170,7 +167,7 @@ class TestCacheHit:
             resolver = HfModelResolver()
             result = resolver.resolve('large-v3-turbo-q8_0')
 
-        mock_download.assert_not_called()
+        mock_download.assert_called_once()
         assert 'ggml-large-v3-turbo-q8_0.bin' in result
 
     @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')

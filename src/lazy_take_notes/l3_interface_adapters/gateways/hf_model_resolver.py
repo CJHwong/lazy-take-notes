@@ -97,9 +97,6 @@ def _download_breeze(name: str, *, tqdm_class: type | None = None) -> str:
     filename = BREEZE_VARIANTS[name]
     cache_dir = Path(MODELS_DIR) / 'breeze'
     cache_dir.mkdir(parents=True, exist_ok=True)
-    local_path = cache_dir / filename
-    if local_path.exists():
-        return str(local_path)
     kwargs: dict = dict(repo_id=BREEZE_REPO, filename=filename, local_dir=cache_dir)
     if tqdm_class is not None:
         kwargs['tqdm_class'] = tqdm_class
@@ -110,9 +107,6 @@ def _download_whisper_cpp(name: str, *, tqdm_class: type | None = None) -> str:
     filename = WHISPER_CPP_MODELS[name]
     cache_dir = Path(MODELS_DIR) / 'whisper-cpp'
     cache_dir.mkdir(parents=True, exist_ok=True)
-    local_path = cache_dir / filename
-    if local_path.exists():
-        return str(local_path)
     kwargs: dict = dict(repo_id=WHISPER_CPP_REPO, filename=filename, local_dir=cache_dir)
     if tqdm_class is not None:
         kwargs['tqdm_class'] = tqdm_class
