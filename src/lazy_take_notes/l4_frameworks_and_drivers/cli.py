@@ -116,6 +116,8 @@ def cli(ctx, config_path, output_dir):
             return
         elif mode == 'view':
             ctx.invoke(view)
+        elif mode == 'create-template':
+            ctx.invoke(create_template)
         elif mode == 'config':
             ctx.invoke(config)
         else:
@@ -140,11 +142,16 @@ def record(ctx, label):
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = _load_config(config_path, output_dir)
 
-    picker = TemplatePicker(show_audio_mode=True)
-    picker_result = picker.run()
-    if picker_result is None:
-        return
-    tmpl_ref, audio_mode = picker_result
+    while True:
+        picker = TemplatePicker(show_audio_mode=True)
+        picker_result = picker.run()
+        if picker_result is None:
+            return
+        tmpl_ref, audio_mode = picker_result
+        if tmpl_ref == '__create_template__':
+            _launch_template_builder()
+            continue  # loop back so user can select their new template
+        break
 
     try:
         template = template_loader.load(tmpl_ref)
@@ -212,11 +219,16 @@ def transcribe(ctx, audio_file, label):
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = _load_config(config_path, output_dir)
 
-    picker = TemplatePicker(show_audio_mode=False)
-    picker_result = picker.run()
-    if picker_result is None:
-        return
-    tmpl_ref, _audio_mode = picker_result
+    while True:
+        picker = TemplatePicker(show_audio_mode=False)
+        picker_result = picker.run()
+        if picker_result is None:
+            return
+        tmpl_ref, _audio_mode = picker_result
+        if tmpl_ref == '__create_template__':
+            _launch_template_builder()
+            continue  # loop back so user can select their new template
+        break
 
     try:
         template = template_loader.load(tmpl_ref)
@@ -278,6 +290,13 @@ def view(ctx):
         app.run()
 
 
+@cli.command('create-template')
+@click.pass_context
+def create_template(ctx):
+    """Build a custom template with AI assistance."""
+    _launch_template_builder()
+
+
 @cli.command()
 @click.pass_context
 def config(ctx):
@@ -287,6 +306,15 @@ def config(ctx):
     )
 
     ConfigApp().run()
+
+
+def _launch_template_builder() -> None:
+    """Launch the TemplateBuilderApp."""
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        TemplateBuilderApp,
+    )
+
+    TemplateBuilderApp().run()
 
 
 def _preflight_llm(infra, config) -> tuple[list[str], list[str]]:

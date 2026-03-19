@@ -17,9 +17,9 @@ class TestWelcomePicker:
         async with picker.run_test() as pilot:
             await pilot.pause()
             items = picker.query(ModeItem)
-            assert len(items) == 4
+            assert len(items) == 5
             modes = [item.mode for item in items]
-            assert modes == ['record', 'transcribe', 'view', 'config']
+            assert modes == ['record', 'transcribe', 'view', 'create-template', 'config']
 
     @pytest.mark.asyncio
     async def test_escape_returns_none(self):

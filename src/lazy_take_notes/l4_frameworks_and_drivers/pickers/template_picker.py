@@ -193,7 +193,7 @@ class TemplatePicker(SearchablePicker[tuple[str, AudioMode]]):
             base += rf'  \[d] Audio: {label}'
             if self._audio_mode == AudioMode.MIX:
                 base += '  [dim]tip: use headphones if you hear echo[/dim]'
-        base += r'  \[e] Edit  \[x] Delete  \[Esc] Cancel'
+        base += r'  \[n] New  \[e] Edit  \[x] Delete  \[Esc] Cancel'
         return base
 
     def _search_placeholder(self) -> str:
@@ -210,11 +210,19 @@ class TemplatePicker(SearchablePicker[tuple[str, AudioMode]]):
             self.action_edit_template()
             event.prevent_default()
             return
+        if event.key == 'n' and not isinstance(self.focused, Input):
+            self.action_new_template()
+            event.prevent_default()
+            return
         if event.key == 'x' and not isinstance(self.focused, Input):
             self.action_delete_template()
             event.prevent_default()
             return
         super().on_key(event)
+
+    def action_new_template(self) -> None:
+        """Exit picker with a sentinel value to launch the template builder."""
+        self.exit(('__create_template__', self._audio_mode))
 
     def _rebuild_list(self, query: str = '') -> None:
         """Rebuild the ListView contents, optionally filtered by *query*."""
