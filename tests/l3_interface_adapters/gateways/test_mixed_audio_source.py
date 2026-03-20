@@ -56,6 +56,53 @@ class TestMixedAudioSource:
         assert mic.close_calls == 1
         assert sys_audio.close_calls == 1
 
+    def test_mic_muted_returns_only_system_audio(self):
+        mic = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])
+        sys_audio = FakeAudioSource(chunks=[np.array([0.4, 0.5], dtype=np.float32)])
+        src = MixedAudioSource(mic, sys_audio)
+        src.mic_muted = True
+        src.open(16000, 1)
+
+        time.sleep(0.1)
+        result = src.read(timeout=0.5)
+        src.close()
+
+        assert result is not None
+        # mic zeroed: (0.0 + 0.4) * 0.5 = 0.2, (0.0 + 0.5) * 0.5 = 0.25
+        np.testing.assert_allclose(result, [0.2, 0.25], atol=1e-6)
+
+    def test_mic_muted_toggle_mid_stream(self):
+        mic = FakeAudioSource(
+            chunks=[
+                np.array([0.6, 0.7], dtype=np.float32),
+                np.array([0.6, 0.7], dtype=np.float32),
+            ]
+        )
+        sys_audio = FakeAudioSource(
+            chunks=[
+                np.array([0.4, 0.5], dtype=np.float32),
+                np.array([0.4, 0.5], dtype=np.float32),
+            ]
+        )
+        src = MixedAudioSource(mic, sys_audio)
+        src.open(16000, 1)
+
+        time.sleep(0.1)
+        # First read — unmuted
+        r1 = src.read(timeout=0.5)
+        assert r1 is not None
+        np.testing.assert_allclose(r1, [0.5, 0.6], atol=1e-6)
+
+        # Mute and read again
+        src.mic_muted = True
+        time.sleep(0.05)
+        r2 = src.read(timeout=0.5)
+        src.close()
+
+        assert r2 is not None
+        # mic zeroed: (0.0 + 0.4) * 0.5 = 0.2, (0.0 + 0.5) * 0.5 = 0.25
+        np.testing.assert_allclose(r2, [0.2, 0.25], atol=1e-6)
+
     def test_size_mismatch_pads_shorter_to_mic_length(self):
         mic = FakeAudioSource(chunks=[np.array([0.1, 0.2, 0.3], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.array([0.1, 0.2], dtype=np.float32)])

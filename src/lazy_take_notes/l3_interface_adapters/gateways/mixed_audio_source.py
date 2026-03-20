@@ -41,6 +41,10 @@ class MixedAudioSource:
         self._sys_buf: np.ndarray = np.array([], dtype=np.float32)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        # When True, mic audio is zeroed before mixing — system audio only.
+        # Written by main thread, read by audio worker thread; bool assignment is
+        # atomic under the GIL so no lock is needed.
+        self.mic_muted: bool = False
 
     def open(self, sample_rate: int, channels: int) -> None:
         log.info(
@@ -70,6 +74,11 @@ class MixedAudioSource:
             mic = self._mic_q.get(timeout=timeout)
         except queue.Empty:
             return None
+
+        # Zero mic data when muted — reader threads keep running to preserve
+        # stream state; we just silence the mic contribution.
+        if self.mic_muted:
+            mic = np.zeros_like(mic)
 
         # Drain ALL available system chunks into the rolling buffer non-blocking.
         # get_nowait() is intentional: blocking here would stall the mic path and
