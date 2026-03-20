@@ -39,6 +39,7 @@ dependencies = [
 ]
 
 [project.scripts]
+take-note = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
 lazy-take-notes = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
 
 [project.urls]

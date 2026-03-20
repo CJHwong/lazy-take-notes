@@ -43,13 +43,18 @@ pip install -e .
 ## Run
 
 ```bash
-lazy-take-notes record                        # start recording
-lazy-take-notes record -l sprint-review       # record with session label
-lazy-take-notes --config path/to/config.yaml  # custom config
-lazy-take-notes --output-dir ./my_session     # custom output dir
-lazy-take-notes transcribe recording.m4a      # transcribe an audio file
-lazy-take-notes view                          # browse saved sessions
+take-note                                     # interactive mode selector
+take-note record                              # start recording
+take-note record -l sprint-review             # record with session label
+take-note transcribe recording.m4a            # transcribe an audio file
+take-note view                                # browse saved sessions
+take-note config                              # open the settings editor
+take-note create-template                     # build a custom template with AI
+take-note --config path/to/config.yaml        # custom config
+take-note --output-dir ./my_session           # custom output dir
 ```
+
+> `lazy-take-notes` works as an alias for `take-note`.
 
 ## Keys
 
