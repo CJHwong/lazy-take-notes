@@ -75,15 +75,14 @@ Audio Worker (thread)          Digest Task (async)          Query Task (async)
 
 Digest and query are on-demand async tasks (`self.run_worker(..., exclusive=True, group=...)`) — not persistent background workers. `_digest_running` / `_query_running` flags prevent double-firing.
 
-## Audio Modes
+## Audio Capture
 
-Selected at startup via template picker (all platforms):
+Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti-clipping). No audio mode picker — the user presses `[m]` during recording to mute/unmute the microphone.
 
-- **MIC_ONLY** — `SounddeviceAudioSource` (PortAudio, cross-platform)
-- **SYSTEM_ONLY** — macOS: `CoreAudioTapSource` (ScreenCaptureKit); Linux/Windows: `SoundCardLoopbackSource` (PulseAudio/WASAPI loopback)
-- **MIX** — `MixedAudioSource` (mic + system blended, 0.5 attenuation anti-clipping)
+- macOS: `MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())`
+- Linux/Windows: `MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())`
 
-`DependencyContainer._build_audio_source()` selects the system audio backend by platform.
+`DependencyContainer._build_mixed_source()` selects the system audio backend by platform. `MixedAudioSource.mic_muted` flag (bool, GIL-atomic) controls mic muting at read time — reader threads always run.
 
 ## Data Flow
 
@@ -93,9 +92,9 @@ Selected at startup via template picker (all platforms):
 4. **Digest cycle**: Template-driven prompt (with user session context) → LLMClient.chat → JSON parse → DigestData → persist + update panel
 5. **Token compaction**: When prompt_tokens exceeds threshold, conversation history is compacted to 3 messages (system, compressed state, last response)
 6. **Quick actions**: Positional keybinding (1–5) → format prompt from template with current digest + recent transcript → LLM fast model → modal display
-7. **File transcription**: `lazy-take-notes transcribe <file>` → TemplatePicker (no audio mode) → ffmpeg decode → chunked transcription via `FileTranscriptionWorker` (thread) → streaming TUI output + auto-trigger final digest on completion
+7. **File transcription**: `lazy-take-notes transcribe <file>` → TemplatePicker → ffmpeg decode → chunked transcription via `FileTranscriptionWorker` (thread) → streaming TUI output + auto-trigger final digest on completion
 8. **Session viewer**: `lazy-take-notes view` → SessionPicker (browse saved sessions) → ViewApp (read-only, standalone TextualApp — no controller/workers)
-9. **Recording**: When `save_audio: true`, WAV is written alongside output — mic mode records at native sample rate, system/mixed mode records processed 16 kHz int16
+9. **Recording**: When `save_audio: true`, WAV is written alongside output — always processed 16 kHz int16
 
 ## Design Decisions
 
@@ -105,9 +104,9 @@ Selected at startup via template picker (all platforms):
 - **Template-driven**: All prompts, labels, and quick actions are defined in YAML templates — core logic is locale-agnostic
 - **Message passing**: Workers communicate with the App exclusively through Textual Messages — clean separation of concerns
 - **Transcriber** and **LLMClient** are fully isolated behind L2 ports — `OllamaLLMClient` and `OpenAICompatLLMClient` are interchangeable; new implementations can be added with zero L2 changes
-- **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` selects per platform + audio mode
+- **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` always builds `MixedAudioSource` with platform-appropriate system backend
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
-- **Template picker**: Interactive TUI launched before the main app; selects template + audio mode to configure the session. `record` shows audio mode selector; `transcribe` hides it (input is a file, not a device)
+- **Template picker**: Interactive TUI launched before the main app; selects template to configure the session
 - **Session picker**: Interactive TUI for `view` subcommand; lists saved session directories and loops back after each ViewApp exit
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
