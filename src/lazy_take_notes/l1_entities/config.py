@@ -39,6 +39,9 @@ class InteractiveConfig(BaseModel):
 class OutputConfig(BaseModel):
     directory: str
     save_audio: bool
+    save_notes_history: bool
+    save_context: bool
+    save_debug_log: bool
 
 
 class AppConfig(BaseModel):

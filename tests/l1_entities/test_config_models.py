@@ -104,8 +104,16 @@ class TestInteractiveConfig:
 
 class TestOutputConfig:
     def test_valid(self):
-        cfg = OutputConfig(directory='./out', save_audio=False)
+        cfg = OutputConfig(
+            directory='./out',
+            save_audio=False,
+            save_notes_history=True,
+            save_context=True,
+            save_debug_log=False,
+        )
         assert cfg.save_audio is False
+        assert cfg.save_notes_history is True
+        assert cfg.save_debug_log is False
 
     def test_missing_field_raises(self):
         with pytest.raises(ValidationError):
@@ -129,13 +137,19 @@ class TestAppConfig:
                 compact_token_threshold=50_000,
             ),
             interactive=InteractiveConfig(model='m'),
-            output=OutputConfig(directory='./out', save_audio=True),
+            output=OutputConfig(
+                directory='./out', save_audio=True, save_notes_history=True, save_context=True, save_debug_log=False
+            ),
         )
         assert cfg.output.save_audio is True
 
     def test_missing_top_level_field_raises(self):
         with pytest.raises(ValidationError):
-            AppConfig(output=OutputConfig(directory='./out', save_audio=True))  # type: ignore[call-arg]
+            AppConfig(
+                output=OutputConfig(
+                    directory='./out', save_audio=True, save_notes_history=True, save_context=True, save_debug_log=False
+                )
+            )  # type: ignore[call-arg]
 
     def test_no_defaults(self):
         """AppConfig has no defaults — bare construction must fail."""
