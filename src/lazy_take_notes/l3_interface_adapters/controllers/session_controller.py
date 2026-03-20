@@ -72,12 +72,13 @@ class SessionController:
         if result.data is not None:
             self.latest_digest = result.data
             self._persistence.save_digest_md(result.data, self.digest_state.digest_count)
-            self._persistence.save_history(
-                result.data,
-                self.digest_state.digest_count,
-                is_final=is_final,
-            )
-            if is_final and self.user_context.strip():
+            if self._config.output.save_notes_history:
+                self._persistence.save_history(
+                    result.data,
+                    self.digest_state.digest_count,
+                    is_final=is_final,
+                )
+            if is_final and self.user_context.strip() and self._config.output.save_context:
                 self._persistence.save_session_context(self.user_context)
 
             # Compact if needed

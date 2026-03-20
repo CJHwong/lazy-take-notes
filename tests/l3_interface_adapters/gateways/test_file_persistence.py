@@ -51,7 +51,7 @@ class TestSaveTranscriptLines:
         segs2 = [TranscriptSegment(text='Second', wall_start=60, wall_end=61)]
         gw.save_transcript_lines(segs1, append=False)
         gw.save_transcript_lines(segs2, append=True)
-        content = (tmp_output_dir / 'transcript_raw.txt').read_text(encoding='utf-8')
+        content = (tmp_output_dir / 'transcript.txt').read_text(encoding='utf-8')
         assert 'First' in content
         assert 'Second' in content
 
@@ -69,7 +69,7 @@ class TestSaveDigestMd:
         gw = FilePersistenceGateway(tmp_output_dir)
         gw.save_digest_md('First version', 1)
         gw.save_digest_md('Second version', 2)
-        content = (tmp_output_dir / 'digest.md').read_text(encoding='utf-8')
+        content = (tmp_output_dir / 'notes.md').read_text(encoding='utf-8')
         assert 'Second version' in content
         assert 'First version' not in content
 
@@ -78,7 +78,7 @@ class TestSaveSessionContext:
     def test_creates_file(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)
         path = gw.save_session_context('Speaker A = Alice\nFix: "rec" → "wreck"')
-        assert path.name == 'session_context.txt'
+        assert path.name == 'context.txt'
         assert path.exists()
         assert 'Speaker A = Alice' in path.read_text(encoding='utf-8')
 
@@ -86,7 +86,7 @@ class TestSaveSessionContext:
         gw = FilePersistenceGateway(tmp_output_dir)
         gw.save_session_context('first')
         gw.save_session_context('second')
-        assert (tmp_output_dir / 'session_context.txt').read_text(encoding='utf-8') == 'second'
+        assert (tmp_output_dir / 'context.txt').read_text(encoding='utf-8') == 'second'
 
 
 class TestRelocate:
@@ -106,20 +106,20 @@ class TestRelocate:
         new_dir.mkdir()
         gw.relocate(new_dir)
         gw.save_digest_md('New location', 1)
-        assert not (tmp_output_dir / 'digest.md').exists()
+        assert not (tmp_output_dir / 'notes.md').exists()
 
 
 class TestSaveHistory:
     def test_creates_numbered_file(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)
         path = gw.save_history(SAMPLE_MARKDOWN, 3)
-        assert path.name == 'digest_003.md'
+        assert path.name == 'notes_003.md'
         assert path.exists()
 
     def test_final_suffix(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)
         path = gw.save_history(SAMPLE_MARKDOWN, 3, is_final=True)
-        assert path.name == 'digest_003_final.md'
+        assert path.name == 'notes_003_final.md'
 
     def test_creates_history_dir(self, tmp_output_dir: Path):
         gw = FilePersistenceGateway(tmp_output_dir)

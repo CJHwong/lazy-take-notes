@@ -16,9 +16,9 @@ def _make_session(tmp_path: Path, *, transcript: str = '', digest: str = '') -> 
     session_dir = tmp_path / '2026-02-20_120000'
     session_dir.mkdir()
     if transcript:
-        (session_dir / 'transcript_raw.txt').write_text(transcript, encoding='utf-8')
+        (session_dir / 'transcript.txt').write_text(transcript, encoding='utf-8')
     if digest:
-        (session_dir / 'digest.md').write_text(digest, encoding='utf-8')
+        (session_dir / 'notes.md').write_text(digest, encoding='utf-8')
     return session_dir
 
 

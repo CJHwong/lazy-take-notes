@@ -17,6 +17,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Static, TextArea
 
 from lazy_take_notes.l1_entities.config import AppConfig
+from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
@@ -71,7 +72,7 @@ class BaseApp(TextualApp):
         self._output_dir.mkdir(parents=True, exist_ok=True)
         self._session_label = label
 
-        setup_file_logging(self._output_dir)
+        setup_file_logging(self._output_dir, enabled=config.output.save_debug_log)
 
         # Controller (injected or created with default wiring)
         if controller is not None:
@@ -217,7 +218,7 @@ class BaseApp(TextualApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.notify(
-            f'Digest failed: {message.error} (see ltn_debug.log)',
+            f'Digest failed: {message.error} (see {DEBUG_LOG.name})',
             severity='error',
             timeout=8,
         )

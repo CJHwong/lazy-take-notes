@@ -25,6 +25,9 @@ class TestBuildAppConfig:
         assert cfg.interactive.model == 'gpt-oss:20b'
         assert cfg.output.directory == './output'
         assert cfg.output.save_audio is True
+        assert cfg.output.save_notes_history is True
+        assert cfg.output.save_context is True
+        assert cfg.output.save_debug_log is False
 
     def test_user_overrides_take_precedence(self):
         cfg = build_app_config(

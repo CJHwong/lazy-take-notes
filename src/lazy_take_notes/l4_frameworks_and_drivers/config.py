@@ -30,6 +30,9 @@ APP_CONFIG_DEFAULTS: dict = {
     'output': {
         'directory': './output',
         'save_audio': True,
+        'save_notes_history': True,
+        'save_context': True,
+        'save_debug_log': False,
     },
     'recognition_hints': [],
 }

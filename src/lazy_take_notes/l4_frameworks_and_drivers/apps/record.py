@@ -8,6 +8,7 @@ import threading
 from textual.binding import Binding
 from textual.widgets import TextArea
 
+from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
@@ -186,7 +187,7 @@ class RecordApp(BaseApp):
             self._update_hints('error')
             if message.error:
                 self.notify(
-                    f'Audio error: {message.error}\n(see ltn_debug.log)',
+                    f'Audio error: {message.error}\n(see {DEBUG_LOG.name})',
                     severity='error',
                     timeout=12,
                 )

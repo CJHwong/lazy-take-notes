@@ -20,12 +20,12 @@ def _create_session(
     transcript: str = 'Hello\nWorld\n',
     digest_text: str = '# Summary\nKey points.',
 ) -> Path:
-    """Create a fake session directory with transcript_raw.txt."""
+    """Create a fake session directory with transcript.txt."""
     session_dir = tmp_path / name
     session_dir.mkdir()
-    (session_dir / 'transcript_raw.txt').write_text(transcript, encoding='utf-8')
+    (session_dir / 'transcript.txt').write_text(transcript, encoding='utf-8')
     if has_digest:
-        (session_dir / 'digest.md').write_text(digest_text, encoding='utf-8')
+        (session_dir / 'notes.md').write_text(digest_text, encoding='utf-8')
     return session_dir
 
 
@@ -194,8 +194,8 @@ class TestSessionPicker:
     @pytest.mark.asyncio
     async def test_preview_empty_digest(self, tmp_path: Path):
         session_dir = _create_session(tmp_path, '2026-02-20_120000')
-        # Create an empty digest.md
-        (session_dir / 'digest.md').write_text('  \n  ', encoding='utf-8')
+        # Create an empty notes.md
+        (session_dir / 'notes.md').write_text('  \n  ', encoding='utf-8')
         picker = SessionPicker(sessions_dir=tmp_path)
         async with picker.run_test() as pilot:
             await pilot.pause()

@@ -473,6 +473,24 @@ class ConfigApp(TextualApp):
                             output.get('save_audio', True),
                             help_text='Save a WAV alongside the transcript. Disable to save disk space.',
                         )
+                        yield _SwitchRow(
+                            'Save Notes History',
+                            'cfg-output-save-notes-history',
+                            output.get('save_notes_history', True),
+                            help_text='Keep numbered snapshots in a history/ folder.',
+                        )
+                        yield _SwitchRow(
+                            'Save Session Context',
+                            'cfg-output-save-context',
+                            output.get('save_context', True),
+                            help_text='Save the context text you typed during the session.',
+                        )
+                        yield _SwitchRow(
+                            'Save Debug Log',
+                            'cfg-output-save-debug-log',
+                            output.get('save_debug_log', False),
+                            help_text='Write a debug.log file. Useful for troubleshooting.',
+                        )
 
                     with Vertical(classes='field-group'):
                         yield Static('Custom vocabulary', classes='field-group-title')
@@ -530,6 +548,9 @@ class ConfigApp(TextualApp):
             'output': {
                 'directory': self.query_one('#cfg-output-dir', Input).value.strip(),
                 'save_audio': self.query_one('#cfg-output-save-audio', Switch).value,
+                'save_notes_history': self.query_one('#cfg-output-save-notes-history', Switch).value,
+                'save_context': self.query_one('#cfg-output-save-context', Switch).value,
+                'save_debug_log': self.query_one('#cfg-output-save-debug-log', Switch).value,
             },
         }
         api_key = self.query_one('#cfg-openai-api-key', Input).value.strip()
@@ -645,6 +666,9 @@ class ConfigApp(TextualApp):
         output = self._raw.get('output', {})
         self.query_one('#cfg-output-dir', Input).value = str(output.get('directory', ''))
         self.query_one('#cfg-output-save-audio', Switch).value = output.get('save_audio', True)
+        self.query_one('#cfg-output-save-notes-history', Switch).value = output.get('save_notes_history', True)
+        self.query_one('#cfg-output-save-context', Switch).value = output.get('save_context', True)
+        self.query_one('#cfg-output-save-debug-log', Switch).value = output.get('save_debug_log', False)
         self.query_one('#cfg-recognition-hints', TextArea).text = '\n'.join(self._raw.get('recognition_hints', []))
 
     def action_quit_app(self) -> None:

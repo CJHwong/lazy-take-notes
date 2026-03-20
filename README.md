@@ -43,13 +43,18 @@ pip install -e .
 ## Run
 
 ```bash
-lazy-take-notes record                        # start recording
-lazy-take-notes record -l sprint-review       # record with session label
-lazy-take-notes --config path/to/config.yaml  # custom config
-lazy-take-notes --output-dir ./my_session     # custom output dir
-lazy-take-notes transcribe recording.m4a      # transcribe an audio file
-lazy-take-notes view                          # browse saved sessions
+take-note                                     # interactive mode selector
+take-note record                              # start recording
+take-note record -l sprint-review             # record with session label
+take-note transcribe recording.m4a            # transcribe an audio file
+take-note view                                # browse saved sessions
+take-note config                              # open the settings editor
+take-note create-template                     # build a custom template with AI
+take-note --config path/to/config.yaml        # custom config
+take-note --output-dir ./my_session           # custom output dir
 ```
+
+> `lazy-take-notes` works as an alias for `take-note`.
 
 ## Keys
 
@@ -110,6 +115,9 @@ interactive:
 output:
   directory: "./output"
   save_audio: true                # save recording.wav alongside transcript
+  save_notes_history: true        # keep numbered snapshots in history/
+  save_context: true              # save session context text
+  save_debug_log: false           # write debug.log (off by default)
 ```
 
 ## Templates
@@ -124,14 +132,15 @@ After a session:
 
 ```
 output/
-├── transcript_raw.txt        # timestamped transcript
-├── digest.md                 # latest digest (markdown)
-├── session_context.txt       # user-provided context (if any)
+├── transcript.txt            # timestamped transcript
+├── notes.md                  # latest notes/digest (markdown)
+├── context.txt               # user-provided context (when save_context: true)
 ├── recording.wav             # audio recording (when save_audio: true)
-└── history/
-    ├── digest_001.md
-    ├── digest_002.md
-    └── digest_003_final.md   # final digest on quit/stop
+├── debug.log                 # debug log (when save_debug_log: true)
+└── history/                  # numbered snapshots (when save_notes_history: true)
+    ├── notes_001.md
+    ├── notes_002.md
+    └── notes_003_final.md    # final digest on quit/stop
 ```
 
 ## Development

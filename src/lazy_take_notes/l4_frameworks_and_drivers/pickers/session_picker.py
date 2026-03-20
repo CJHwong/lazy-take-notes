@@ -7,6 +7,7 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.widgets import ListItem, Markdown, Static
 
+from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
     PickerListView,
     SearchablePicker,
@@ -14,7 +15,9 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
 
 
 def discover_sessions(sessions_dir: Path) -> list[dict]:
-    """Scan *sessions_dir* for session subdirs containing transcript_raw.txt.
+    """Scan *sessions_dir* for session subdirs containing a transcript file.
+
+    Recognises both current and legacy filenames.
 
     Returns a list of dicts sorted newest-first:
       {'dir': Path, 'name': str, 'has_digest': bool}
@@ -26,14 +29,13 @@ def discover_sessions(sessions_dir: Path) -> list[dict]:
     for child in sorted(sessions_dir.iterdir(), reverse=True):
         if not child.is_dir():
             continue
-        transcript = child / 'transcript_raw.txt'
-        if not transcript.exists():
+        if not TRANSCRIPT.resolve(child):
             continue
         results.append(
             {
                 'dir': child,
                 'name': child.name,
-                'has_digest': (child / 'digest.md').exists(),
+                'has_digest': NOTES.resolve(child) is not None,
             }
         )
     return results
@@ -115,8 +117,8 @@ class SessionPicker(SearchablePicker[Path]):
     def _show_preview(self, session_dir: Path) -> None:
         lines = [f'## {session_dir.name}', '']
 
-        transcript_path = session_dir / 'transcript_raw.txt'
-        if transcript_path.exists():
+        transcript_path = TRANSCRIPT.resolve(session_dir)
+        if transcript_path:
             text = transcript_path.read_text(encoding='utf-8')
             preview_lines = text.strip().splitlines()[:10]
             if preview_lines:
@@ -130,8 +132,8 @@ class SessionPicker(SearchablePicker[Path]):
             else:
                 lines.append('*Empty transcript*')
 
-        digest_path = session_dir / 'digest.md'
-        if digest_path.exists():
+        digest_path = NOTES.resolve(session_dir)
+        if digest_path:
             lines.extend(['', '---', '', '### Digest'])
             digest_text = digest_path.read_text(encoding='utf-8').strip()
             if digest_text:

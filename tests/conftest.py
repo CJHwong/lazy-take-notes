@@ -9,6 +9,7 @@ import pytest
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
 from lazy_take_notes.l1_entities.config import AppConfig
+from lazy_take_notes.l1_entities.session_files import CONTEXT, NOTES, TRANSCRIPT
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse
@@ -122,19 +123,19 @@ class FakePersistence:
 
     def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
         self.transcript_calls.append((segments, append))
-        return self._output_dir / 'transcript_raw.txt'
+        return self._output_dir / TRANSCRIPT.name
 
     def save_digest_md(self, markdown: str, digest_number: int) -> Path:
         self.digest_calls.append((markdown, digest_number))
-        return self._output_dir / 'digest.md'
+        return self._output_dir / NOTES.name
 
     def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:
         self.history_calls.append((markdown, digest_number, is_final))
-        return self._output_dir / 'history' / f'digest_{digest_number:03d}.md'
+        return self._output_dir / 'history' / f'notes_{digest_number:03d}.md'
 
     def save_session_context(self, context: str) -> Path:
         self.context_calls.append(context)
-        return self._output_dir / 'session_context.txt'
+        return self._output_dir / CONTEXT.name
 
 
 # --- Standard Fixtures ---
@@ -182,6 +183,9 @@ template: "default_zh_tw"
 output:
   directory: "./test_output"
   save_audio: true
+  save_notes_history: true
+  save_context: true
+  save_debug_log: false
 """
     p = tmp_path / 'config.yaml'
     p.write_text(content, encoding='utf-8')

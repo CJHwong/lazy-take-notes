@@ -24,18 +24,30 @@ If the output shows `3.11` or higher, you're good. Otherwise:
 
 ## 2. Install lazy-take-notes
 
-The easiest way is with [uv](https://docs.astral.sh/uv/getting-started/installation/) (a fast Python package manager):
+### Recommended: one-line setup (macOS / Linux)
+
+This installs all dependencies, picks your AI provider, and creates a `take-note` shortcut:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash
+```
+
+After it finishes, skip to [Step 4](#4-first-run) — the script handles everything in between.
+
+### Manual install
+
+If you prefer to set things up yourself, use [uv](https://docs.astral.sh/uv/getting-started/installation/):
 
 ```bash
 # install uv (one-time)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # try without installing
-uvx --from git+https://github.com/CJHwong/lazy-meeting-note.git lazy-take-notes
+uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes
 
 # or clone and install locally
-git clone https://github.com/CJHwong/lazy-meeting-note.git
-cd lazy-meeting-note
+git clone https://github.com/CJHwong/lazy-take-notes.git
+cd lazy-take-notes
 uv sync
 ```
 
@@ -49,7 +61,7 @@ pip install -e .
 
 lazy-take-notes needs a large language model to generate digests and answer questions. You have two options.
 
-Any config changes below go in `config.yaml` in your config directory — see [Config in the README](README.md#config) for the path on your OS.
+You can edit settings with `take-note config` or manually in `config.yaml` — see [Config in the README](README.md#config) for the path on your OS.
 
 ### Option A: Ollama (default, local, free, private)
 
@@ -118,7 +130,7 @@ Use OpenAI, Groq, Together, Google Gemini, or any provider with an OpenAI-compat
 ## 4. First run
 
 ```bash
-lazy-take-notes record
+take-note record
 ```
 
 You'll see:
@@ -144,6 +156,8 @@ You'll see:
 | `q`     | Quit                            |
 
 When you quit, your session is saved to the `output/` directory.
+
+**Want to change settings later?** Run `take-note config` to open the built-in settings editor.
 
 ## 5. Troubleshooting
 
