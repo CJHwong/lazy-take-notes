@@ -1695,3 +1695,54 @@ class TestConsentNoticeOnMount:
                     await pilot.pause()
                     assert marker.exists()
                     assert not isinstance(app.screen, ConsentNotice)
+
+
+class TestMicMuteToggle:
+    @pytest.mark.asyncio
+    async def test_m_toggles_mic_mute(self, tmp_path):
+        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
+        from tests.conftest import FakeAudioSource
+
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        mixed = MixedAudioSource(mic, sys_audio)
+        app = make_app(tmp_path)
+        app._audio_source = mixed
+
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                # Simulate recording started so [m] is not blocked
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+
+                assert not mixed.mic_muted
+
+                await pilot.press('m')
+                await pilot.pause()
+                assert mixed.mic_muted
+
+                bar = app.query_one('#status-bar', StatusBar)
+                assert bar.mic_muted is True
+
+                await pilot.press('m')
+                await pilot.pause()
+                assert not mixed.mic_muted
+                assert bar.mic_muted is False
+
+    @pytest.mark.asyncio
+    async def test_m_noop_when_stopped(self, tmp_path):
+        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
+        from tests.conftest import FakeAudioSource
+
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        mixed = MixedAudioSource(mic, sys_audio)
+        app = make_app(tmp_path)
+        app._audio_source = mixed
+
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app._audio_stopped = True
+                await pilot.press('m')
+                await pilot.pause()
+                assert not mixed.mic_muted

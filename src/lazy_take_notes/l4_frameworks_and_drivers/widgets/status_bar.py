@@ -54,6 +54,7 @@ class StatusBar(Static):
     buf_max: reactive[int] = reactive(15)
     audio_level: reactive[float] = reactive(0.0)
     last_digest_time: reactive[float] = reactive(0.0)
+    mic_muted: reactive[bool] = reactive(False)
     mode_label: reactive[str] = reactive('')
     keybinding_hints: reactive[str] = reactive('')
     quick_action_hints: reactive[str] = reactive('')
@@ -140,6 +141,8 @@ class StatusBar(Static):
         left_parts = []
         if self.mode_label:
             left_parts.append(self.mode_label)
+        if self.mic_muted:
+            left_parts.append('MIC ✕')
         left_parts.extend(
             [
                 status_icon,

@@ -11,6 +11,7 @@ from textual.widgets import TextArea
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
+from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
 from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
@@ -31,6 +32,7 @@ class RecordApp(BaseApp):
         Binding('space', 'toggle_pause', 'Pause/Resume', priority=True),
         Binding('s', 'stop_recording', 'Stop', priority=True),
         Binding('d', 'force_digest', 'Digest now', show=False),
+        Binding('m', 'toggle_mic', 'Mute mic', show=False),
     ]
 
     def __init__(
@@ -52,7 +54,7 @@ class RecordApp(BaseApp):
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
-            return r'\[Space] pause  \[s] stop  \[d] digest  \[c] copy  \[l] label  \[h] help'
+            return r'\[Space] pause  \[s] stop  \[d] digest  \[m] mute mic  \[c] copy  \[l] label  \[h] help'
         if state == 'paused':
             return r'\[Space] resume  \[s] stop  \[c] copy  \[l] label  \[h] help'
         return r'\[c] copy  \[l] label  \[o] open  \[h] help  \[q] quit'
@@ -64,6 +66,7 @@ class RecordApp(BaseApp):
             '| `Space` | Pause / Resume |',
             '| `s` | Stop recording |',
             '| `d` | Force digest now |',
+            '| `m` | Mute / Unmute mic |',
             '| `c` | Copy focused panel |',
             '| `Tab` | Switch panel focus |',
             '| `l` | Rename session |',
@@ -245,6 +248,17 @@ class RecordApp(BaseApp):
         if self._pending_quit:
             return
         super().action_force_digest()
+
+    def action_toggle_mic(self) -> None:
+        if self._audio_stopped or self._audio_source is None:
+            return
+        if not isinstance(self._audio_source, MixedAudioSource):
+            return
+        self._audio_source.mic_muted = not self._audio_source.mic_muted
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.mic_muted = self._audio_source.mic_muted
+        label = 'Mic muted' if self._audio_source.mic_muted else 'Mic unmuted'
+        self.notify(label, timeout=2)
 
     def action_quit_app(self) -> None:
         bar = self.query_one('#status-bar', StatusBar)

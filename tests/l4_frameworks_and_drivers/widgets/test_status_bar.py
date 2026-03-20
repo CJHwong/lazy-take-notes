@@ -67,6 +67,28 @@ def _make_app(tmp_path):
     return RecordApp(config=config, template=template, output_dir=output_dir, controller=controller)
 
 
+class TestMicMutedIndicator:
+    @pytest.mark.asyncio
+    async def test_render_shows_mic_muted_indicator(self, tmp_path):
+        app = _make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as _pilot:
+                bar = app.query_one('#status-bar', StatusBar)
+                bar.mic_muted = True
+                rendered = bar.render()
+                assert 'MIC' in rendered
+
+    @pytest.mark.asyncio
+    async def test_render_hides_mic_muted_when_not_muted(self, tmp_path):
+        app = _make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as _pilot:
+                bar = app.query_one('#status-bar', StatusBar)
+                bar.mic_muted = False
+                rendered = bar.render()
+                assert 'MIC' not in rendered
+
+
 class TestTranscribingIndicator:
     @pytest.mark.asyncio
     async def test_render_shows_transcribing_when_active(self, tmp_path):
