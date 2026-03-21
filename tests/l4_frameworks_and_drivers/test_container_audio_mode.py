@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from unittest.mock import patch
 
 import pytest
 
@@ -20,10 +21,13 @@ def basic_container_args(tmp_path):
 
 
 class TestContainerAudioSource:
-    def test_always_builds_mixed_source(self, basic_container_args):
+    @patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer._build_mixed_source')
+    def test_always_builds_mixed_source(self, mock_build, basic_container_args):
+        mock_build.return_value = MixedAudioSource.__new__(MixedAudioSource)
         config, template, out_dir = basic_container_args
         container = DependencyContainer(config, template, out_dir)
-        assert isinstance(container.audio_source, MixedAudioSource)
+        mock_build.assert_called_once()
+        assert container.audio_source is mock_build.return_value
 
     @pytest.mark.skipif(sys.platform != 'darwin', reason='CoreAudioTapSource is macOS only')
     def test_mixed_source_uses_coreaudio_on_macos(self, basic_container_args):

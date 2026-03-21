@@ -2,57 +2,28 @@
 
 from __future__ import annotations
 
-import re
 import sys
-from datetime import datetime
+from importlib.metadata import entry_points
 from pathlib import Path
 
 import click
 
 from lazy_take_notes import __version__
-
-
-def _make_session_dir(base_dir: Path, label: str | None) -> Path:
-    """Create a timestamped session subdirectory under base_dir."""
-    stamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
-    if label:
-        safe_label = re.sub(r'[^\w\-]', '_', label)
-        name = f'{stamp}_{safe_label}'
-    else:
-        name = stamp
-    session_dir = base_dir / name
-    session_dir.mkdir(parents=True, exist_ok=True)
-    return session_dir
-
-
-def _load_config(config_path, output_dir):
-    """Load configuration and infra settings. Returns (config, infra, template_loader) or exits."""
-    from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
-        YamlConfigLoader,
-    )
-    from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
-        YamlTemplateLoader,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.config import (  # noqa: PLC0415 -- deferred: not needed for --help
-        InfraConfig,
-        build_app_config,
-    )
-
-    config_loader = YamlConfigLoader()
-    template_loader = YamlTemplateLoader()
-
-    try:
-        overrides: dict = {}
-        if output_dir:
-            overrides['output'] = {'directory': output_dir}
-        raw = config_loader.load(config_path, overrides=overrides if overrides else None)
-        config = build_app_config(raw)
-        infra = InfraConfig.model_validate(raw)
-    except FileNotFoundError as e:
-        click.echo(f'Error: {e}', err=True)
-        sys.exit(1)
-
-    return config, infra, template_loader
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    load_config as _load_config,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    make_session_dir as _make_session_dir,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    pick_template as _pick_template,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    preflight_llm as _preflight_llm,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    run_transcribe as _run_transcribe,
+)
 
 
 def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort platform guard
@@ -134,30 +105,13 @@ def cli(ctx, config_path, output_dir):
 @click.pass_context
 def record(ctx, label):
     """Start a live recording session with transcription and digest."""
-    from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
-        TemplatePicker,
-    )
-
     config_path = ctx.obj['config_path']
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = _load_config(config_path, output_dir)
 
-    while True:
-        picker = TemplatePicker()
-        picker_result = picker.run()
-        if picker_result is None:
-            return
-        tmpl_ref = picker_result
-        if tmpl_ref == '__create_template__':
-            _launch_template_builder()
-            continue  # loop back so user can select their new template
-        break
-
-    try:
-        template = template_loader.load(tmpl_ref)
-    except FileNotFoundError as e:
-        click.echo(f'Error: {e}', err=True)
-        sys.exit(1)
+    template = _pick_template(template_loader)
+    if template is None:
+        return
 
     base_dir = Path(output_dir or config.output.directory)
     out_dir = _make_session_dir(base_dir, label)
@@ -211,56 +165,7 @@ def transcribe(ctx, audio_file, label):
         click.echo(f'Error: {audio_file!r} is not a valid file.', err=True)
         sys.exit(1)
 
-    from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
-        TemplatePicker,
-    )
-
-    config_path = ctx.obj['config_path']
-    output_dir = ctx.obj['output_dir']
-    config, infra, template_loader = _load_config(config_path, output_dir)
-
-    while True:
-        picker = TemplatePicker()
-        picker_result = picker.run()
-        if picker_result is None:
-            return
-        tmpl_ref = picker_result
-        if tmpl_ref == '__create_template__':
-            _launch_template_builder()
-            continue  # loop back so user can select their new template
-        break
-
-    try:
-        template = template_loader.load(tmpl_ref)
-    except FileNotFoundError as e:
-        click.echo(f'Error: {e}', err=True)
-        sys.exit(1)
-
-    base_dir = Path(output_dir or config.output.directory)
-    out_dir = _make_session_dir(base_dir, label)
-
-    missing_digest, missing_interactive = _preflight_llm(infra, config)
-
-    from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        TranscribeApp,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        DependencyContainer,
-    )
-
-    container = DependencyContainer(config, template, out_dir, infra=infra, build_audio=False)
-    app = TranscribeApp(
-        config=config,
-        template=template,
-        output_dir=out_dir,
-        controller=container.controller,
-        audio_path=Path(audio_file),
-        transcriber=container.transcriber,
-        missing_digest_models=missing_digest,
-        missing_interactive_models=missing_interactive,
-        label=label or '',
-    )
-    app.run()
+    _run_transcribe(ctx, audio_path=Path(audio_file), label=label)
 
 
 @cli.command()
@@ -317,36 +222,23 @@ def _launch_template_builder() -> None:
     TemplateBuilderApp().run()
 
 
-def _preflight_llm(infra, config) -> tuple[list[str], list[str]]:
-    from lazy_take_notes.l2_use_cases.ports.llm_client import (  # noqa: PLC0415 -- deferred: preflight only runs when starting a session
-        LLMClient,
-    )
+def _load_plugins(group: click.Group) -> None:
+    """Discover and register plugin subcommands via entry_points."""
+    for ep in entry_points(group='lazy_take_notes.plugins'):
+        try:
+            command = ep.load()
+            if isinstance(command, click.Command):
+                group.add_command(command, ep.name)
+            else:
+                click.echo(
+                    f'Warning: plugin {ep.name!r} is not a click command, skipping.',
+                    err=True,
+                )
+        except Exception as exc:  # noqa: BLE001 -- plugin isolation: one broken plugin must not crash the CLI
+            click.echo(f'Warning: plugin {ep.name!r} failed to load: {exc}', err=True)
 
-    client: LLMClient
-    if infra.llm_provider == 'openai':
-        from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred: only loaded for openai provider
-            OpenAICompatLLMClient,
-        )
 
-        client = OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
-    else:
-        from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: only loaded for ollama provider
-            OllamaLLMClient,
-        )
-
-        client = OllamaLLMClient(host=infra.ollama.host)
-
-    ok, err = client.check_connectivity()
-    if not ok:
-        click.echo(f'Warning: LLM provider not reachable ({err}). Digests will fail.', err=True)
-        click.echo('Transcript-only mode: audio capture will still work.', err=True)
-        return [], []
-
-    unique_models = list(dict.fromkeys([config.digest.model, config.interactive.model]))
-    missing = set(client.check_models(unique_models))
-    missing_digest = [config.digest.model] if config.digest.model in missing else []
-    missing_interactive = [config.interactive.model] if config.interactive.model in missing else []
-    return missing_digest, missing_interactive
+_load_plugins(cli)
 
 
 def _preflight_microphone() -> None:

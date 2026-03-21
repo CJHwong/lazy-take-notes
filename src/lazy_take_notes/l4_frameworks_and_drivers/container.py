@@ -7,6 +7,7 @@ from pathlib import Path
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.config_loader import ConfigLoader
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.model_resolver import ModelResolver
@@ -16,7 +17,6 @@ from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import FilePersistenceGateway
 from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
-from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
 from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import SubprocessWhisperTranscriber
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
@@ -42,7 +42,7 @@ class DependencyContainer:
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
         self.llm_client: LLMClient = self._build_llm_client(_infra)
         self.transcriber: Transcriber = SubprocessWhisperTranscriber()
-        self.audio_source: MixedAudioSource | None = self._build_mixed_source() if build_audio else None
+        self.audio_source: AudioSource | None = self._build_mixed_source() if build_audio else None
         self.model_resolver: ModelResolver = HfModelResolver()
 
         self.controller = SessionController(
@@ -53,7 +53,10 @@ class DependencyContainer:
         )
 
     @staticmethod
-    def _build_mixed_source() -> MixedAudioSource:
+    def _build_mixed_source() -> AudioSource:
+        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: audio stack loaded only when needed
+            MixedAudioSource,
+        )
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: sounddevice loaded only when audio is needed
             SounddeviceAudioSource,
         )
