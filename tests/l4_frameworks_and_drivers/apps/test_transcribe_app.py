@@ -21,7 +21,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusB
 from tests.conftest import FakeLLMClient, FakePersistence
 
 
-def make_app(tmp_path: Path) -> TranscribeApp:
+def _make_controller(tmp_path: Path):
     config = build_app_config({})
     template = YamlTemplateLoader().load('default_zh_tw')
     output_dir = tmp_path / 'output'
@@ -34,6 +34,11 @@ def make_app(tmp_path: Path) -> TranscribeApp:
         llm_client=fake_llm,
         persistence=fake_persist,
     )
+    return config, template, output_dir, controller
+
+
+def make_app(tmp_path: Path) -> TranscribeApp:
+    config, template, output_dir, controller = _make_controller(tmp_path)
     audio_file = tmp_path / 'audio.wav'
     audio_file.touch()
     return TranscribeApp(
@@ -42,6 +47,21 @@ def make_app(tmp_path: Path) -> TranscribeApp:
         output_dir=output_dir,
         controller=controller,
         audio_path=audio_file,
+    )
+
+
+def make_subtitle_app(tmp_path: Path) -> TranscribeApp:
+    config, template, output_dir, controller = _make_controller(tmp_path)
+    segments = [
+        TranscriptSegment(text='Hello subtitle', wall_start=0.0, wall_end=1.0),
+        TranscriptSegment(text='Second line', wall_start=1.0, wall_end=2.0),
+    ]
+    return TranscribeApp(
+        config=config,
+        template=template,
+        output_dir=output_dir,
+        controller=controller,
+        subtitle_segments=segments,
     )
 
 
@@ -345,3 +365,31 @@ class TestTranscribeAppForceDigest:
                     await pilot.press('d')
                     await pilot.pause()
                     mock_digest.assert_called_once()
+
+
+class TestTranscribeAppSubtitleMode:
+    def test_requires_audio_path_or_subtitle_segments(self, tmp_path):
+        config, template, output_dir, controller = _make_controller(tmp_path)
+        with pytest.raises(ValueError, match='requires either'):
+            TranscribeApp(
+                config=config,
+                template=template,
+                output_dir=output_dir,
+                controller=controller,
+            )
+
+    @pytest.mark.asyncio
+    async def test_subtitle_mode_has_segments(self, tmp_path):
+        app = make_subtitle_app(tmp_path)
+        assert app._subtitle_segments is not None
+        assert len(app._subtitle_segments) == 2
+        assert app._audio_path is None
+
+    @pytest.mark.asyncio
+    async def test_subtitle_mode_composes_normally(self, tmp_path):
+        app = make_subtitle_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test():
+                assert app.query_one('#transcript-panel')
+                assert app.query_one('#digest-panel')
+                assert app.query_one('#status-bar', StatusBar)

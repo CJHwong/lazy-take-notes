@@ -14,7 +14,10 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     TranscriptChunk,
     TranscriptionStatus,
 )
-from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import run_file_transcription
+from lazy_take_notes.l4_frameworks_and_drivers.workers.file_transcription_worker import (
+    run_file_transcription,
+    run_subtitle_replay,
+)
 
 # Patch at SOURCE module level — deferred imports inside run_file_transcription
 # create local bindings, so patches must target the original modules.
@@ -204,3 +207,63 @@ class TestRunFileTranscription:
 
         # Transcriber.transcribe called at least once
         assert mock_transcriber.transcribe.call_count >= 1
+
+
+class TestRunSubtitleReplay:
+    def test_happy_path_posts_all_segments(self):
+        messages: list = []
+        segments = [
+            TranscriptSegment(text='Hello', wall_start=0.0, wall_end=1.0),
+            TranscriptSegment(text='World', wall_start=1.0, wall_end=2.0),
+        ]
+
+        result = run_subtitle_replay(
+            post_message=messages.append,
+            is_cancelled=lambda: False,
+            segments=segments,
+        )
+
+        assert result == segments
+        chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
+        assert len(chunks) == 2
+        assert chunks[0].segments == [segments[0]]
+        assert chunks[1].segments == [segments[1]]
+
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses == ['recording', 'stopped']
+
+    def test_cancellation_stops_early(self):
+        messages: list = []
+        segments = [
+            TranscriptSegment(text='One', wall_start=0.0, wall_end=1.0),
+            TranscriptSegment(text='Two', wall_start=1.0, wall_end=2.0),
+            TranscriptSegment(text='Three', wall_start=2.0, wall_end=3.0),
+        ]
+
+        call_count = 0
+
+        def cancel_after_first():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 1
+
+        result = run_subtitle_replay(
+            post_message=messages.append,
+            is_cancelled=cancel_after_first,
+            segments=segments,
+        )
+
+        assert len(result) == 1
+        assert result[0].text == 'One'
+
+    def test_empty_segments_posts_recording_and_stopped(self):
+        messages: list = []
+        result = run_subtitle_replay(
+            post_message=messages.append,
+            is_cancelled=lambda: False,
+            segments=[],
+        )
+
+        assert result == []
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses == ['recording', 'stopped']
