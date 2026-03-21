@@ -151,7 +151,7 @@ uv run pytest tests/ -v  # run tests
 uv run lint-imports      # check layer contracts
 ```
 
-Architecture details are in [AGENTS.md](AGENTS.md).
+Architecture details are in [AGENTS.md](AGENTS.md). To build your own source plugin, see the [Plugin Development Guide](PLUGINS.md).
 
 ## License
 
