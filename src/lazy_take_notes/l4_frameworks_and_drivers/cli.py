@@ -189,26 +189,39 @@ def transcribe(ctx, audio_file, label):
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = _load_config(config_path, output_dir)
 
+    def _fetch_youtube_content(url: str, tmp: Path):
+        """Fetch subtitles; fall back to audio download if none found.
+
+        Returns ('subtitles', (vtt_path, title)) or ('audio', (audio_path, title)).
+        Runs entirely in background thread so audio download starts without waiting
+        for TemplatePicker to complete.
+        """
+        subtitle_result = fetch_youtube_subtitles(url, tmp)
+        if subtitle_result is not None:
+            return ('subtitles', subtitle_result)
+        audio_result = download_youtube_audio(url, tmp)
+        return ('audio', audio_result)
+
     tmp_dir = None
     resolved_label = label
     audio_path: Path | None = None
     subtitle_segments = None
     youtube_url: str | None = None
     video_title = ''
-    subtitle_future: concurrent.futures.Future | None = None
+    content_future: concurrent.futures.Future | None = None
     executor: concurrent.futures.ThreadPoolExecutor | None = None
 
     if is_url(audio_file):
         tmp_dir = tempfile.mkdtemp(prefix='ltn_yt_')
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix='ltn_yt_fetch')
-        subtitle_future = executor.submit(fetch_youtube_subtitles, audio_file, Path(tmp_dir))
-        click.echo('Fetching YouTube subtitles in background...', err=True)
+        content_future = executor.submit(_fetch_youtube_content, audio_file, Path(tmp_dir))
+        click.echo('Fetching YouTube content in background...', err=True)
 
     picker = TemplatePicker(show_audio_mode=False)
     picker_result = picker.run()
     if picker_result is None:
-        if subtitle_future is not None:
-            subtitle_future.cancel()
+        if content_future is not None:
+            content_future.cancel()
         if executor is not None:
             executor.shutdown(wait=True)  # wait for thread before rmtree
         if tmp_dir is not None:
@@ -223,24 +236,20 @@ def transcribe(ctx, audio_file, label):
             click.echo(f'Error: {e}', err=True)
             sys.exit(1)
 
-        if subtitle_future is not None:
+        if content_future is not None:
             try:
-                subtitle_result = subtitle_future.result()
+                kind, payload = content_future.result()
             except Exception as exc:
                 click.echo(f'Error: {exc}', err=True)
                 sys.exit(1)
 
-            if subtitle_result is not None:
-                vtt_path, video_title = subtitle_result
+            if kind == 'subtitles':
+                vtt_path, video_title = payload
                 click.echo('Subtitles found, skipping audio download.', err=True)
                 subtitle_segments = parse_vtt_to_segments(vtt_path)
             else:
-                click.echo('No subtitles found. Downloading audio...', err=True)
-                try:
-                    audio_path, video_title = download_youtube_audio(audio_file, Path(tmp_dir))
-                except RuntimeError as exc:
-                    click.echo(f'Error: {exc}', err=True)
-                    sys.exit(1)
+                audio_path, video_title = payload
+                click.echo('No subtitles found, audio downloaded.', err=True)
             youtube_url = audio_file
             if resolved_label is None and video_title:
                 resolved_label = video_title
