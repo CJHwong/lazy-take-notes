@@ -141,6 +141,53 @@ class TestCompaction:
         assert ctrl.digest_state.messages[0].role == 'system'
 
 
+class TestGenerateLabel:
+    @pytest.mark.asyncio
+    async def test_happy_path(self, controller):
+        ctrl, fake_llm, _ = controller
+        ctrl.latest_digest = '## Sprint Review\nGood progress.'
+        fake_llm.set_response('sprint_review_notes')
+
+        result = await ctrl.generate_label()
+
+        assert result == 'sprint_review_notes'
+        assert len(fake_llm.chat_single_calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_digest(self, controller):
+        ctrl, fake_llm, _ = controller
+        assert ctrl.latest_digest is None
+
+        result = await ctrl.generate_label()
+
+        assert result is None
+        assert len(fake_llm.chat_single_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_llm_error(self, controller):
+        ctrl, fake_llm, _ = controller
+        ctrl.latest_digest = 'some digest'
+
+        async def _blow_up(model: str, prompt: str) -> str:
+            raise RuntimeError('LLM is down')
+
+        fake_llm.chat_single = _blow_up
+
+        result = await ctrl.generate_label()
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_sanitized_label_empty(self, controller):
+        ctrl, fake_llm, _ = controller
+        ctrl.latest_digest = 'some digest'
+        fake_llm.set_response('!!!')
+
+        result = await ctrl.generate_label()
+
+        assert result is None
+
+
 class TestRunQuickAction:
     @pytest.mark.asyncio
     async def test_existing_key(self, controller):

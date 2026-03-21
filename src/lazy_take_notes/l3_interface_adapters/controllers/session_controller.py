@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
+
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.digest_state import DigestState
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.compact_messages_use_case import CompactMessagesUseCase
 from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult, RunDigestUseCase, should_trigger_digest
+from lazy_take_notes.l2_use_cases.generate_label_use_case import GenerateLabelUseCase
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.persistence import PersistenceGateway
 from lazy_take_notes.l2_use_cases.quick_action_use_case import RunQuickActionUseCase
+
+log = logging.getLogger('ltn.controller')
 
 
 class SessionController:
@@ -34,6 +39,7 @@ class SessionController:
         self._digest_uc = RunDigestUseCase(llm_client)
         self._compact_uc = CompactMessagesUseCase()
         self._quick_action_uc = RunQuickActionUseCase(llm_client)
+        self._label_uc = GenerateLabelUseCase(llm_client)
 
         self.digest_state = DigestState()
         self.digest_state.init_messages(template.system_prompt)
@@ -90,6 +96,22 @@ class SessionController:
                 )
 
         return result
+
+    async def generate_label(self) -> str | None:
+        """Generate a short session label from the latest digest. Returns None on failure."""
+        if self.latest_digest is None:
+            return None
+        try:
+            label = await self._label_uc.execute(
+                self._template.metadata.name,
+                self._template.metadata.description or '',
+                self.latest_digest,
+                self._config.interactive.model,
+            )
+            return label or None
+        except Exception:
+            log.warning('Auto-label generation failed', exc_info=True)
+            return None
 
     async def run_quick_action(self, key: str) -> tuple[str, str] | None:
         """Execute a quick action by key. Returns (result, label) or None."""

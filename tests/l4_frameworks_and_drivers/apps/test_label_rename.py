@@ -13,8 +13,9 @@ from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import File
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
 from lazy_take_notes.l4_frameworks_and_drivers.apps.record import RecordApp
 from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
+from lazy_take_notes.l4_frameworks_and_drivers.messages import DigestReady
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.label_modal import LabelModal
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, FakePersistence
 
 
 def _make_app(tmp_path: Path, *, label: str = '', dir_name: str = '2026-02-21_143052') -> RecordApp:
@@ -245,3 +246,101 @@ class TestLabelModal:
                 await pilot.pause()
                 assert not isinstance(app.screen, LabelModal)
                 assert app._output_dir == original_dir
+
+
+# ---------------------------------------------------------------------------
+# Auto-label worker tests (_run_label_worker)
+# ---------------------------------------------------------------------------
+
+
+def _make_app_with_fake_persistence(
+    tmp_path: Path,
+    *,
+    label: str = '',
+    auto_label: bool = True,
+    llm_response: str = 'auto_generated_label',
+) -> tuple[RecordApp, FakeLLMClient]:
+    config = build_app_config({'output': {'auto_label': auto_label}})
+    template = YamlTemplateLoader().load('default_en')
+    output_dir = tmp_path / '2026-03-21_100000'
+    output_dir.mkdir(parents=True)
+    fake_llm = FakeLLMClient(response=llm_response)
+    fake_persist = FakePersistence(output_dir)
+    controller = SessionController(
+        config=config,
+        template=template,
+        llm_client=fake_llm,
+        persistence=fake_persist,
+    )
+    app = RecordApp(
+        config=config,
+        template=template,
+        output_dir=output_dir,
+        controller=controller,
+        label=label,
+    )
+    return app, fake_llm
+
+
+class TestAutoLabelWorker:
+    @pytest.mark.asyncio
+    async def test_fires_on_final_digest_ready(self, tmp_path):
+        app, fake_llm = _make_app_with_fake_persistence(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                # Simulate a prior digest so latest_digest is set
+                app._controller.latest_digest = '## Sprint Review'
+                app.post_message(DigestReady(markdown='## Final', digest_number=2, is_final=True))
+                await pilot.pause()
+                await pilot.pause()  # extra tick for label worker to complete
+
+                assert len(fake_llm.chat_single_calls) >= 1
+
+    @pytest.mark.asyncio
+    async def test_skips_when_label_already_set(self, tmp_path):
+        app, fake_llm = _make_app_with_fake_persistence(tmp_path, label='manual_label')
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app._controller.latest_digest = '## Sprint Review'
+                app.post_message(DigestReady(markdown='## Final', digest_number=2, is_final=True))
+                await pilot.pause()
+
+                assert len(fake_llm.chat_single_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_when_auto_label_disabled(self, tmp_path):
+        app, fake_llm = _make_app_with_fake_persistence(tmp_path, auto_label=False)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app._controller.latest_digest = '## Sprint Review'
+                app.post_message(DigestReady(markdown='## Final', digest_number=2, is_final=True))
+                await pilot.pause()
+
+                assert len(fake_llm.chat_single_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_when_no_digest(self, tmp_path):
+        app, fake_llm = _make_app_with_fake_persistence(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                assert app._controller.latest_digest is None
+                app.post_message(DigestReady(markdown='## Final', digest_number=1, is_final=True))
+                await pilot.pause()
+
+                # on_digest_ready sets latest_digest via the panel update,
+                # but the controller's latest_digest is only set by run_digest —
+                # posting DigestReady directly does NOT update controller state.
+                assert len(fake_llm.chat_single_calls) == 0
+
+    @pytest.mark.asyncio
+    async def test_reentrant_guard_prevents_double_fire(self, tmp_path):
+        app, fake_llm = _make_app_with_fake_persistence(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test():
+                app._controller.latest_digest = '## Topic'
+                app._label_running = True
+
+                app._run_label_worker()
+
+                # Should have been rejected by the guard
+                assert len(fake_llm.chat_single_calls) == 0

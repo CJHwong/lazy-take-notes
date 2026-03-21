@@ -3,6 +3,7 @@
 from lazy_take_notes.l2_use_cases.utils.prompt_builder import (
     build_compact_user_message,
     build_digest_prompt,
+    build_label_prompt,
     build_quick_action_prompt,
 )
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
@@ -77,6 +78,34 @@ class TestBuildQuickActionPrompt:
     def test_empty_user_context_not_appended(self):
         result = build_quick_action_prompt('{digest_markdown}', 'digest', 'text', user_context='')
         assert 'User corrections' not in result
+
+
+class TestBuildLabelPrompt:
+    def test_includes_template_name_and_digest(self):
+        result = build_label_prompt('Daily Standup', 'Quick sync meeting', '## Standup Notes\nAll good.')
+        assert 'Daily Standup' in result
+        assert 'Quick sync meeting' in result
+        assert 'Standup Notes' in result
+
+    def test_asks_for_snake_case(self):
+        result = build_label_prompt('Default', '', 'some digest')
+        assert 'snake_case' in result
+        assert 'ONLY the label' in result
+
+    def test_empty_description_omits_dash(self):
+        result = build_label_prompt('Default', '', 'some digest')
+        assert ' — ' not in result
+
+    def test_full_prompt_shape(self):
+        result = build_label_prompt('Daily Standup', 'Quick sync meeting', '## Notes\nAll good.')
+        # Instruction block
+        assert result.startswith('Generate a short label')
+        assert 'snake_case' in result
+        assert 'ONLY the label' in result
+        # Template header with description
+        assert 'Template: Daily Standup — Quick sync meeting' in result
+        # Digest content
+        assert 'Latest digest:\n## Notes\nAll good.' in result
 
 
 class TestBuildCompactUserMessage:

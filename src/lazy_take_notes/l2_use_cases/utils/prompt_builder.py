@@ -48,6 +48,20 @@ def build_quick_action_prompt(
     return result
 
 
+def build_label_prompt(template_name: str, template_description: str, latest_digest: str) -> str:
+    """Build a prompt that asks the LLM for a short session label."""
+    header = f'Template: {template_name}'
+    if template_description:
+        header += f' — {template_description}'
+    return (
+        'Generate a short label (2-5 words, snake_case, lowercase) that '
+        'summarises this session.\n\n'
+        f'{header}\n\n'
+        f'Latest digest:\n{latest_digest}\n\n'
+        'Output ONLY the label, nothing else.'
+    )
+
+
 def build_compact_user_message(latest_markdown: str) -> str:
     """Build the synthetic user message for conversation compaction."""
     return (

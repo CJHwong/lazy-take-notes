@@ -187,6 +187,7 @@ output:
   save_notes_history: true
   save_context: true
   save_debug_log: false
+  auto_label: true
 """
     p = tmp_path / 'config.yaml'
     p.write_text(content, encoding='utf-8')

@@ -110,6 +110,7 @@ class TestOutputConfig:
             save_notes_history=True,
             save_context=True,
             save_debug_log=False,
+            auto_label=True,
         )
         assert cfg.save_audio is False
         assert cfg.save_notes_history is True
@@ -138,7 +139,12 @@ class TestAppConfig:
             ),
             interactive=InteractiveConfig(model='m'),
             output=OutputConfig(
-                directory='./out', save_audio=True, save_notes_history=True, save_context=True, save_debug_log=False
+                directory='./out',
+                save_audio=True,
+                save_notes_history=True,
+                save_context=True,
+                save_debug_log=False,
+                auto_label=True,
             ),
         )
         assert cfg.output.save_audio is True
@@ -147,7 +153,12 @@ class TestAppConfig:
         with pytest.raises(ValidationError):
             AppConfig(
                 output=OutputConfig(
-                    directory='./out', save_audio=True, save_notes_history=True, save_context=True, save_debug_log=False
+                    directory='./out',
+                    save_audio=True,
+                    save_notes_history=True,
+                    save_context=True,
+                    save_debug_log=False,
+                    auto_label=True,
                 )
             )  # type: ignore[call-arg]
 

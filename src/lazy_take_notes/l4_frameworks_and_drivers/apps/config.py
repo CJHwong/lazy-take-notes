@@ -491,6 +491,12 @@ class ConfigApp(TextualApp):
                             output.get('save_debug_log', False),
                             help_text='Write a debug.log file. Useful for troubleshooting.',
                         )
+                        yield _SwitchRow(
+                            'Auto-Label Sessions',
+                            'cfg-output-auto-label',
+                            output.get('auto_label', True),
+                            help_text='Use AI to name unlabeled sessions after the final digest.',
+                        )
 
                     with Vertical(classes='field-group'):
                         yield Static('Custom vocabulary', classes='field-group-title')
@@ -551,6 +557,7 @@ class ConfigApp(TextualApp):
                 'save_notes_history': self.query_one('#cfg-output-save-notes-history', Switch).value,
                 'save_context': self.query_one('#cfg-output-save-context', Switch).value,
                 'save_debug_log': self.query_one('#cfg-output-save-debug-log', Switch).value,
+                'auto_label': self.query_one('#cfg-output-auto-label', Switch).value,
             },
         }
         api_key = self.query_one('#cfg-openai-api-key', Input).value.strip()
@@ -669,6 +676,7 @@ class ConfigApp(TextualApp):
         self.query_one('#cfg-output-save-notes-history', Switch).value = output.get('save_notes_history', True)
         self.query_one('#cfg-output-save-context', Switch).value = output.get('save_context', True)
         self.query_one('#cfg-output-save-debug-log', Switch).value = output.get('save_debug_log', False)
+        self.query_one('#cfg-output-auto-label', Switch).value = output.get('auto_label', True)
         self.query_one('#cfg-recognition-hints', TextArea).text = '\n'.join(self._raw.get('recognition_hints', []))
 
     def action_quit_app(self) -> None:

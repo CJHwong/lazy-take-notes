@@ -42,6 +42,7 @@ class OutputConfig(BaseModel):
     save_notes_history: bool
     save_context: bool
     save_debug_log: bool
+    auto_label: bool
 
 
 class AppConfig(BaseModel):

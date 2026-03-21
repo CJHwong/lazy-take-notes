@@ -91,6 +91,7 @@ class BaseApp(TextualApp):
         self._download_modal: DownloadModal | None = None
         self._digest_running = False
         self._query_running = False
+        self._label_running = False
         self._final_digest_done = False
 
         # Register dynamic quick action bindings (positional: 1-5)
@@ -213,6 +214,7 @@ class BaseApp(TextualApp):
 
         if message.is_final:
             self._final_digest_done = True
+            self._run_label_worker()
 
     def on_digest_error(self, message: DigestError) -> None:
         bar = self.query_one('#status-bar', StatusBar)
@@ -317,6 +319,29 @@ class BaseApp(TextualApp):
                 self._digest_running = False
 
         self.run_worker(_final_task, exclusive=True, group='final')
+
+    def _run_label_worker(self) -> None:
+        """Generate an AI label in parallel with the final digest (fire-and-forget)."""
+        if self._label_running:
+            return
+        if not self._config.output.auto_label or self._session_label or not self._controller.latest_digest:
+            return
+        self._label_running = True
+
+        async def _label_task() -> None:
+            try:
+                label = await self._controller.generate_label()
+                if label is None:
+                    return
+                if self._session_label or not self.is_running:
+                    return
+                self._on_label_result(label)
+            except Exception:
+                log.debug('Auto-label generation failed', exc_info=True)
+            finally:
+                self._label_running = False
+
+        self.run_worker(_label_task, exclusive=True, group='label')
 
     # --- Actions ---
 
