@@ -93,9 +93,9 @@ class TestMixedAudioSource:
         assert r1 is not None
         np.testing.assert_allclose(r1, [0.5, 0.6], atol=1e-6)
 
-        # Mute and read again
+        # Mute and read again — no sleep needed; mic_muted is GIL-atomic and
+        # checked inside read(), not in a background thread.
         src.mic_muted = True
-        time.sleep(0.05)
         r2 = src.read(timeout=0.5)
         src.close()
 

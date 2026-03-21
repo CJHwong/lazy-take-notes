@@ -93,6 +93,7 @@ class FakeAudioSource:
         self.open_calls: list[tuple[int, int]] = []
         self.close_calls: int = 0
         self._idx = 0
+        self.mic_muted: bool = False
 
     def open(self, sample_rate: int, channels: int) -> None:
         self.open_calls.append((sample_rate, channels))

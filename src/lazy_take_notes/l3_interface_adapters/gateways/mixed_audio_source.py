@@ -76,9 +76,10 @@ class MixedAudioSource:
             return None
 
         # Zero mic data when muted — reader threads keep running to preserve
-        # stream state; we just silence the mic contribution.
+        # stream state; we just silence the mic contribution. In-place to avoid
+        # allocation on every read (~30 Hz hot path).
         if self.mic_muted:
-            mic = np.zeros_like(mic)
+            mic *= 0
 
         # Drain ALL available system chunks into the rolling buffer non-blocking.
         # get_nowait() is intentional: blocking here would stall the mic path and

@@ -31,6 +31,7 @@ class CoreAudioTapSource:
         self._thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
+        self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     @property
     def exhausted(self) -> bool:
