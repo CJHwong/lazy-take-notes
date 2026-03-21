@@ -110,3 +110,43 @@ Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti
 - **Template picker**: Interactive TUI launched before the main app; selects template to configure the session
 - **Session picker**: Interactive TUI for `view` subcommand; lists saved session directories and loops back after each ViewApp exit
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
+- **Plugin system**: External packages register CLI subcommands via Python `entry_points` (group `lazy_take_notes.plugins`). Plugins import shared helpers from `lazy_take_notes.plugin_api` — this is the stable public surface
+
+## Plugin System
+
+Plugins are external packages that add subcommands to the CLI (e.g. `lazy-take-notes my-source <input>`).
+
+### Contract
+
+1. Declare an entry point in group `lazy_take_notes.plugins`:
+```toml
+# plugin's pyproject.toml
+[project.entry-points."lazy_take_notes.plugins"]
+my-source = "ltn_my_source:my_command"
+```
+
+2. The entry point must resolve to a `click.BaseCommand` (typically `@click.command`).
+
+3. The entry point name becomes the subcommand name (e.g. `my-source` → `lazy-take-notes my-source`).
+
+### Plugin API
+
+Import from `lazy_take_notes.plugin_api` — not from internal modules.
+
+```python
+from lazy_take_notes.plugin_api import run_transcribe, TranscriptSegment
+
+@click.command('my-source')
+@click.argument('input_path')
+@click.pass_context
+def my_command(ctx, input_path):
+    segments = my_parser(input_path)  # plugin-specific logic
+    run_transcribe(ctx, subtitle_segments=segments, label='my session')
+```
+
+`run_transcribe(ctx, *, audio_path=None, subtitle_segments=None, label=None)` handles config loading, template picker, session directory, LLM preflight, dependency wiring, and TUI launch. Provide `audio_path` for whisper transcription or `subtitle_segments` for subtitle replay.
+
+### Isolation
+
+- Plugins that fail to load print a warning to stderr, never crash the CLI.
+- Each plugin manages its own dependencies (add them to the plugin package, not to core).
