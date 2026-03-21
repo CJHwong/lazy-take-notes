@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="logo-banner.png" alt="lazy-take-notes" width="360">
+  <img src="docs/logo-banner.png" alt="lazy-take-notes" width="360">
 </p>
 
 Terminal app for live transcription and note-taking. Records your mic, transcribes speech to text, and periodically generates structured digests of what's happening.
 
-![screenshot](screenshot.png)
+![screenshot](docs/screenshot.png)
 
 ## Requirements
 
@@ -38,7 +38,7 @@ uv sync
 pip install -e .
 ```
 
-**New to this?** See the [Getting Started guide](GETTING_STARTED.md) for step-by-step setup instructions.
+**New to this?** See the [Getting Started guide](docs/GETTING_STARTED.md) for step-by-step setup instructions.
 
 ## Run
 
@@ -124,7 +124,7 @@ output:
 
 Templates control the LLM prompts, labels, and quick-action keys for a session. The template picker launches at startup — built-ins are listed there.
 
-To add your own or override a built-in, drop a `.yaml` file in the `templates/` subdirectory of your config path (see table above). See [TEMPLATES.md](TEMPLATES.md) for the full schema and variable reference.
+To add your own or override a built-in, drop a `.yaml` file in the `templates/` subdirectory of your config path (see table above). See [docs/TEMPLATES.md](docs/TEMPLATES.md) for the full schema and variable reference.
 
 ## Output
 
@@ -151,7 +151,7 @@ uv run pytest tests/ -v  # run tests
 uv run lint-imports      # check layer contracts
 ```
 
-Architecture details are in [AGENTS.md](AGENTS.md).
+Architecture details are in [AGENTS.md](AGENTS.md). To build your own source plugin, see the [Plugin Development Guide](docs/PLUGINS.md).
 
 ## License
 

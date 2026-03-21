@@ -77,6 +77,7 @@ class SoundCardLoopbackSource:
         self._thread: threading.Thread | None = None
         self._recorder = None
         self._com_owner = False  # tracks whether we initialized COM on the caller thread
+        self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform == 'darwin':

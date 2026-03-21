@@ -10,6 +10,10 @@ import numpy as np
 class AudioSource(Protocol):
     """Abstract audio input stream."""
 
+    mic_muted: bool
+    """When True, microphone contribution is silenced. Sources that do not
+    support muting should accept the attribute but may ignore it."""
+
     def open(self, sample_rate: int, channels: int) -> None:
         """Open the audio stream."""
         ...

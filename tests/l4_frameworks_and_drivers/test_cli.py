@@ -6,10 +6,12 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import click
 from click.testing import CliRunner
 
 from lazy_take_notes import __version__
 from lazy_take_notes.l4_frameworks_and_drivers.cli import (
+    _load_plugins,  # noqa: PLC2701 -- testing private helper
     _make_session_dir,  # noqa: PLC2701 -- testing private helper
     _preflight_llm,  # noqa: PLC2701 -- testing private helper
     _preflight_microphone,  # noqa: PLC2701 -- testing private helper
@@ -579,3 +581,70 @@ class TestViewSubcommand:
             runner.invoke(cli, ['view'])
 
         mock_app_cls.return_value.run.assert_called_once()
+
+
+class TestLoadPlugins:
+    def test_valid_plugin_registered_as_subcommand(self):
+        """A valid click.Command entry point gets added to the group."""
+        fake_command = click.Command('greet', callback=lambda: None)
+        mock_ep = MagicMock()
+        mock_ep.name = 'greet'
+        mock_ep.load.return_value = fake_command
+
+        group = click.Group('test')
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.cli.entry_points', return_value=[mock_ep]):
+            _load_plugins(group)
+
+        assert 'greet' in group.commands
+        assert group.commands['greet'] is fake_command
+
+    def test_non_command_entry_point_skipped(self):
+        """An entry point that resolves to a non-Command object is skipped with a warning."""
+        mock_ep = MagicMock()
+        mock_ep.name = 'bad'
+        mock_ep.load.return_value = 'not a command'
+
+        group = click.Group('test')
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.cli.entry_points', return_value=[mock_ep]):
+            _load_plugins(group)
+
+        assert 'bad' not in group.commands
+
+    def test_broken_plugin_does_not_crash_cli(self):
+        """A plugin that raises on load prints a warning, doesn't crash."""
+        mock_ep = MagicMock()
+        mock_ep.name = 'broken'
+        mock_ep.load.side_effect = ImportError('no such module')
+
+        group = click.Group('test')
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.cli.entry_points', return_value=[mock_ep]):
+            _load_plugins(group)
+
+        assert 'broken' not in group.commands
+
+    def test_no_plugins_is_noop(self):
+        """When no plugins are installed, the group is unchanged."""
+        group = click.Group('test')
+        original_commands = dict(group.commands)
+
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.cli.entry_points', return_value=[]):
+            _load_plugins(group)
+
+        assert group.commands == original_commands
+
+    def test_plugin_subcommand_visible_in_help(self):
+        """A registered plugin shows up in --help output."""
+        fake_command = click.Command('my-source', callback=lambda: None, help='Import from an external source.')
+        mock_ep = MagicMock()
+        mock_ep.name = 'my-source'
+        mock_ep.load.return_value = fake_command
+
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.cli.entry_points', return_value=[mock_ep]):
+            _load_plugins(cli)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ['--help'])
+        assert 'my-source' in result.output
+
+        # Cleanup: remove the test command so it doesn't leak into other tests
+        cli.commands.pop('my-source', None)

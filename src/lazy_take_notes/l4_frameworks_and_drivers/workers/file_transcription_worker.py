@@ -22,6 +22,30 @@ log = logging.getLogger('ltn.file_worker')
 _FEED_CHUNK = SAMPLE_RATE  # 1 second of audio per feed call
 
 
+def run_subtitle_replay(
+    post_message: Callable,
+    is_cancelled: Callable[[], bool],
+    segments: list[TranscriptSegment],
+) -> list[TranscriptSegment]:
+    """Replay pre-parsed subtitle segments into the TUI without whisper inference.
+
+    Posts TranscriptChunk messages one-by-one so the TUI streams them
+    into the transcript panel and digest buffer, identical to real-time
+    transcription. Designed to run inside a Textual @work(thread=True) worker.
+    """
+    post_message(AudioWorkerStatus(status='recording'))
+    all_segments: list[TranscriptSegment] = []
+
+    for segment in segments:
+        if is_cancelled():
+            break
+        all_segments.append(segment)
+        post_message(TranscriptChunk(segments=[segment]))
+
+    post_message(AudioWorkerStatus(status='stopped'))
+    return all_segments
+
+
 def run_file_transcription(
     post_message: Callable,
     is_cancelled: Callable[[], bool],

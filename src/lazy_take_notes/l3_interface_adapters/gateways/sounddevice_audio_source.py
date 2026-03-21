@@ -19,6 +19,7 @@ class SounddeviceAudioSource:
     def __init__(self) -> None:
         self._stream: sd.InputStream | None = None
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
+        self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     def open(self, sample_rate: int = SAMPLE_RATE, channels: int = 1) -> None:
         device_info = sd.query_devices(kind='input')

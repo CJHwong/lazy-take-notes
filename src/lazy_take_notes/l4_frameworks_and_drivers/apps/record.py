@@ -11,7 +11,6 @@ from textual.widgets import TextArea
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
-from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
 from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
@@ -164,6 +163,7 @@ class RecordApp(BaseApp):
         elif message.status == 'stopped':
             bar.recording = False
             bar.stopped = True
+            bar.mic_muted = False
             self._update_hints('stopped')
             if not self._audio_stopped:
                 # Audio worker finished without user pressing [s] — stream may have
@@ -239,6 +239,7 @@ class RecordApp(BaseApp):
         bar.recording = False
         bar.paused = False
         bar.stopped = True
+        bar.mic_muted = False
         self._update_hints('stopped')
 
         self.query_one('#context-input', TextArea).read_only = True
@@ -252,13 +253,14 @@ class RecordApp(BaseApp):
     def action_toggle_mic(self) -> None:
         if self._audio_stopped or self._audio_source is None:
             return
-        if not isinstance(self._audio_source, MixedAudioSource):
+        if self._audio_paused.is_set():
+            self.notify('Muting unavailable while paused', severity='warning', timeout=2)
             return
-        self._audio_source.mic_muted = not self._audio_source.mic_muted
+        muted = not self._audio_source.mic_muted
+        self._audio_source.mic_muted = muted
         bar = self.query_one('#status-bar', StatusBar)
-        bar.mic_muted = self._audio_source.mic_muted
-        label = 'Mic muted' if self._audio_source.mic_muted else 'Mic unmuted'
-        self.notify(label, timeout=2)
+        bar.mic_muted = muted
+        self.notify('Mic muted' if muted else 'Mic unmuted', timeout=2)
 
     def action_quit_app(self) -> None:
         bar = self.query_one('#status-bar', StatusBar)

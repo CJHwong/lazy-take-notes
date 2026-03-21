@@ -1700,49 +1700,106 @@ class TestConsentNoticeOnMount:
 class TestMicMuteToggle:
     @pytest.mark.asyncio
     async def test_m_toggles_mic_mute(self, tmp_path):
-        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
         from tests.conftest import FakeAudioSource
 
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        mixed = MixedAudioSource(mic, sys_audio)
+        fake_source = FakeAudioSource()
         app = make_app(tmp_path)
-        app._audio_source = mixed
+        app._audio_source = fake_source
 
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
-                # Simulate recording started so [m] is not blocked
                 app.post_message(AudioWorkerStatus(status='recording'))
                 await pilot.pause()
 
-                assert not mixed.mic_muted
+                assert not fake_source.mic_muted
 
-                await pilot.press('m')
-                await pilot.pause()
-                assert mixed.mic_muted
+                with patch.object(app, 'notify') as mock_notify:
+                    await pilot.press('m')
+                    await pilot.pause()
+                    mock_notify.assert_called_once_with('Mic muted', timeout=2)
 
+                assert fake_source.mic_muted
                 bar = app.query_one('#status-bar', StatusBar)
                 assert bar.mic_muted is True
 
-                await pilot.press('m')
-                await pilot.pause()
-                assert not mixed.mic_muted
+                with patch.object(app, 'notify') as mock_notify:
+                    await pilot.press('m')
+                    await pilot.pause()
+                    mock_notify.assert_called_once_with('Mic unmuted', timeout=2)
+
+                assert not fake_source.mic_muted
                 assert bar.mic_muted is False
 
     @pytest.mark.asyncio
     async def test_m_noop_when_stopped(self, tmp_path):
-        from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
         from tests.conftest import FakeAudioSource
 
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        mixed = MixedAudioSource(mic, sys_audio)
+        fake_source = FakeAudioSource()
         app = make_app(tmp_path)
-        app._audio_source = mixed
+        app._audio_source = fake_source
 
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 app._audio_stopped = True
                 await pilot.press('m')
                 await pilot.pause()
-                assert not mixed.mic_muted
+                assert not fake_source.mic_muted
+
+    @pytest.mark.asyncio
+    async def test_m_noop_when_audio_source_is_none(self, tmp_path):
+        app = make_app(tmp_path)
+        app._audio_source = None
+
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+                await pilot.press('m')
+                await pilot.pause()
+                # No exception raised — guard handled it
+
+    @pytest.mark.asyncio
+    async def test_m_warns_when_paused(self, tmp_path):
+        from tests.conftest import FakeAudioSource
+
+        fake_source = FakeAudioSource()
+        app = make_app(tmp_path)
+        app._audio_source = fake_source
+
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+
+                app._audio_paused.set()
+                with patch.object(app, 'notify') as mock_notify:
+                    await pilot.press('m')
+                    await pilot.pause()
+                    mock_notify.assert_called_once_with(
+                        'Muting unavailable while paused',
+                        severity='warning',
+                        timeout=2,
+                    )
+                assert not fake_source.mic_muted
+
+    @pytest.mark.asyncio
+    async def test_stop_resets_mic_muted_indicator(self, tmp_path):
+        from tests.conftest import FakeAudioSource
+
+        fake_source = FakeAudioSource()
+        app = make_app(tmp_path)
+        app._audio_source = fake_source
+
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+
+                await pilot.press('m')
+                await pilot.pause()
+                bar = app.query_one('#status-bar', StatusBar)
+                assert bar.mic_muted is True
+
+                await pilot.press('s')
+                await pilot.pause()
+                assert bar.mic_muted is False
