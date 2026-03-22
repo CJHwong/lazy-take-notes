@@ -134,6 +134,14 @@ my-source = "ltn_my_source:my_command"
 
 Import from `lazy_take_notes.plugin_api` — not from internal modules.
 
+**Available exports:**
+- `run_transcribe` — launch a file transcription session
+- `run_record` — launch a live recording session
+- `TranscriptSegment` — L1 entity for transcript data
+- `LLMClient`, `Transcriber`, `AudioSource` — L2 protocol types (implement these to swap backends)
+- `ChatMessage`, `ChatResponse` — L2 types needed to implement `LLMClient`
+
+**Basic usage (subtitle replay):**
 ```python
 from lazy_take_notes.plugin_api import run_transcribe, TranscriptSegment
 
@@ -145,7 +153,26 @@ def my_command(ctx, input_path):
     run_transcribe(ctx, subtitle_segments=segments, label='my session')
 ```
 
-`run_transcribe(ctx, *, audio_path=None, subtitle_segments=None, label=None)` handles config loading, template picker, session directory, LLM preflight, dependency wiring, and TUI launch. Provide `audio_path` for whisper transcription or `subtitle_segments` for subtitle replay.
+**Custom LLM backend:**
+```python
+from lazy_take_notes.plugin_api import run_record, LLMClient
+
+class MyLLMClient:
+    """Implements the LLMClient protocol."""
+    async def chat(self, model, messages): ...
+    async def chat_single(self, model, prompt): ...
+    def check_connectivity(self): ...
+    def check_models(self, models): ...
+
+@click.command('my-record')
+@click.pass_context
+def my_command(ctx):
+    run_record(ctx, llm_client=MyLLMClient())
+```
+
+**Signatures:**
+- `run_transcribe(ctx, *, audio_path=None, subtitle_segments=None, label=None, llm_client=None, transcriber=None)` — provide `audio_path` for whisper transcription or `subtitle_segments` for subtitle replay. Optional `llm_client`/`transcriber` override defaults.
+- `run_record(ctx, *, label=None, llm_client=None, transcriber=None, audio_source=None)` — full live recording session. Optional overrides bypass `DependencyContainer` defaults.
 
 ### Isolation
 

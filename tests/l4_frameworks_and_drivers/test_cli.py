@@ -12,10 +12,16 @@ from click.testing import CliRunner
 from lazy_take_notes import __version__
 from lazy_take_notes.l4_frameworks_and_drivers.cli import (
     _load_plugins,  # noqa: PLC2701 -- testing private helper
-    _make_session_dir,  # noqa: PLC2701 -- testing private helper
-    _preflight_llm,  # noqa: PLC2701 -- testing private helper
-    _preflight_microphone,  # noqa: PLC2701 -- testing private helper
     cli,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    make_session_dir as _make_session_dir,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    preflight_llm as _preflight_llm,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
+    preflight_microphone as _preflight_microphone,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
 
@@ -31,6 +37,7 @@ _SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.session_pic
 _FILE_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker.FilePicker'
 _WELCOME_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker.WelcomePicker'
 _CLI = 'lazy_take_notes.l4_frameworks_and_drivers.cli'
+_CLI_HELPERS = 'lazy_take_notes.l4_frameworks_and_drivers.cli_helpers'
 
 
 class TestMakeSessionDir:
@@ -218,7 +225,7 @@ class TestCliGroup:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_template_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
@@ -252,8 +259,8 @@ class TestCliGroup:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_template_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
-            patch(f'{_CLI}._preflight_microphone'),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_microphone'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
@@ -368,8 +375,8 @@ class TestRecordSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
-            patch(f'{_CLI}._preflight_microphone'),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_microphone'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
@@ -399,8 +406,8 @@ class TestRecordSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
-            patch(f'{_CLI}._preflight_microphone'),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_microphone'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp'),
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
@@ -480,7 +487,7 @@ class TestTranscribeSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):
@@ -528,7 +535,7 @@ class TestTranscribeSubcommand:
             patch(_BUILD) as mock_build,
             patch(_INFRA),
             patch(_PICKER, return_value=mock_template_picker),
-            patch(f'{_CLI}._preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
             patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
             patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
         ):

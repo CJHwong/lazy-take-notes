@@ -14,15 +14,6 @@ from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
     load_config as _load_config,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
-    make_session_dir as _make_session_dir,
-)
-from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
-    pick_template as _pick_template,
-)
-from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
-    preflight_llm as _preflight_llm,
-)
-from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
     resolve_base_dir as _resolve_base_dir,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
@@ -113,40 +104,11 @@ def cli(ctx, config_path, output_dir):
 @click.pass_context
 def record(ctx, label):
     """Start a live recording session with transcription and digest."""
-    config_path = ctx.obj['config_path']
-    output_dir = ctx.obj['output_dir']
-    config, infra, template_loader = _load_config(config_path, output_dir)
-
-    template = _pick_template(template_loader)
-    if template is None:
-        return
-
-    base_dir = _resolve_base_dir(output_dir, config)
-    out_dir = _make_session_dir(base_dir, label)
-
-    missing_digest, missing_interactive = _preflight_llm(infra, config)
-    _preflight_microphone()
-
-    from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        RecordApp,
-    )
-    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
-        DependencyContainer,
+    from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred: not loaded on --help
+        run_record as _run_record_impl,
     )
 
-    container = DependencyContainer(config, template, out_dir, infra=infra)
-    app = RecordApp(
-        config=config,
-        template=template,
-        output_dir=out_dir,
-        controller=container.controller,
-        audio_source=container.audio_source,
-        transcriber=container.transcriber,
-        missing_digest_models=missing_digest,
-        missing_interactive_models=missing_interactive,
-        label=label or '',
-    )
-    app.run()
+    _run_record_impl(ctx, label=label)
 
 
 @cli.command()
@@ -247,15 +209,3 @@ def _load_plugins(group: click.Group) -> None:
 
 
 _load_plugins(cli)
-
-
-def _preflight_microphone() -> None:
-    try:
-        import sounddevice as sd  # noqa: PLC0415 -- deferred: not loaded on --help
-
-        devices = sd.query_devices()
-        input_devices = [d for d in devices if d['max_input_channels'] > 0]
-        if not input_devices:
-            click.echo('Warning: No input audio devices found.', err=True)
-    except Exception as e:
-        click.echo(f'Warning: Cannot query audio devices ({e}).', err=True)

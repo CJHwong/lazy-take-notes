@@ -6,22 +6,38 @@ This insulates plugins from internal refactors.
 
 Example::
 
-    from lazy_take_notes.plugin_api import run_transcribe, TranscriptSegment
+    from lazy_take_notes.plugin_api import (
+        run_record, run_transcribe, LLMClient, TranscriptSegment,
+    )
 
-    @click.command('my-source')
-    @click.argument('input_path')
+    class MyLLMClient:
+        async def chat(self, model, messages): ...
+        async def chat_single(self, model, prompt): ...
+        def check_connectivity(self): ...
+        def check_models(self, models): ...
+
+    @click.command('my-record')
     @click.pass_context
-    def my_command(ctx, input_path):
-        segments = fetch_and_parse(input_path)
-        run_transcribe(ctx, subtitle_segments=segments, label='my session')
+    def my_command(ctx):
+        run_record(ctx, llm_client=MyLLMClient())
 """
 
 from __future__ import annotations
 
+from lazy_take_notes.l1_entities.chat_message import ChatMessage
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
-from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
+from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
+from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse, LLMClient
+from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
+from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_record, run_transcribe
 
 __all__ = [
-    'run_transcribe',
+    'AudioSource',
+    'ChatMessage',
+    'ChatResponse',
+    'LLMClient',
+    'Transcriber',
     'TranscriptSegment',
+    'run_record',
+    'run_transcribe',
 ]

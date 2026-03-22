@@ -33,6 +33,10 @@ class DependencyContainer:
         output_dir: Path,
         infra: InfraConfig | None = None,
         build_audio: bool = True,
+        *,
+        llm_client: LLMClient | None = None,
+        transcriber: Transcriber | None = None,
+        audio_source: AudioSource | None = None,
     ) -> None:
         self.config = config
         self.template = template
@@ -40,9 +44,9 @@ class DependencyContainer:
 
         _infra = infra or InfraConfig()
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
-        self.llm_client: LLMClient = self._build_llm_client(_infra)
-        self.transcriber: Transcriber = SubprocessWhisperTranscriber()
-        self.audio_source: AudioSource | None = self._build_mixed_source() if build_audio else None
+        self.llm_client: LLMClient = llm_client or self._build_llm_client(_infra)
+        self.transcriber: Transcriber = transcriber or SubprocessWhisperTranscriber()
+        self.audio_source: AudioSource | None = audio_source or (self._build_mixed_source() if build_audio else None)
         self.model_resolver: ModelResolver = HfModelResolver()
 
         self.controller = SessionController(
