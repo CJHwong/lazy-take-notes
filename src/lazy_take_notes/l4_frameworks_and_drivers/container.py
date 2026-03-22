@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib.metadata import entry_points
 from pathlib import Path
 
 from lazy_take_notes.l1_entities.config import AppConfig
@@ -22,6 +23,9 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import Ya
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
 from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig
 
+LLM_PROVIDERS_GROUP = 'lazy_take_notes.llm_providers'
+BUILTIN_LLM_PROVIDERS = ('ollama', 'openai')
+
 
 class DependencyContainer:
     """Creates and wires all concrete instances. Easy to override for testing."""
@@ -33,6 +37,10 @@ class DependencyContainer:
         output_dir: Path,
         infra: InfraConfig | None = None,
         build_audio: bool = True,
+        *,
+        llm_client: LLMClient | None = None,
+        transcriber: Transcriber | None = None,
+        audio_source: AudioSource | None = None,
     ) -> None:
         self.config = config
         self.template = template
@@ -40,9 +48,9 @@ class DependencyContainer:
 
         _infra = infra or InfraConfig()
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
-        self.llm_client: LLMClient = self._build_llm_client(_infra)
-        self.transcriber: Transcriber = SubprocessWhisperTranscriber()
-        self.audio_source: AudioSource | None = self._build_mixed_source() if build_audio else None
+        self.llm_client: LLMClient = llm_client or self.resolve_llm_client(_infra)
+        self.transcriber: Transcriber = transcriber or SubprocessWhisperTranscriber()
+        self.audio_source: AudioSource | None = audio_source or (self._build_mixed_source() if build_audio else None)
         self.model_resolver: ModelResolver = HfModelResolver()
 
         self.controller = SessionController(
@@ -76,7 +84,8 @@ class DependencyContainer:
         return MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())
 
     @staticmethod
-    def _build_llm_client(infra: InfraConfig) -> LLMClient:
+    def resolve_llm_client(infra: InfraConfig) -> LLMClient:
+        """Build an LLM client from built-in providers or plugin discovery."""
         if infra.llm_provider == 'openai':
             from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred: only loaded when provider is openai
                 OpenAICompatLLMClient,
@@ -84,11 +93,14 @@ class DependencyContainer:
 
             return OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
 
-        from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: only loaded when provider is ollama
-            OllamaLLMClient,
-        )
+        if infra.llm_provider == 'ollama':
+            from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred: only loaded when provider is ollama
+                OllamaLLMClient,
+            )
 
-        return OllamaLLMClient(host=infra.ollama.host)
+            return OllamaLLMClient(host=infra.ollama.host)
+
+        return _load_plugin_llm_client(infra)
 
     @staticmethod
     def config_loader() -> ConfigLoader:
@@ -97,3 +109,20 @@ class DependencyContainer:
     @staticmethod
     def template_loader() -> TemplateLoader:
         return YamlTemplateLoader()
+
+
+def _load_plugin_llm_client(infra: InfraConfig) -> LLMClient:
+    """Discover and load an LLM client from a plugin entry point.
+
+    Scans ``lazy_take_notes.llm_providers`` for an entry point whose name
+    matches ``infra.llm_provider``. The entry point must resolve to a
+    callable that accepts ``InfraConfig`` and returns an ``LLMClient``.
+    """
+    eps = list(entry_points(group=LLM_PROVIDERS_GROUP))
+    for ep in eps:
+        if ep.name == infra.llm_provider:
+            factory = ep.load()
+            return factory(infra)
+    available = [*BUILTIN_LLM_PROVIDERS, *(ep.name for ep in eps)]
+    msg = f'Unknown LLM provider {infra.llm_provider!r}. Available: {", ".join(available)}'
+    raise ValueError(msg)

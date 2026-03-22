@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import deep_merge
@@ -56,8 +56,15 @@ class OpenAIProviderConfig(BaseModel):
 
 
 class InfraConfig(BaseModel):
-    """Groups all provider-specific settings outside the domain layer."""
+    """Groups all provider-specific settings outside the domain layer.
 
-    llm_provider: str = 'ollama'  # 'ollama' | 'openai'
+    Plugin providers can store custom config under arbitrary keys
+    (e.g. ``claude_code: {digest_model: sonnet}``). These are accessible
+    via ``infra.model_extra``.
+    """
+
+    model_config = ConfigDict(extra='allow')
+
+    llm_provider: str = 'ollama'  # 'ollama' | 'openai' | plugin-registered name
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)

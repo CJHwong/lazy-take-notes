@@ -29,6 +29,10 @@ from lazy_take_notes.l4_frameworks_and_drivers.config import (
     InfraConfig,
     build_app_config,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.container import (
+    BUILTIN_LLM_PROVIDERS,
+    LLM_PROVIDERS_GROUP,
+)
 
 
 def _resolve_editor() -> list[str] | None:
@@ -193,6 +197,32 @@ class _SelectRow(Vertical):
         yield Select(choices, value=self._value, id=self._field_id, allow_blank=False)
 
 
+def _discover_llm_providers() -> list[str]:
+    """Return built-in + plugin-registered LLM provider names."""
+    from importlib.metadata import entry_points  # noqa: PLC0415 -- deferred: not needed on --help
+
+    plugin_names = [ep.name for ep in entry_points(group=LLM_PROVIDERS_GROUP)]
+    return [*BUILTIN_LLM_PROVIDERS, *(n for n in plugin_names if n not in BUILTIN_LLM_PROVIDERS)]
+
+
+def _provider_manages_models(provider: str) -> bool:
+    """Check if a plugin provider manages its own model selection.
+
+    Returns True when the provider's factory has ``manages_models = True``.
+    Built-in providers always return False (they use the model fields).
+    """
+    if provider in BUILTIN_LLM_PROVIDERS:
+        return False
+
+    from importlib.metadata import entry_points  # noqa: PLC0415 -- deferred: only on provider change
+
+    for ep in entry_points(group=LLM_PROVIDERS_GROUP):
+        if ep.name == provider:
+            factory = ep.load()
+            return getattr(factory, 'manages_models', False)
+    return False
+
+
 # ── ConfigApp ────────────────────────────────────────────────────────────────
 
 
@@ -298,11 +328,12 @@ class ConfigApp(TextualApp):
                     yield _SelectRow(
                         'AI Provider',
                         'cfg-llm-provider',
-                        ['ollama', 'openai'],
+                        _discover_llm_providers(),
                         self._infra.llm_provider,
                         help_text=(
-                            '"ollama" runs models on your computer (free, private). '
-                            '"openai" uses a cloud API (needs an API key).'
+                            '"ollama" runs models locally (free, private). '
+                            '"openai" uses a cloud API (needs an API key). '
+                            'Plugin providers appear when installed.'
                         ),
                     )
 
@@ -333,6 +364,32 @@ class ConfigApp(TextualApp):
                             placeholder='sk-...',
                             password=True,
                         )
+
+                    digest = self._raw.get('digest', {})
+                    interactive = self._raw.get('interactive', {})
+
+                    with Vertical(id='model-fields', classes='field-group'):
+                        yield Static('AI Models', classes='field-group-title')
+                        yield _FieldRow(
+                            'Summary Model',
+                            'cfg-digest-model',
+                            str(digest.get('model', '')),
+                            help_text='Generates rolling summaries from your transcript.',
+                            placeholder='gpt-oss:20b',
+                        )
+                        yield _FieldRow(
+                            'Quick-Action Model',
+                            'cfg-interactive-model',
+                            str(interactive.get('model', '')),
+                            help_text='Handles keyboard-shortcut queries (keys 1–5). Can be the same model.',
+                            placeholder='gpt-oss:20b',
+                        )
+
+                    yield Static(
+                        'Models are managed by the plugin. Edit config.yaml to configure.',
+                        id='plugin-model-note',
+                        classes='section-desc',
+                    )
 
             # ── Tab 2: Transcription ─────────────────────────────────
             with TabPane('Speech-to-Text', id='tab-transcription'):
@@ -395,29 +452,11 @@ class ConfigApp(TextualApp):
             with TabPane('Summaries', id='tab-digest'):
                 with VerticalScroll(classes='form-scroll'):
                     digest = self._raw.get('digest', {})
-                    interactive = self._raw.get('interactive', {})
 
                     yield Static(
                         'Controls live summaries and quick-action Q&A.',
                         classes='section-desc',
                     )
-
-                    with Vertical(classes='field-group'):
-                        yield Static('AI Models', classes='field-group-title')
-                        yield _FieldRow(
-                            'Summary Model',
-                            'cfg-digest-model',
-                            str(digest.get('model', '')),
-                            help_text='Generates rolling summaries from your transcript.',
-                            placeholder='gpt-oss:20b',
-                        )
-                        yield _FieldRow(
-                            'Quick-Action Model',
-                            'cfg-interactive-model',
-                            str(interactive.get('model', '')),
-                            help_text='Handles keyboard-shortcut queries (keys 1–5). Can be the same model.',
-                            placeholder='gpt-oss:20b',
-                        )
 
                     with Vertical(classes='field-group'):
                         yield Static('When to summarize', classes='field-group-title')
@@ -572,6 +611,20 @@ class ConfigApp(TextualApp):
 
         return data
 
+    def on_mount(self) -> None:
+        """Set initial visibility of model fields based on provider."""
+        self._sync_model_fields_visibility(self._infra.llm_provider)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """Toggle model fields when provider changes."""
+        if event.select.id == 'cfg-llm-provider':
+            self._sync_model_fields_visibility(str(event.value))
+
+    def _sync_model_fields_visibility(self, provider: str) -> None:
+        hide_models = _provider_manages_models(provider)
+        self.query_one('#model-fields').display = not hide_models
+        self.query_one('#plugin-model-note').display = hide_models
+
     def action_save_config(self) -> None:
         """Validate form data, then write to config.yaml."""
         data = self._collect_form_data()
@@ -595,23 +648,15 @@ class ConfigApp(TextualApp):
             self.notify(f'Invalid provider config: {exc}', severity='error')
             return
 
-        from lazy_take_notes.l2_use_cases.ports.llm_client import (  # noqa: PLC0415 -- deferred: only needed on test
-            LLMClient,
+        from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: only needed on test
+            DependencyContainer,
         )
 
-        client: LLMClient
-        if infra.llm_provider == 'openai':
-            from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred
-                OpenAICompatLLMClient,
-            )
-
-            client = OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
-        else:
-            from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred
-                OllamaLLMClient,
-            )
-
-            client = OllamaLLMClient(host=infra.ollama.host)
+        try:
+            client = DependencyContainer.resolve_llm_client(infra)
+        except ValueError as exc:
+            self.notify(str(exc), severity='error', timeout=8)
+            return
 
         ok, err = client.check_connectivity()
         if ok:
