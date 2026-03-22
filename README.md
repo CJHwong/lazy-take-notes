@@ -143,6 +143,26 @@ output/
     └── notes_003_final.md    # final digest on quit/stop
 ```
 
+## Desktop App (macOS)
+
+Package lazy-take-notes as a native macOS desktop app powered by [Trolley](https://github.com/weedonandscott/trolley) + [libghostty](https://github.com/ghostty-org/ghostty).
+
+### Prerequisites
+
+```bash
+brew install weedonandscott/tap/trolley
+uv pip install pyinstaller
+```
+
+### Build & Run
+
+```bash
+./scripts/build_desktop.sh          # build + launch in dev mode
+./scripts/build_desktop.sh package  # build .app, .dmg, .tar.gz
+```
+
+The packaged `.app` is a standalone desktop app with GPU-accelerated terminal rendering. No Python or uv required on the target machine.
+
 ## Development
 
 ```bash
