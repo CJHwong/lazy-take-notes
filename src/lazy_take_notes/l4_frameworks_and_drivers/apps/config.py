@@ -193,8 +193,12 @@ class _SelectRow(Vertical):
         yield Label(self._label, classes='field-label')
         if self._help_text:
             yield Static(self._help_text, classes='field-help')
-        choices = [(opt, opt) for opt in self._options]
-        yield Select(choices, value=self._value, id=self._field_id, allow_blank=False)
+        options = self._options
+        value = self._value
+        if value not in options:
+            options = [*options, value]
+        choices = [(opt, opt) for opt in options]
+        yield Select(choices, value=value, id=self._field_id, allow_blank=False)
 
 
 def _discover_llm_providers() -> list[str]:
@@ -693,7 +697,13 @@ class ConfigApp(TextualApp):
 
     def _repopulate_fields(self) -> None:
         """Push current self._raw / self._infra values back into form widgets."""
-        self.query_one('#cfg-llm-provider', Select).value = self._infra.llm_provider
+        provider_select = self.query_one('#cfg-llm-provider', Select)
+        provider = self._infra.llm_provider
+        current_values = [str(v) for _, v in provider_select._options]
+        if provider not in current_values:
+            all_names = [*current_values, provider]
+            provider_select.set_options([(n, n) for n in all_names])
+        provider_select.value = provider
         self.query_one('#cfg-ollama-host', Input).value = self._infra.ollama.host
         self.query_one('#cfg-openai-base-url', Input).value = self._infra.openai.base_url
         self.query_one('#cfg-openai-api-key', Input).value = self._infra.openai.api_key or ''
