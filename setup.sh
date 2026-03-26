@@ -41,55 +41,13 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 1: Homebrew
+# Step 1: uv (package manager)
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "1 / 6  Homebrew"
-if command -v brew &>/dev/null; then
-  ok "Already installed"
-elif [[ "$PLATFORM" == "linux" ]] && [[ "${LTN_ACCEPT_BREW:-}" != "1" ]]; then
-  # Homebrew on Linux is not standard — warn before touching the system
-  echo ""
-  warn "Homebrew is not installed."
-  echo -e "  This script uses Homebrew to install dependencies."
-  echo -e "  On Linux, Homebrew (linuxbrew) will:"
-  echo -e "    • Create ${BOLD}/home/linuxbrew/.linuxbrew${RESET} (~1 GB)"
-  echo -e "    • Add entries to your shell profile"
-  echo ""
-  echo -e "  ${DIM}If you prefer your distro package manager, install these manually:${RESET}"
-  echo -e "    ${BOLD}uv${RESET}      — https://docs.astral.sh/uv/getting-started/installation/"
-  echo -e "    ${BOLD}ollama${RESET}   — https://ollama.com/download (only if using Ollama provider)"
-  echo -e "  ${DIM}Then re-run this script — it will skip what's already installed.${RESET}"
-  echo ""
-  read -rp "  Install Homebrew on this system? (y/N): " brew_confirm
-  if [[ "$brew_confirm" != [yY]* ]]; then
-    info "Skipping Homebrew — checking for dependencies directly..."
-    # Fall through to step 2; uv/ollama checks will use whatever is on PATH
-    HAS_BREW=0
-  fi
-fi
-
-if [[ "${HAS_BREW:-1}" == "1" ]] && ! command -v brew &>/dev/null; then
-  info "Installing Homebrew..."
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  # Ensure brew is on PATH for the rest of this script
-  if [[ "$PLATFORM" == "linux" ]] && [[ -f /home/linuxbrew/.linuxbrew/bin/brew ]]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-  fi
-fi
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Step 2: uv (package manager)
-# ═════════════════════════════════════════════════════════════════════════════
-
-section "2 / 6  uv (package manager)"
+section "1 / 5  uv (package manager)"
 if command -v uv &>/dev/null; then
   ok "Already installed"
-elif command -v brew &>/dev/null; then
-  info "Installing uv via Homebrew..."
-  brew install uv
 else
-  # No brew available (Linux user declined) — try the standalone installer
   info "Installing uv via standalone installer..."
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
@@ -101,10 +59,10 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 3: Choose AI provider
+# Step 2: Choose AI provider
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "3 / 6  AI provider"
+section "2 / 5  AI provider"
 
 if [[ -z "$PROVIDER" ]]; then
   echo ""
@@ -126,10 +84,10 @@ fi
 ok "Selected: $PROVIDER"
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 4: Provider-specific setup
+# Step 3: Provider-specific setup
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "4 / 6  Provider setup ($PROVIDER)"
+section "3 / 5  Provider setup ($PROVIDER)"
 
 if [[ "$PROVIDER" == "ollama" ]]; then
   # ── Ollama path ──────────────────────────────────────────────────────────
@@ -139,10 +97,33 @@ if [[ "$PROVIDER" == "ollama" ]]; then
     info "Installing Ollama via Homebrew..."
     brew install ollama
   else
-    warn "Ollama is not installed and Homebrew is not available."
-    echo -e "  ${DIM}Install Ollama manually: https://ollama.com/download${RESET}"
-    echo -e "  ${DIM}Then re-run this script.${RESET}"
-    exit 1
+    # No brew available — on Linux, offer to install brew for ollama
+    if [[ "$PLATFORM" == "linux" ]] && [[ "${LTN_ACCEPT_BREW:-}" != "1" ]]; then
+      echo ""
+      warn "Ollama is not installed and Homebrew is not available."
+      echo -e "  Homebrew is needed to install Ollama."
+      echo -e "  On Linux, Homebrew (linuxbrew) will:"
+      echo -e "    • Create ${BOLD}/home/linuxbrew/.linuxbrew${RESET} (~1 GB)"
+      echo -e "    • Add entries to your shell profile"
+      echo ""
+      echo -e "  ${DIM}Alternatively, install Ollama manually: https://ollama.com/download${RESET}"
+      echo -e "  ${DIM}Then re-run this script.${RESET}"
+      echo ""
+      read -rp "  Install Homebrew to get Ollama? (y/N): " brew_confirm
+      if [[ "$brew_confirm" != [yY]* ]]; then
+        warn "Skipping. Install Ollama manually: https://ollama.com/download"
+        echo -e "  ${DIM}Then re-run this script.${RESET}"
+        exit 1
+      fi
+    fi
+    # Install brew, then ollama
+    info "Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    if [[ "$PLATFORM" == "linux" ]] && [[ -f /home/linuxbrew/.linuxbrew/bin/brew ]]; then
+      eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+    fi
+    info "Installing Ollama via Homebrew..."
+    brew install ollama
   fi
 
 elif [[ "$PROVIDER" == "openai" ]]; then
@@ -166,21 +147,67 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 5: take-note command
+# Step 4: take-note command
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "5 / 6  take-note command"
+section "4 / 5  take-note command"
 
-BREW_BIN="$(brew --prefix)/bin"
-TAKE_NOTE_BIN="$BREW_BIN/take-note"
+# ── Determine install directory ──────────────────────────────────────────────
+if [[ "$PLATFORM" == "macos" ]]; then
+  INSTALL_DIR="/usr/local/bin"
+  if ! touch "$INSTALL_DIR/.ltn-write-test" 2>/dev/null; then
+    INSTALL_DIR="$HOME/.local/bin"
+  else
+    rm -f "$INSTALL_DIR/.ltn-write-test"
+  fi
+else
+  INSTALL_DIR="$HOME/.local/bin"
+fi
 
-# Clean up stale alias from previous setup versions
+mkdir -p "$INSTALL_DIR"
+TAKE_NOTE_BIN="$INSTALL_DIR/take-note"
+
+# ── Migrate: remove old brew-based wrapper if it exists ──────────────────────
+if command -v brew &>/dev/null; then
+  OLD_BREW_BIN="$(brew --prefix)/bin/take-note"
+  if [[ -f "$OLD_BREW_BIN" ]] && [[ "$OLD_BREW_BIN" != "$TAKE_NOTE_BIN" ]]; then
+    rm -f "$OLD_BREW_BIN"
+    info "Removed old wrapper at $OLD_BREW_BIN"
+  fi
+fi
+
+# ── Clean up stale alias from previous setup versions ────────────────────────
 SHELL_RC="$HOME/.zshrc"
 if grep -q "alias take-note=" "$SHELL_RC" 2>/dev/null; then
   sed -i '' '/# lazy-take-notes/d;/alias take-note=/d' "$SHELL_RC" 2>/dev/null || true
   info "Removed old alias from $SHELL_RC"
 fi
 
+# ── Ensure ~/.local/bin is on PATH if we're installing there ─────────────────
+if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *)
+      # Detect shell rc file
+      if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$(basename "$SHELL")" == "zsh" ]]; then
+        RC_FILE="$HOME/.zshrc"
+      else
+        RC_FILE="$HOME/.bashrc"
+      fi
+      EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
+      if ! grep -qF '.local/bin' "$RC_FILE" 2>/dev/null; then
+        echo "" >> "$RC_FILE"
+        echo "# Added by lazy-take-notes setup" >> "$RC_FILE"
+        echo "$EXPORT_LINE" >> "$RC_FILE"
+        info "Added ~/.local/bin to PATH in $RC_FILE"
+      fi
+      export PATH="$HOME/.local/bin:$PATH"
+      warn "Restart your shell or run: source $RC_FILE"
+      ;;
+  esac
+fi
+
+# ── Create wrapper script ───────────────────────────────────────────────────
 UVX_PATH="$(command -v uvx 2>/dev/null)"
 if [[ -z "$UVX_PATH" ]]; then
   warn "uvx not found in PATH — install uv first"
@@ -190,10 +217,6 @@ fi
 if [[ -f "$TAKE_NOTE_BIN" ]]; then
   ok "Already exists at $TAKE_NOTE_BIN"
 else
-  if ! touch "$TAKE_NOTE_BIN" 2>/dev/null; then
-    warn "Cannot write to $BREW_BIN — re-run with: sudo bash setup.sh"
-    exit 1
-  fi
   cat > "$TAKE_NOTE_BIN" << WRAPPER
 #!/bin/bash
 exec "$UVX_PATH" --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes "\$@"
@@ -203,10 +226,10 @@ WRAPPER
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 6: config.yaml
+# Step 5: config.yaml
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "6 / 6  Config"
+section "5 / 5  Config"
 
 CONFIG_FILE="$CONFIG_DIR/config.yaml"
 mkdir -p "$CONFIG_DIR"

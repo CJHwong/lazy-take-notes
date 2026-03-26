@@ -15,7 +15,7 @@ Terminal app for live transcription and note-taking. Records your mic, transcrib
 
 ## Install
 
-### Quick setup (macOS)
+### Quick setup
 
 Run this in Terminal — it installs everything and sets up a `take-note` shortcut:
 
