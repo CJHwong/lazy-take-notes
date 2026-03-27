@@ -72,7 +72,7 @@ if [[ -z "$PROVIDER" ]]; then
   echo -e "  ${BOLD}2${RESET}  OpenAI  ${DIM}— cloud API (needs an API key from platform.openai.com)${RESET}"
   echo ""
   while true; do
-    read -rp "  Enter 1 or 2: " choice
+    read -rp "  Enter 1 or 2: " choice </dev/tty
     case "$choice" in
       1) PROVIDER="ollama"; break ;;
       2) PROVIDER="openai"; break ;;
@@ -109,7 +109,7 @@ if [[ "$PROVIDER" == "ollama" ]]; then
       echo -e "  ${DIM}Alternatively, install Ollama manually: https://ollama.com/download${RESET}"
       echo -e "  ${DIM}Then re-run this script.${RESET}"
       echo ""
-      read -rp "  Install Homebrew to get Ollama? (y/N): " brew_confirm
+      read -rp "  Install Homebrew to get Ollama? (y/N): " brew_confirm </dev/tty
       if [[ "$brew_confirm" != [yY]* ]]; then
         warn "Skipping. Install Ollama manually: https://ollama.com/download"
         echo -e "  ${DIM}Then re-run this script.${RESET}"
@@ -134,7 +134,7 @@ elif [[ "$PROVIDER" == "openai" ]]; then
     echo -e "  Enter your OpenAI API key (starts with ${BOLD}sk-${RESET})."
     echo -e "  ${DIM}Get one at: https://platform.openai.com/api-keys${RESET}"
     echo ""
-    read -rsp "  API key: " OPENAI_KEY
+    read -rsp "  API key: " OPENAI_KEY </dev/tty
     echo ""
     if [[ -z "$OPENAI_KEY" ]]; then
       warn "No API key provided. You can add it later in Settings."
