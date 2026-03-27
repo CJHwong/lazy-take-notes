@@ -9,6 +9,9 @@ USER_TEMPLATES_DIR = CONFIG_DIR / 'templates'
 
 CONSENT_NOTICED_PATH = CONFIG_DIR / '.consent_noticed'
 
+PLUGINS_YAML = CONFIG_DIR / 'plugins.yaml'
+PLUGINS_TXT = CONFIG_DIR / 'plugins.txt'
+
 DEFAULT_CONFIG_PATHS = [
     CONFIG_DIR / 'config.yaml',
     CONFIG_DIR / 'config.yml',

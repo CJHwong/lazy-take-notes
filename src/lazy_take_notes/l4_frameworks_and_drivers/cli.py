@@ -192,6 +192,60 @@ def _launch_template_builder() -> None:
     TemplateBuilderApp().run()
 
 
+@cli.group('plugin')
+def plugin_group():
+    """Manage uvx plugins (add, remove, list)."""
+
+
+@plugin_group.command('add')
+@click.argument('spec')
+def plugin_add(spec):
+    """Add a plugin by pip/uvx spec (e.g. 'ltn-youtube @ git+https://...')."""
+    from lazy_take_notes.l4_frameworks_and_drivers.plugin_manifest import (  # noqa: PLC0415 -- deferred
+        add_plugin,
+        parse_spec_name,
+    )
+
+    name = parse_spec_name(spec)
+    click.echo(f'Validating {name}...', nl=False)
+    err = add_plugin(spec)
+    if err is not None:
+        click.echo(f' failed\n{err}', err=True)
+        raise SystemExit(1)
+    click.echo(f' ok\nPlugin {name} added.')
+
+
+@plugin_group.command('remove')
+@click.argument('name')
+def plugin_remove(name):
+    """Remove a plugin by package name (e.g. 'ltn-youtube')."""
+    from lazy_take_notes.l4_frameworks_and_drivers.plugin_manifest import (  # noqa: PLC0415 -- deferred
+        remove_plugin,
+    )
+
+    removed = remove_plugin(name)
+    if removed:
+        click.echo(f'Plugin {name} removed.')
+    else:
+        click.echo(f'Plugin {name} not found.', err=True)
+
+
+@plugin_group.command('list')
+def plugin_list():
+    """List installed plugins."""
+    from lazy_take_notes.l4_frameworks_and_drivers.plugin_manifest import (  # noqa: PLC0415 -- deferred
+        load_plugins,
+        parse_spec_name,
+    )
+
+    specs = load_plugins()
+    if not specs:
+        click.echo('No plugins installed.')
+        return
+    for spec in specs:
+        click.echo(f'  {parse_spec_name(spec)}  ({spec})')
+
+
 def _load_plugins(group: click.Group) -> None:
     """Discover and register plugin subcommands via entry_points."""
     for ep in entry_points(group='lazy_take_notes.plugins'):

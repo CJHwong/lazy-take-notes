@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import click
+import pytest
 from click.testing import CliRunner
 
 from lazy_take_notes import __version__
@@ -655,3 +656,60 @@ class TestLoadPlugins:
 
         # Cleanup: remove the test command so it doesn't leak into other tests
         cli.commands.pop('my-source', None)
+
+
+_MANIFEST = 'lazy_take_notes.l4_frameworks_and_drivers.plugin_manifest'
+
+
+@pytest.fixture()
+def plugin_dir(tmp_path: Path):
+    """Patch plugin manifest paths to use tmp_path, yield the dir."""
+    with (
+        patch(f'{_MANIFEST}.PLUGINS_YAML', tmp_path / 'plugins.yaml'),
+        patch(f'{_MANIFEST}.PLUGINS_TXT', tmp_path / 'plugins.txt'),
+    ):
+        yield tmp_path
+
+
+class TestPluginCommands:
+    """Tests for `take-note plugin add/remove/list` CLI commands."""
+
+    def test_plugin_add_success(self, plugin_dir: Path):
+        runner = CliRunner()
+        with patch(f'{_MANIFEST}.validate_spec', return_value=(True, '')):
+            result = runner.invoke(cli, ['plugin', 'add', 'my-plugin @ git+https://example.com'])
+        assert result.exit_code == 0
+        assert 'my-plugin added' in result.output
+
+    def test_plugin_add_validation_failure(self, plugin_dir: Path):
+        runner = CliRunner()
+        with patch(f'{_MANIFEST}.validate_spec', return_value=(False, 'No matching distribution')):
+            result = runner.invoke(cli, ['plugin', 'add', 'nonexistent'])
+        assert result.exit_code == 1
+
+    def test_plugin_remove_success(self, plugin_dir: Path):
+        runner = CliRunner()
+        (plugin_dir / 'plugins.yaml').write_text('plugins:\n  - my-plugin\n')
+        result = runner.invoke(cli, ['plugin', 'remove', 'my-plugin'])
+        assert result.exit_code == 0
+        assert 'removed' in result.output
+
+    def test_plugin_remove_not_found(self, plugin_dir: Path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ['plugin', 'remove', 'nonexistent'])
+        assert result.exit_code == 0
+        assert 'not found' in result.output
+
+    def test_plugin_list_empty(self, plugin_dir: Path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ['plugin', 'list'])
+        assert result.exit_code == 0
+        assert 'No plugins installed' in result.output
+
+    def test_plugin_list_shows_installed(self, plugin_dir: Path):
+        runner = CliRunner()
+        (plugin_dir / 'plugins.yaml').write_text('plugins:\n  - plugin-a\n  - plugin-b\n')
+        result = runner.invoke(cli, ['plugin', 'list'])
+        assert result.exit_code == 0
+        assert 'plugin-a' in result.output
+        assert 'plugin-b' in result.output
