@@ -21,6 +21,17 @@ from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
 )
 
 
+def _clear_normal_screen() -> None:  # pragma: no cover -- terminal escape; no-op in test
+    """Clear the normal screen buffer before launching Textual apps.
+
+    Each Textual App enters/exits the alternate screen buffer independently.
+    Between apps the terminal briefly restores the normal screen. Clearing it
+    beforehand means the flash shows a blank screen instead of shell history.
+    """
+    sys.stdout.write('\033[2J\033[H')
+    sys.stdout.flush()
+
+
 def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort platform guard
     """Pre-initialize the multiprocessing resource tracker before Textual replaces sys.stderr.
 
@@ -73,7 +84,10 @@ def cli(ctx, config_path, output_dir):
         WelcomePicker,
     )
 
+    # FIXME: replace with a single ShellApp that uses Textual Screens for
+    # pickers and main apps, eliminating inter-app terminal flicker entirely.
     kiosk = os.environ.get('LTN_KIOSK') == '1'
+    _clear_normal_screen()
     while True:
         mode = WelcomePicker().run()
         if mode == 'record':
@@ -127,6 +141,7 @@ def transcribe(ctx, audio_file, label):
             FilePicker,
         )
 
+        _clear_normal_screen()
         selected = FilePicker().run()
         if selected is None:
             return
@@ -155,6 +170,7 @@ def view(ctx):
         SessionPicker,
     )
 
+    _clear_normal_screen()
     while True:
         picker = SessionPicker(sessions_dir=base_dir)
         session_dir = picker.run()

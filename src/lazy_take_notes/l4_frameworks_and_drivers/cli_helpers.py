@@ -21,6 +21,17 @@ if TYPE_CHECKING:
     from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 
 
+def _clear_normal_screen() -> None:  # pragma: no cover -- terminal escape; no-op in test
+    """Clear the normal screen buffer before launching Textual apps.
+
+    Each Textual App enters/exits the alternate screen buffer independently.
+    Between apps the terminal briefly restores the normal screen. Clearing it
+    beforehand means the flash shows a blank screen instead of shell history.
+    """
+    sys.stdout.write('\033[2J\033[H')
+    sys.stdout.flush()
+
+
 def resolve_base_dir(output_dir: str | None, config) -> Path:
     """Resolve the base output directory, expanding ~ in paths."""
     return Path(output_dir or config.output.directory).expanduser()
@@ -82,6 +93,9 @@ def pick_template(template_loader):
         TemplatePicker,
     )
 
+    # FIXME: replace with a single ShellApp that uses Textual Screens for
+    # pickers and main apps, eliminating inter-app terminal flicker entirely.
+    _clear_normal_screen()
     while True:
         picker_result = TemplatePicker().run()
         if picker_result is None:
