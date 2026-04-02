@@ -273,6 +273,12 @@ class RecordingPreview(Vertical):
     RecordingPreview .preview-panels {
         height: 12;
     }
+    RecordingPreview .preview-panels > TranscriptPanel {
+        width: 1fr;
+    }
+    RecordingPreview .preview-panels > DigestPanel {
+        width: 1fr;
+    }
     """
 
     def compose(self) -> ComposeResult:
