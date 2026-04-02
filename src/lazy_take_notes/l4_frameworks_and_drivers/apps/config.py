@@ -33,6 +33,9 @@ from lazy_take_notes.l4_frameworks_and_drivers.container import (
     BUILTIN_LLM_PROVIDERS,
     LLM_PROVIDERS_GROUP,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
 
 
 def _resolve_editor() -> list[str] | None:
@@ -225,6 +228,74 @@ def _provider_manages_models(provider: str) -> bool:
             factory = ep.load()
             return getattr(factory, 'manages_models', False)
     return False
+
+
+# ── Theme preview ─────────────────────────────────────────────────────────────
+
+
+_SAMPLE_TRANSCRIPT = [
+    '[dim]\\[00:01:23][/dim] So the main takeaway from today is...',
+    '[dim]\\[00:02:05][/dim] Right, and we should follow up on the',
+    '[dim]\\[00:02:34][/dim] deployment timeline before next sprint.',
+    '[dim]\\[00:03:12][/dim] Agreed. Let me also check the metrics',
+    '[dim]\\[00:03:45][/dim] from last week before we commit to that.',
+]
+
+_SAMPLE_DIGEST = """\
+## Meeting Summary
+
+**Key decisions:**
+- Follow up on deployment timeline
+- Review last week metrics
+
+## Action Items
+- Check sprint metrics
+"""
+
+
+class RecordingPreview(Vertical):
+    """Preview of the recording layout using the real widgets."""
+
+    DEFAULT_CSS = """
+    RecordingPreview {
+        height: auto;
+        margin: 1 0;
+        border: round $surface-lighten-2;
+        padding: 0;
+    }
+    RecordingPreview .preview-header {
+        height: 1;
+        background: $primary;
+        color: $text;
+        text-style: bold;
+        padding: 0 1;
+    }
+    RecordingPreview .preview-panels {
+        height: 12;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Static('  lazy-take-notes | default_en', classes='preview-header')
+        with Horizontal(classes='preview-panels'):
+            yield TranscriptPanel(id='preview-transcript')
+            yield DigestPanel(id='preview-digest')
+        yield StatusBar(id='preview-status')
+
+    def on_mount(self) -> None:
+        transcript = self.query_one('#preview-transcript', TranscriptPanel)
+        for line in _SAMPLE_TRANSCRIPT:
+            transcript.write(line)
+
+        digest = self.query_one('#preview-digest', DigestPanel)
+        digest.update_digest(_SAMPLE_DIGEST)
+
+        bar = self.query_one('#preview-status', StatusBar)
+        bar.recording = True
+        bar.mode_label = 'Record'
+        bar.buf_count = 5
+        bar.buf_max = 15
+        bar.keybinding_hints = r'\[Space] pause  \[s] stop  \[d] digest  \[m] mute  \[h] help'
 
 
 # ── ConfigApp ────────────────────────────────────────────────────────────────
@@ -552,6 +623,22 @@ class ConfigApp(TextualApp):
                             id='cfg-recognition-hints',
                         )
 
+            # ── Tab 5: Appearance ─────────────────────────────────
+            with TabPane('Appearance', id='tab-appearance'):
+                with VerticalScroll(classes='form-scroll'):
+                    yield Static(
+                        'Customize the look and feel of the app.',
+                        classes='section-desc',
+                    )
+                    yield _SelectRow(
+                        'Theme',
+                        'cfg-theme',
+                        list(self.available_themes.keys()),
+                        self._infra.theme,
+                        help_text='Choose a color theme. Preview updates instantly.',
+                    )
+                    yield RecordingPreview()
+
         yield Static(
             r'\[Ctrl+S] Save  \[t] Test AI connection  \[e] Edit raw file  \[Esc] Back',
             id='cfg-footer',
@@ -571,6 +658,7 @@ class ConfigApp(TextualApp):
         provider = self.query_one('#cfg-llm-provider', Select).value
         data: dict = {
             'llm_provider': provider,
+            'theme': str(self.query_one('#cfg-theme', Select).value),
             'ollama': {
                 'host': self.query_one('#cfg-ollama-host', Input).value.strip(),
             },
@@ -616,13 +704,16 @@ class ConfigApp(TextualApp):
         return data
 
     def on_mount(self) -> None:
-        """Set initial visibility of model fields based on provider."""
+        """Apply saved theme and set initial visibility of model fields."""
+        self.theme = self._infra.theme
         self._sync_model_fields_visibility(self._infra.llm_provider)
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        """Toggle model fields when provider changes."""
+        """Toggle model fields when provider changes; preview theme on change."""
         if event.select.id == 'cfg-llm-provider':
             self._sync_model_fields_visibility(str(event.value))
+        elif event.select.id == 'cfg-theme':
+            self.theme = str(event.value)
 
     def _sync_model_fields_visibility(self, provider: str) -> None:
         hide_models = _provider_manages_models(provider)
@@ -733,6 +824,7 @@ class ConfigApp(TextualApp):
         self.query_one('#cfg-output-save-debug-log', Switch).value = output.get('save_debug_log', False)
         self.query_one('#cfg-output-auto-label', Switch).value = output.get('auto_label', True)
         self.query_one('#cfg-recognition-hints', TextArea).text = '\n'.join(self._raw.get('recognition_hints', []))
+        self.query_one('#cfg-theme', Select).value = self._infra.theme
 
     def action_quit_app(self) -> None:
         self.exit(self._saved)

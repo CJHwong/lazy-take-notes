@@ -6,6 +6,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import ListItem, ListView, Static
 
+from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
+
 _MODES = [
     ('record', 'Record', 'Live transcription with AI digest'),
     ('transcribe', 'Transcribe', 'Transcribe an existing audio file'),
@@ -130,6 +132,7 @@ class WelcomePicker(App[str | None]):
         )
 
     def on_mount(self) -> None:
+        self.theme = load_theme()
         self.query_one('#welcome-list', ListView).focus()
 
     def action_select_mode(self) -> None:

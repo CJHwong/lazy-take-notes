@@ -68,3 +68,15 @@ class TestWelcomePicker:
             await pilot.press('enter')
             await pilot.pause()
         assert picker.return_value == 'view'
+
+    @pytest.mark.asyncio
+    async def test_theme_applied_on_mount(self):
+        from unittest.mock import patch
+
+        with patch(
+            'lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker.load_theme', return_value='textual-light'
+        ):
+            picker = WelcomePicker()
+            async with picker.run_test() as pilot:
+                await pilot.pause()
+                assert picker.theme == 'textual-light'

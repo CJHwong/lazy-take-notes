@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Static
 
 from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
+from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -47,6 +48,7 @@ class ViewApp(TextualApp):
         yield StatusBar(id='status-bar')
 
     def on_mount(self) -> None:
+        self.theme = load_theme()
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'View'
         bar.keybinding_hints = r'\[c] copy  \[o] open  \[Tab] switch  \[q] back'

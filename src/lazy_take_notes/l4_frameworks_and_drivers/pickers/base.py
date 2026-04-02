@@ -14,6 +14,8 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widgets import Input, ListItem, ListView, Static
 
+from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
+
 T = TypeVar('T')
 
 
@@ -104,6 +106,7 @@ class SearchablePicker(App[T]):
         yield Static(self._footer_text(), id='sp-footer', markup=True)
 
     def on_mount(self) -> None:
+        self.theme = load_theme()
         self._rebuild_list()
         self.query_one('#sp-search', Input).focus()
 

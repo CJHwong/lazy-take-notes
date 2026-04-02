@@ -203,3 +203,14 @@ class TestSessionPicker:
 
             md = picker.query_one('#sp-preview-md', Markdown)
             assert md is not None
+
+    @pytest.mark.asyncio
+    async def test_theme_applied_on_mount(self, tmp_path: Path):
+        from unittest.mock import patch
+
+        _create_session(tmp_path, '2026-02-20_120000')
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.pickers.base.load_theme', return_value='textual-light'):
+            picker = SessionPicker(sessions_dir=tmp_path)
+            async with picker.run_test() as pilot:
+                await pilot.pause()
+                assert picker.theme == 'textual-light'

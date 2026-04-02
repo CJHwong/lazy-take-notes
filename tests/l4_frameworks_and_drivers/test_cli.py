@@ -37,6 +37,7 @@ _PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker.Tem
 _SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker.SessionPicker'
 _FILE_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker.FilePicker'
 _WELCOME_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker.WelcomePicker'
+
 _CLI = 'lazy_take_notes.l4_frameworks_and_drivers.cli'
 _CLI_HELPERS = 'lazy_take_notes.l4_frameworks_and_drivers.cli_helpers'
 
@@ -504,7 +505,9 @@ class TestTranscribeSubcommand:
         mock_file_picker = MagicMock()
         mock_file_picker.run.return_value = None  # user cancels
 
-        with patch(_FILE_PICKER, return_value=mock_file_picker):
+        with (
+            patch(_FILE_PICKER, return_value=mock_file_picker),
+        ):
             result = runner.invoke(cli, ['transcribe'])
 
         assert result.exit_code == 0

@@ -1803,3 +1803,14 @@ class TestMicMuteToggle:
                 await pilot.press('s')
                 await pilot.pause()
                 assert bar.mic_muted is False
+
+
+class TestBaseAppTheme:
+    @pytest.mark.asyncio
+    async def test_on_mount_applies_saved_theme(self, tmp_path):
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.base.load_theme', return_value='nord'):
+            app = make_app(tmp_path)
+            with patch.object(app, '_start_audio_worker'):
+                async with app.run_test() as pilot:
+                    await pilot.pause()
+                    assert app.theme == 'nord'
