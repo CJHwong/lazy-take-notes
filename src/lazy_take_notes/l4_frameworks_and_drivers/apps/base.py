@@ -20,6 +20,7 @@ from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
+from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     DigestError,
@@ -138,6 +139,7 @@ class BaseApp(TextualApp):
             pass
 
     def on_mount(self) -> None:
+        self.theme = load_theme()
         self._update_hints('idle')
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_max = self._config.digest.min_lines

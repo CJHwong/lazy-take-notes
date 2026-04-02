@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from lazy_take_notes.l4_frameworks_and_drivers.config import (
     APP_CONFIG_DEFAULTS,
+    InfraConfig,
     build_app_config,
     deep_merge,
+    load_theme,
 )
 
 
@@ -66,3 +70,36 @@ class TestDeepMerge:
         base = {'a': 'scalar'}
         result = deep_merge(base, {'a': {'nested': True}})
         assert result['a'] == {'nested': True}
+
+
+class TestInfraConfigTheme:
+    def test_default_theme(self):
+        cfg = InfraConfig()
+        assert cfg.theme == 'textual-dark'
+
+    def test_custom_theme(self):
+        cfg = InfraConfig(theme='textual-light')
+        assert cfg.theme == 'textual-light'
+
+
+class TestLoadTheme:
+    @patch(
+        'lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader.YamlConfigLoader',
+    )
+    def test_returns_theme_from_config(self, mock_loader_cls):
+        mock_loader_cls.return_value.load.return_value = {'theme': 'nord'}
+        assert load_theme() == 'nord'
+
+    @patch(
+        'lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader.YamlConfigLoader',
+    )
+    def test_returns_default_when_key_missing(self, mock_loader_cls):
+        mock_loader_cls.return_value.load.return_value = {'llm_provider': 'ollama'}
+        assert load_theme() == 'textual-dark'
+
+    @patch(
+        'lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader.YamlConfigLoader',
+    )
+    def test_returns_default_on_file_not_found(self, mock_loader_cls):
+        mock_loader_cls.return_value.load.side_effect = FileNotFoundError
+        assert load_theme() == 'textual-dark'

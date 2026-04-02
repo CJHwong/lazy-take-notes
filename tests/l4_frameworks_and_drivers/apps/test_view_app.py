@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -160,3 +161,14 @@ class TestViewAppStatusBar:
             await pilot.pause()
             bar = app.query_one('#status-bar', StatusBar)
             assert 'back' in bar.keybinding_hints
+
+
+class TestViewAppTheme:
+    @pytest.mark.asyncio
+    async def test_on_mount_applies_saved_theme(self, tmp_path):
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.load_theme', return_value='nord'):
+            session_dir = _make_session(tmp_path)
+            app = ViewApp(session_dir=session_dir)
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert app.theme == 'nord'

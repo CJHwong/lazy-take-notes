@@ -66,5 +66,22 @@ class InfraConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     llm_provider: str = 'ollama'  # 'ollama' | 'openai' | plugin-registered name
+    theme: str = 'textual-dark'  # Textual built-in theme name
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)
+
+
+DEFAULT_THEME = 'textual-dark'
+
+
+def load_theme() -> str:
+    """Read the saved theme from config.yaml, defaulting to DEFAULT_THEME."""
+    from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: avoid circular import at module level
+        YamlConfigLoader,
+    )
+
+    try:
+        raw = YamlConfigLoader().load()
+        return raw.get('theme', DEFAULT_THEME)
+    except FileNotFoundError:
+        return DEFAULT_THEME

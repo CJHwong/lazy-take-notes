@@ -32,6 +32,16 @@ class TestTemplatePicker:
             assert len(items) == len(all_template_names())
 
     @pytest.mark.asyncio
+    async def test_theme_applied_on_mount(self):
+        from unittest.mock import patch
+
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.pickers.base.load_theme', return_value='textual-light'):
+            picker = TemplatePicker()
+            async with picker.run_test() as pilot:
+                await pilot.pause()
+                assert picker.theme == 'textual-light'
+
+    @pytest.mark.asyncio
     async def test_escape_returns_none(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:

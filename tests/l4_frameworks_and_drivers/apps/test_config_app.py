@@ -417,6 +417,78 @@ class TestConfigAppRepopulate:
             assert app.query_one('#cfg-recognition-hints', TextArea).text == 'Alice\nBob'
 
 
+class TestConfigAppAppearance:
+    @pytest.mark.asyncio
+    async def test_appearance_tab_exists(self, tmp_path, monkeypatch):
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one('#tab-appearance')
+            assert app.query_one('#cfg-theme')
+
+    @pytest.mark.asyncio
+    async def test_theme_select_has_available_themes(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            select = app.query_one('#cfg-theme', Select)
+            option_values = {str(v) for _, v in select._options}
+            assert 'textual-dark' in option_values
+            assert 'nord' in option_values
+
+    @pytest.mark.asyncio
+    async def test_theme_applied_on_mount(self, tmp_path, monkeypatch):
+        app, _ = _make_app(tmp_path, monkeypatch, config_data={'theme': 'nord'})
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.theme == 'nord'
+
+    @pytest.mark.asyncio
+    async def test_theme_select_change_previews(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-theme', Select).value = 'nord'
+            await pilot.pause()
+            assert app.theme == 'nord'
+
+    @pytest.mark.asyncio
+    async def test_recording_preview_renders(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.config import RecordingPreview
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one(RecordingPreview)
+
+    @pytest.mark.asyncio
+    async def test_save_includes_theme(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['theme'] == 'textual-dark'
+
+    @pytest.mark.asyncio
+    async def test_repopulate_updates_theme(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._infra.theme = 'nord'
+            app._repopulate_fields()
+            await pilot.pause()
+            assert app.query_one('#cfg-theme', Select).value == 'nord'
+
+
 class TestConfigAppQuit:
     @pytest.mark.asyncio
     async def test_escape_exits(self, tmp_path, monkeypatch):

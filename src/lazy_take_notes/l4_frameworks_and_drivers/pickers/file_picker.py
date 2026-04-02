@@ -11,6 +11,7 @@ from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Input, ListItem, Static
 
+from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
     PickerListView,
     SearchablePicker,
@@ -109,9 +110,10 @@ class FilePicker(SearchablePicker[Path]):
         self._highlighted_dir: Path | None = None
 
     def on_mount(self) -> None:
-        # Override base on_mount entirely: FilePicker starts with the list focused,
+        # Override base on_mount: FilePicker starts with the list focused,
         # not the search input. call_after_refresh defers focus until after the
         # first render so the widget is ready to receive it.
+        self.theme = load_theme()
         self._rebuild_list()
         self.call_after_refresh(self.query_one('#sp-list', _FileListView).focus)
 
