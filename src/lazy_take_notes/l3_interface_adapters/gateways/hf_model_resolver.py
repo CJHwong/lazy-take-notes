@@ -34,6 +34,15 @@ WHISPER_CPP_MODELS = {
 }
 
 
+def expand_model_alias(name: str) -> str:
+    """Convert a short alias to its ``hf://`` URI. Unknown names pass through."""
+    if name in BREEZE_VARIANTS:
+        return f'hf://{BREEZE_REPO}/{BREEZE_VARIANTS[name]}'
+    if name in WHISPER_CPP_MODELS:
+        return f'hf://{WHISPER_CPP_REPO}/{WHISPER_CPP_MODELS[name]}'
+    return name
+
+
 def _make_progress_class(callback: Callable[[int], None]) -> type:
     """Create a tqdm-compatible class that reports download progress via *callback*."""
 
@@ -84,6 +93,9 @@ class HfModelResolver:
 
         tqdm_class = _make_progress_class(self._on_progress) if self._on_progress else None
 
+        if model_name.startswith('hf://'):
+            return _download_hf_uri(model_name, tqdm_class=tqdm_class)
+
         if model_name in BREEZE_VARIANTS:
             return _download_breeze(model_name, tqdm_class=tqdm_class)
 
@@ -93,21 +105,46 @@ class HfModelResolver:
         return model_name
 
 
-def _download_breeze(name: str, *, tqdm_class: type | None = None) -> str:
-    filename = BREEZE_VARIANTS[name]
-    cache_dir = Path(MODELS_DIR) / 'breeze'
+def _download_from_hf(
+    repo_id: str,
+    filename: str,
+    cache_dir: Path,
+    *,
+    tqdm_class: type | None = None,
+) -> str:
+    """Download a model file from HuggingFace Hub into *cache_dir*."""
     cache_dir.mkdir(parents=True, exist_ok=True)
-    kwargs: dict = dict(repo_id=BREEZE_REPO, filename=filename, local_dir=cache_dir)
+    kwargs: dict = dict(repo_id=repo_id, filename=filename, local_dir=cache_dir)
     if tqdm_class is not None:
         kwargs['tqdm_class'] = tqdm_class
     return hf_hub_download(**kwargs)
+
+
+def _download_hf_uri(uri: str, *, tqdm_class: type | None = None) -> str:
+    """Download a model specified by ``hf://owner/repo/filename`` URI."""
+    path = uri.removeprefix('hf://')
+    parts = path.split('/')
+    if len(parts) < 3:  # noqa: PLR2004 -- need owner, repo, and at least one filename segment
+        raise ModelResolutionError(f'Malformed hf:// URI (expected hf://owner/repo/file): {uri}')
+    repo_id = f'{parts[0]}/{parts[1]}'
+    filename = '/'.join(parts[2:])
+    cache_dir = Path(MODELS_DIR) / 'hf' / f'{parts[0]}__{parts[1]}'
+    return _download_from_hf(repo_id, filename, cache_dir, tqdm_class=tqdm_class)
+
+
+def _download_breeze(name: str, *, tqdm_class: type | None = None) -> str:
+    return _download_from_hf(
+        BREEZE_REPO,
+        BREEZE_VARIANTS[name],
+        Path(MODELS_DIR) / 'breeze',
+        tqdm_class=tqdm_class,
+    )
 
 
 def _download_whisper_cpp(name: str, *, tqdm_class: type | None = None) -> str:
-    filename = WHISPER_CPP_MODELS[name]
-    cache_dir = Path(MODELS_DIR) / 'whisper-cpp'
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    kwargs: dict = dict(repo_id=WHISPER_CPP_REPO, filename=filename, local_dir=cache_dir)
-    if tqdm_class is not None:
-        kwargs['tqdm_class'] = tqdm_class
-    return hf_hub_download(**kwargs)
+    return _download_from_hf(
+        WHISPER_CPP_REPO,
+        WHISPER_CPP_MODELS[name],
+        Path(MODELS_DIR) / 'whisper-cpp',
+        tqdm_class=tqdm_class,
+    )

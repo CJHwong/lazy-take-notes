@@ -11,8 +11,8 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import de
 
 APP_CONFIG_DEFAULTS: dict = {
     'transcription': {
-        'model': 'large-v3-turbo-q8_0',
-        'models': {'zh': 'breeze-q8'},
+        'model': 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin',
+        'models': {'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'},
         'chunk_duration': 25.0,
         'overlap': 1.0,
         'silence_threshold': 0.01,
@@ -40,10 +40,28 @@ APP_CONFIG_DEFAULTS: dict = {
 
 
 def build_app_config(raw: dict) -> AppConfig:
-    """Merge *raw* user overrides on top of defaults, then validate."""
+    """Merge *raw* user overrides on top of defaults, then validate.
+
+    Known short aliases in transcription model fields are expanded to
+    ``hf://`` URIs so users always see the full HuggingFace origin.
+    """
     merged = copy.deepcopy(APP_CONFIG_DEFAULTS)
     deep_merge(merged, raw)
+    _expand_transcription_aliases(merged)
     return AppConfig.model_validate(merged)
+
+
+def _expand_transcription_aliases(cfg: dict) -> None:
+    """Expand known short model aliases to hf:// URIs in-place."""
+    from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: avoid import at module level
+        expand_model_alias,
+    )
+
+    trans = cfg.get('transcription', {})
+    if 'model' in trans:
+        trans['model'] = expand_model_alias(trans['model'])
+    for locale, name in trans.get('models', {}).items():
+        trans['models'][locale] = expand_model_alias(name)
 
 
 class OllamaProviderConfig(BaseModel):
@@ -66,6 +84,7 @@ class InfraConfig(BaseModel):
     model_config = ConfigDict(extra='allow')
 
     llm_provider: str = 'ollama'  # 'ollama' | 'openai' | plugin-registered name
+    transcription_provider: str = 'whisper-cpp'
     theme: str = 'textual-dark'  # Textual built-in theme name
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)

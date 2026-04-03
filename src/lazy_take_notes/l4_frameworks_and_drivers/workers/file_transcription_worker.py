@@ -58,6 +58,7 @@ def run_file_transcription(
     pause_duration: float,
     recognition_hints: list[str] | None = None,
     transcriber: Transcriber | None = None,
+    model_resolver_factory: Callable | None = None,
 ) -> list[TranscriptSegment]:
     """Transcribe an audio file in chunks, posting messages for TUI updates.
 
@@ -65,9 +66,6 @@ def run_file_transcription(
     """
     from lazy_take_notes.l3_interface_adapters.gateways.audio_file_loader import (  # noqa: PLC0415 -- deferred: only loaded when worker starts
         load_audio_file,
-    )
-    from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: only loaded when worker starts
-        HfModelResolver,
     )
 
     # Load audio file
@@ -84,7 +82,14 @@ def run_file_transcription(
 
     post_message(AudioWorkerStatus(status='loading_model'))
     try:
-        resolver = HfModelResolver(on_progress=_on_progress)
+        if model_resolver_factory is not None:
+            resolver = model_resolver_factory(_on_progress)
+        else:
+            from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: fallback when no factory provided
+                HfModelResolver,
+            )
+
+            resolver = HfModelResolver(on_progress=_on_progress)
         model_path = resolver.resolve(model_name)
     except Exception as exc:
         log.error('Failed to resolve model: %s', exc, exc_info=True)

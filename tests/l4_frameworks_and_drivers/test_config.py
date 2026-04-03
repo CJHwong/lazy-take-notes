@@ -16,8 +16,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.config import (
 class TestBuildAppConfig:
     def test_defaults_produce_valid_config(self):
         cfg = build_app_config({})
-        assert cfg.transcription.model == 'large-v3-turbo-q8_0'
-        assert cfg.transcription.models == {'zh': 'breeze-q8'}
+        assert cfg.transcription.model == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
+        assert cfg.transcription.models == {'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'}
         assert cfg.transcription.chunk_duration == 25.0
         assert cfg.transcription.overlap == 1.0
         assert cfg.transcription.silence_threshold == 0.01
@@ -41,10 +41,31 @@ class TestBuildAppConfig:
             }
         )
         assert cfg.transcription.model == 'custom-model'
-        assert cfg.transcription.models == {'zh': 'breeze-q8', 'ja': 'ja-model'}
+        assert cfg.transcription.models == {
+            'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin',
+            'ja': 'ja-model',
+        }
         assert cfg.transcription.chunk_duration == 25.0  # default preserved
         assert cfg.digest.min_lines == 5
         assert cfg.digest.model == 'gpt-oss:20b'  # default preserved
+
+    def test_old_alias_expanded_to_hf_uri(self):
+        """Old short aliases in user config get auto-converted to hf:// URIs."""
+        cfg = build_app_config({'transcription': {'model': 'large-v3-turbo-q8_0', 'models': {'zh': 'breeze-q8'}}})
+        assert cfg.transcription.model == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
+        assert cfg.transcription.models['zh'] == 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+
+    def test_unknown_model_name_passes_through(self):
+        """Non-alias model names (custom paths, unknown names) are left unchanged."""
+        cfg = build_app_config({'transcription': {'model': 'my-custom-model', 'models': {'ja': '/abs/path.bin'}}})
+        assert cfg.transcription.model == 'my-custom-model'
+        assert cfg.transcription.models['ja'] == '/abs/path.bin'
+
+    def test_hf_uri_not_double_expanded(self):
+        """hf:// URIs are not modified by expansion."""
+        uri = 'hf://my-org/my-repo/my-model.bin'
+        cfg = build_app_config({'transcription': {'model': uri}})
+        assert cfg.transcription.model == uri
 
     def test_build_does_not_mutate_defaults(self):
         import copy
@@ -80,6 +101,16 @@ class TestInfraConfigTheme:
     def test_custom_theme(self):
         cfg = InfraConfig(theme='textual-light')
         assert cfg.theme == 'textual-light'
+
+
+class TestInfraConfigTranscriptionProvider:
+    def test_default_transcription_provider(self):
+        cfg = InfraConfig()
+        assert cfg.transcription_provider == 'whisper-cpp'
+
+    def test_custom_transcription_provider(self):
+        cfg = InfraConfig(transcription_provider='my-stt-plugin')
+        assert cfg.transcription_provider == 'my-stt-plugin'
 
 
 class TestLoadTheme:

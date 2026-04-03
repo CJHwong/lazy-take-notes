@@ -138,8 +138,10 @@ Import from `lazy_take_notes.plugin_api` — not from internal modules.
 - `run_transcribe` — launch a file transcription session
 - `run_record` — launch a live recording session
 - `TranscriptSegment` — L1 entity for transcript data
-- `LLMClient`, `Transcriber`, `AudioSource` — L2 protocol types (implement these to swap backends)
+- `LLMClient`, `Transcriber`, `AudioSource`, `ModelResolver` — L2 protocol types (implement these to swap backends)
 - `ChatMessage`, `ChatResponse` — L2 types needed to implement `LLMClient`
+- `TranscriptionBackend` — dataclass returned by transcription provider plugins
+- `InfraConfig` — infrastructure config passed to provider factories
 
 **Basic usage (subtitle replay):**
 ```python
@@ -203,6 +205,41 @@ my_provider:
 `InfraConfig` uses `extra='allow'`, so plugin keys pass through without validation errors. Access them via `infra.model_extra`.
 
 Resolution order: built-in (`ollama`, `openai`) checked first, then plugin entry points. Unknown provider raises `ValueError` with available options listed.
+
+### Transcription Provider Plugins
+
+Plugins can register transcription backends via the `lazy_take_notes.transcription_providers` entry point group. The user selects the provider in `config.yaml` with `transcription_provider: <name>`, and the standard `record`/`transcribe` commands use it automatically.
+
+1. Declare an entry point:
+```toml
+[project.entry-points."lazy_take_notes.transcription_providers"]
+my-whisper = "my_package:create_transcription_backend"
+```
+
+2. The entry point must resolve to a callable `(InfraConfig) -> TranscriptionBackend`:
+```python
+from lazy_take_notes.plugin_api import InfraConfig, TranscriptionBackend
+
+def create_transcription_backend(infra: InfraConfig) -> TranscriptionBackend:
+    extra = (infra.model_extra or {}).get('my_whisper', {})
+    return TranscriptionBackend(
+        create_transcriber=lambda: MyTranscriber(api_key=extra.get('api_key')),
+        create_model_resolver=lambda on_progress: MyModelResolver(on_progress=on_progress),
+    )
+```
+
+3. Plugin-specific config goes under an arbitrary key in `config.yaml`:
+```yaml
+transcription_provider: my-whisper
+my_whisper:
+  api_key: sk-...
+```
+
+`TranscriptionBackend` is a dataclass with two factory fields:
+- `create_transcriber: Callable[[], Transcriber]`
+- `create_model_resolver: Callable[[Callable[[int], None] | None], ModelResolver]`
+
+Resolution order: built-in (`whisper-cpp`) checked first, then plugin entry points. Unknown provider raises `ValueError` with available options listed.
 
 ### Isolation
 

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from textual.binding import Binding
+
+if TYPE_CHECKING:
+    from lazy_take_notes.l2_use_cases.ports.model_resolver import ModelResolver
 from textual.widgets import TextArea
 
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
@@ -39,11 +44,13 @@ class RecordApp(BaseApp):
         *args,
         audio_source: AudioSource | None = None,
         transcriber: Transcriber | None = None,
+        model_resolver_factory: Callable[[Callable[[int], None] | None], ModelResolver] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._audio_source = audio_source
         self._transcriber = transcriber
+        self._model_resolver_factory = model_resolver_factory
 
         # Audio control state
         self._audio_paused = threading.Event()
@@ -102,7 +109,7 @@ class RecordApp(BaseApp):
     def _audio_worker_thread(
         self,
     ):  # pragma: no cover -- thread body; tested independently
-        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: runs in worker thread, loaded only when audio starts
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: fallback when no factory provided
             HfModelResolver,
         )
         from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (  # noqa: PLC0415 -- deferred: audio module loaded only when session starts
@@ -111,7 +118,10 @@ class RecordApp(BaseApp):
 
         # Resolve model in the worker thread so downloads don't block the TUI.
         try:
-            resolver = HfModelResolver(on_progress=self._report_download_progress)
+            if self._model_resolver_factory is not None:
+                resolver = self._model_resolver_factory(self._report_download_progress)
+            else:
+                resolver = HfModelResolver(on_progress=self._report_download_progress)
             model_path = resolver.resolve(self._audio_model_name)
         except Exception as e:
             self.post_message(AudioWorkerStatus(status='error', error=str(e)))

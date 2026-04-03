@@ -11,7 +11,8 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
 from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
 from lazy_take_notes.l4_frameworks_and_drivers.container import (
     DependencyContainer,
-    _load_plugin_llm_client,  # noqa: PLC2701 -- testing private helper
+    TranscriptionBackend,
+    _load_plugin_provider,  # noqa: PLC2701 -- testing private helper
 )
 
 
@@ -128,11 +129,15 @@ class TestPluginProviderDiscovery:
     """Plugin LLM providers discovered via entry_points."""
 
     def test_unknown_provider_raises_value_error(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import BUILTIN_LLM_PROVIDERS, LLM_PROVIDERS_GROUP
+
         infra = InfraConfig(llm_provider='nonexistent')
-        with pytest.raises(ValueError, match='Unknown LLM provider'):
-            _load_plugin_llm_client(infra)
+        with pytest.raises(ValueError, match='Unknown provider'):
+            _load_plugin_provider('nonexistent', LLM_PROVIDERS_GROUP, BUILTIN_LLM_PROVIDERS, infra)
 
     def test_plugin_provider_factory_called(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import BUILTIN_LLM_PROVIDERS, LLM_PROVIDERS_GROUP
+
         fake_client = MagicMock()
         fake_factory = MagicMock(return_value=fake_client)
         fake_ep = MagicMock()
@@ -144,7 +149,7 @@ class TestPluginProviderDiscovery:
             'lazy_take_notes.l4_frameworks_and_drivers.container.entry_points',
             return_value=[fake_ep],
         ):
-            result = _load_plugin_llm_client(infra)
+            result = _load_plugin_provider('test-provider', LLM_PROVIDERS_GROUP, BUILTIN_LLM_PROVIDERS, infra)
 
         fake_factory.assert_called_once_with(infra)
         assert result is fake_client
@@ -164,3 +169,116 @@ class TestPluginProviderDiscovery:
             result = DependencyContainer.resolve_llm_client(infra)
 
         assert result is fake_client
+
+
+class TestTranscriptionBackendResolution:
+    """Transcription provider dispatch — built-in + plugin discovery."""
+
+    def test_whisper_cpp_returns_correct_backend(self):
+        infra = InfraConfig(transcription_provider='whisper-cpp')
+        backend = DependencyContainer.resolve_transcription_backend(infra)
+
+        assert isinstance(backend, TranscriptionBackend)
+        # Factory produces SubprocessWhisperTranscriber
+        transcriber = backend.create_transcriber()
+        from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import (
+            SubprocessWhisperTranscriber,
+        )
+
+        assert isinstance(transcriber, SubprocessWhisperTranscriber)
+
+        # Factory produces HfModelResolver
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+
+        resolver = backend.create_model_resolver(None)
+        assert isinstance(resolver, HfModelResolver)
+
+    def test_whisper_cpp_resolver_passes_on_progress(self):
+        infra = InfraConfig(transcription_provider='whisper-cpp')
+        backend = DependencyContainer.resolve_transcription_backend(infra)
+
+        progress_calls = []
+        resolver = backend.create_model_resolver(lambda p: progress_calls.append(p))
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+
+        assert isinstance(resolver, HfModelResolver)
+        assert resolver._on_progress is not None
+
+    def test_unknown_provider_raises_value_error(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import (
+            BUILTIN_TRANSCRIPTION_PROVIDERS,
+            TRANSCRIPTION_PROVIDERS_GROUP,
+        )
+
+        infra = InfraConfig(transcription_provider='nonexistent')
+        with pytest.raises(ValueError, match='Unknown provider'):
+            _load_plugin_provider(
+                'nonexistent',
+                TRANSCRIPTION_PROVIDERS_GROUP,
+                BUILTIN_TRANSCRIPTION_PROVIDERS,
+                infra,
+            )
+
+    def test_plugin_provider_factory_called(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import (
+            BUILTIN_TRANSCRIPTION_PROVIDERS,
+            TRANSCRIPTION_PROVIDERS_GROUP,
+        )
+
+        fake_backend = MagicMock(spec=TranscriptionBackend)
+        fake_factory = MagicMock(return_value=fake_backend)
+        fake_ep = MagicMock()
+        fake_ep.name = 'test-whisper'
+        fake_ep.load.return_value = fake_factory
+
+        infra = InfraConfig(transcription_provider='test-whisper')
+        with patch(
+            'lazy_take_notes.l4_frameworks_and_drivers.container.entry_points',
+            return_value=[fake_ep],
+        ):
+            result = _load_plugin_provider(
+                'test-whisper',
+                TRANSCRIPTION_PROVIDERS_GROUP,
+                BUILTIN_TRANSCRIPTION_PROVIDERS,
+                infra,
+            )
+
+        fake_factory.assert_called_once_with(infra)
+        assert result is fake_backend
+
+    def test_resolve_falls_through_to_plugin(self):
+        fake_backend = MagicMock(spec=TranscriptionBackend)
+        fake_factory = MagicMock(return_value=fake_backend)
+        fake_ep = MagicMock()
+        fake_ep.name = 'my-whisper-plugin'
+        fake_ep.load.return_value = fake_factory
+
+        infra = InfraConfig(transcription_provider='my-whisper-plugin')
+        with patch(
+            'lazy_take_notes.l4_frameworks_and_drivers.container.entry_points',
+            return_value=[fake_ep],
+        ):
+            result = DependencyContainer.resolve_transcription_backend(infra)
+
+        assert result is fake_backend
+
+    def test_container_uses_backend_factories(self, tmp_path: Path):
+        """Container wires transcriber and model_resolver from the backend."""
+        config = build_app_config({})
+        template = YamlTemplateLoader().load('default_zh_tw')
+
+        container = DependencyContainer(
+            config,
+            template,
+            tmp_path,
+            build_audio=False,
+        )
+
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+        from lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber import (
+            SubprocessWhisperTranscriber,
+        )
+
+        assert isinstance(container.transcriber, SubprocessWhisperTranscriber)
+        assert isinstance(container.model_resolver, HfModelResolver)
+        assert isinstance(container._transcription_backend, TranscriptionBackend)
