@@ -61,5 +61,11 @@ Thumbs.db
 *.bin
 *.onnx
 
+# Generated icons (build_desktop.sh generates .icns from logo.png)
+*.icns
+
+# Trolley (desktop app build artifacts)
+trolley/
+
 # Procject-specific
 output/
