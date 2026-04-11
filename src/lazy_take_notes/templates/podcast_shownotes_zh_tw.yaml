@@ -36,7 +36,7 @@ system_prompt: |
   - **資源名稱** — 提及的背景脈絡
 
   ## 時間軸
-  - 格式：`[HH:MM:SS] 主題描述`（有 Source URL 時改為 `[HH:MM:SS](url) — 主題描述`，時間戳本身即連結，不另附連結欄位）
+  - 格式：`[HH:MM:SS] 主題描述`（有 Source URL 時改為 `[HH:MM:SS](Source_URL?t=SECONDS) — 主題描述`，時間戳本身即連結，不另附連結欄位）
 
 digest_user_template: |
   新逐字稿（{line_count} 行）：

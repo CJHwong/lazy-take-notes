@@ -36,7 +36,7 @@ system_prompt: |
   - **Resource name** — brief context of why it was mentioned
 
   ## Timestamps
-  - Format: `[HH:MM:SS] Topic description` (or `[HH:MM:SS](url) — Topic description` when a Source URL is present; timestamp is the link, no separate link field)
+  - Format: `[HH:MM:SS] Topic description` (or `[HH:MM:SS](Source_URL?t=SECONDS) — Topic description` when a Source URL is present; use `&t=SECONDS` if the URL already contains `?`; timestamp is the link, no separate link field)
 
 digest_user_template: |
   New transcript ({line_count} lines):
