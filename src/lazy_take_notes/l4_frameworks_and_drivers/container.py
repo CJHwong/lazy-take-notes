@@ -41,13 +41,19 @@ class DependencyContainer:
         llm_client: LLMClient | None = None,
         transcriber: Transcriber | None = None,
         audio_source: AudioSource | None = None,
+        source_url: str | None = None,
+        source_title: str | None = None,
     ) -> None:
         self.config = config
         self.template = template
         self.output_dir = output_dir
 
         _infra = infra or InfraConfig()
-        self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
+        self.persistence: PersistenceGateway = FilePersistenceGateway(
+            output_dir,
+            source_url=source_url,
+            source_title=source_title,
+        )
         self.llm_client: LLMClient = llm_client or self.resolve_llm_client(_infra)
         self.transcriber: Transcriber = transcriber or SubprocessWhisperTranscriber()
         self.audio_source: AudioSource | None = audio_source or (self._build_mixed_source() if build_audio else None)
@@ -58,6 +64,7 @@ class DependencyContainer:
             template=template,
             llm_client=self.llm_client,
             persistence=self.persistence,
+            source_url=source_url,
         )
 
     @staticmethod

@@ -17,6 +17,7 @@ system_prompt: |
   8. If a "User corrections and additions" block appears, these are errata or additional context (e.g., correct spelling of guest names, URLs). Silently apply corrections throughout the notes — do not mention the corrections themselves.
   9. Topics Discussed is cumulative: all previously covered topics must be retained, plus any new ones. Never remove a topic just because the current transcript segment does not mention it.
   10. Resources Mentioned is cumulative: never drop a resource that was mentioned earlier.
+  11. If a "Source URL" line appears in the user message, format every entry in ## Timestamps as a Markdown link: [HH:MM:SS](Source_URL&t=SECONDS), where SECONDS is the timestamp converted to total seconds (e.g. 00:21:43 → &t=1303). If the source URL already contains "?", append "&t=SECONDS"; otherwise append "?t=SECONDS".
 
   Return format must be Markdown, using the following structure:
 
