@@ -14,8 +14,16 @@ log = logging.getLogger('ltn.persist')
 class FilePersistenceGateway:
     """Persists transcripts, digests, and history to the filesystem."""
 
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        *,
+        source_url: str | None = None,
+        source_title: str | None = None,
+    ) -> None:
         self._output_dir = output_dir
+        self._source_url = source_url
+        self._source_title = source_title
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
     @property
@@ -44,7 +52,10 @@ class FilePersistenceGateway:
         return path
 
     def save_digest_md(self, markdown: str, digest_number: int) -> Path:
-        content = f'# Digest #{digest_number}\n\n{markdown}\n'
+        header = ''
+        if self._source_url and self._source_title:
+            header = f'{self._source_url}\n\n# [{self._source_title}]({self._source_url})\n\n'
+        content = f'{header}# Digest #{digest_number}\n\n{markdown}\n'
         path = self._output_dir / NOTES.name
         path.write_text(content, encoding='utf-8')
         return path

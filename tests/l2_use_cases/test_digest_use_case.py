@@ -106,3 +106,19 @@ class TestRunDigest:
         _, messages = fake_llm.chat_calls[0]
         user_msg = messages[-1].content
         assert 'Full transcript text' in user_msg
+
+    @pytest.mark.asyncio
+    async def test_source_url_appears_in_prompt(self, digest_state, template):
+        fake_llm = FakeLLMClient(response=VALID_DIGEST_RESPONSE)
+        uc = RunDigestUseCase(fake_llm)
+
+        await uc.execute(
+            state=digest_state,
+            model='test-model',
+            template=template,
+            source_url='https://www.youtube.com/watch?v=abc123',
+        )
+
+        _, messages = fake_llm.chat_calls[0]
+        user_msg = messages[-1].content
+        assert 'Source URL: https://www.youtube.com/watch?v=abc123' in user_msg
