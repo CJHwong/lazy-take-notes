@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import queue
 import threading
 from typing import TYPE_CHECKING
@@ -26,9 +27,11 @@ class MixedAudioSource:
     because mic data arrives more frequently; both sources contribute equally to the
     final audio.
 
-    The 0.5 attenuation is an anti-clipping guard, not normalization. The two sources
-    are not amplitude-normalized: mic level depends on input gain, system audio level
-    depends on OS system volume. If they differ significantly, one will dominate.
+    Output is peak-limited: when the combined signal would exceed 0.99 (float32) it is
+    scaled so the peak lands at 0.99, otherwise it passes through at full amplitude.
+    This replaces a naive unconditional * 0.5 attenuation, which halved the mic signal
+    even when the system channel was effectively silent — enough to drop quiet speakers
+    below the transcription VAD gate.
     """
 
     def __init__(self, mic: AudioSource, system_audio: AudioSource) -> None:
@@ -45,6 +48,10 @@ class MixedAudioSource:
         # Written by main thread, read by audio worker thread; bool assignment is
         # atomic under the GIL so no lock is needed.
         self.mic_muted: bool = False
+        # RMS of the mic signal from the most recent read() — exposed so the audio
+        # worker can detect "mic gain is too low" without re-separating channels.
+        # Updated on every successful read; reset to 0 on drain().
+        self.last_mic_rms: float = 0.0
 
     def open(self, sample_rate: int, channels: int) -> None:
         log.info(
@@ -88,6 +95,10 @@ class MixedAudioSource:
                 break
         mic = np.concatenate([first, *extras]) if extras else first
 
+        # Pre-mute, pre-mix mic RMS for low-gain diagnostics. np.dot avoids
+        # allocating a temporary mic**2 array on every read (~31 Hz hot path).
+        self.last_mic_rms = math.sqrt(float(np.dot(mic, mic)) / mic.size) if mic.size else 0.0
+
         # Zero mic data when muted — reader threads keep running to preserve
         # stream state; we just silence the mic contribution. In-place to avoid
         # allocation on every read (~30 Hz hot path).
@@ -117,8 +128,14 @@ class MixedAudioSource:
             sys = np.pad(self._sys_buf, (0, n - len(self._sys_buf)))
             self._sys_buf = np.array([], dtype=np.float32)
 
-        # Attenuate by 0.5 to prevent clipping (not normalization — see class docstring).
-        return (mic + sys) * 0.5
+        # Peak limiter: scale to 0.99 only when clipping. Two scalar reductions
+        # (max + min) instead of np.abs() to avoid a temp-array allocation on
+        # every read (~31 Hz hot path).
+        combined = mic + sys
+        peak = max(float(combined.max()), float(-combined.min()))
+        if peak > 0.99:
+            combined *= 0.99 / peak
+        return combined
 
     def drain(self) -> None:
         """Discard all buffered audio — called on pause so resume starts fresh.
@@ -133,6 +150,7 @@ class MixedAudioSource:
                 except queue.Empty:
                     break
         self._sys_buf = np.array([], dtype=np.float32)
+        self.last_mic_rms = 0.0
         self._mic.drain()
         self._system.drain()
 
