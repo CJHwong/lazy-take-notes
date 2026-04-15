@@ -71,9 +71,22 @@ class MixedAudioSource:
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
         # Mic chunk timing drives output cadence (see class docstring).
         try:
-            mic = self._mic_q.get(timeout=timeout)
+            first = self._mic_q.get(timeout=timeout)
         except queue.Empty:
             return None
+
+        # Catch-up: drain any additional queued mic chunks and merge them.
+        # Without this, a FIFO backlog on _mic_q becomes permanent lag —
+        # consumer rate matches producer rate forever but the backlog never drains.
+        # By pulling all pending chunks in one call, we let the consumer catch up
+        # whenever it gets behind (e.g. GC pause, LLM CPU contention, pause/resume).
+        extras: list[np.ndarray] = []
+        while True:
+            try:
+                extras.append(self._mic_q.get_nowait())
+            except queue.Empty:
+                break
+        mic = np.concatenate([first, *extras]) if extras else first
 
         # Zero mic data when muted — reader threads keep running to preserve
         # stream state; we just silence the mic contribution. In-place to avoid
@@ -106,6 +119,22 @@ class MixedAudioSource:
 
         # Attenuate by 0.5 to prevent clipping (not normalization — see class docstring).
         return (mic + sys) * 0.5
+
+    def drain(self) -> None:
+        """Discard all buffered audio — called on pause so resume starts fresh.
+
+        Drains our own mixing queues AND delegates to each underlying source so
+        their internal queues don't bleed pause-period audio through on resume.
+        """
+        for q in (self._mic_q, self._sys_q):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
+        self._sys_buf = np.array([], dtype=np.float32)
+        self._mic.drain()
+        self._system.drain()
 
     def close(self) -> None:
         log.debug('closing mixed source')
