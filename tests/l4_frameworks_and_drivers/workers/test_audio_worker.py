@@ -76,8 +76,8 @@ class TestAudioWorker:
         assert fake_source.open_calls == [(16000, 1)]
         assert fake_source.close_calls == 1
 
-    def test_pause_discards_audio(self):
-        """When pause_event is set, worker should not feed audio to transcriber."""
+    def test_pause_before_any_audio_is_noop(self):
+        """Pause set before any audio captured: flush finds empty buffer, no transcription."""
         fake_transcriber = FakeTranscriber()
         fake_source = FakeAudioSource(chunks=[np.zeros(1600, dtype=np.float32)] * 3)
 
@@ -102,11 +102,71 @@ class TestAudioWorker:
             audio_source=fake_source,
         )
 
+        # Empty buffer → nothing to flush → transcriber untouched.
         assert len(fake_transcriber.transcribe_calls) == 0
         chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
         assert len(chunks) == 0
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)
+        # drain() should be called at least on pause entry.
+        assert fake_source.drain_calls >= 1
+
+    def test_pause_flushes_buffered_audio_then_discards(self):
+        """Pause entry must commit buffered speech before discarding subsequent audio.
+
+        Without this, anything buffered but not yet transcribed (up to chunk_duration)
+        is lost whenever the user pauses mid-sentence.
+        """
+        fake_transcriber = FakeTranscriber()
+        fake_transcriber.set_segments(
+            [
+                TranscriptSegment(text='hello world', wall_start=0.0, wall_end=0.2),
+            ]
+        )
+        # Non-zero samples so RMS passes the silence_threshold gate in prepare_buffer.
+        speech = np.full(1600, 0.3, dtype=np.float32)
+        post_pause = np.full(1600, 0.5, dtype=np.float32)
+        fake_source = FakeAudioSource(chunks=[speech, speech, post_pause, post_pause])
+
+        messages = []
+        pause_event = threading.Event()
+
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            # Iter 1-2: unpaused — 2 speech chunks enter the buffer
+            # Iter 3: flip pause → flush transcribes buffered speech; drain discards rest
+            # Iter 4-5: still paused — no additional transcriber calls
+            # Iter 6: cancel
+            if call_count == 3:
+                pause_event.set()
+            return call_count > 5
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            pause_event=pause_event,
+            transcriber=fake_transcriber,
+            audio_source=fake_source,
+        )
+
+        # Exactly one transcriber call — the flush of pre-pause speech.
+        # Post-pause chunks were drained (or never read), not fed.
+        assert len(fake_transcriber.transcribe_calls) == 1
+        flush_audio = fake_transcriber.transcribe_calls[0][0]
+        # Flushed buffer should span the 2 speech chunks (3200 samples).
+        assert len(flush_audio) == 3200
+        # All samples are from the pre-pause speech chunks (value 0.3).
+        np.testing.assert_allclose(flush_audio, 0.3, atol=1e-6)
+        # Transcript from the flush was posted.
+        chunks = [m for m in messages if isinstance(m, TranscriptChunk)]
+        assert len(chunks) == 1
+        # drain() called on pause entry (and during pause).
+        assert fake_source.drain_calls >= 1
 
     def test_audio_chunks_fed_to_use_case(self):
         """Chunks from audio_source should be processed; audio_source opened and closed."""

@@ -74,13 +74,16 @@ class TranscribeAudioUseCase:
         """Extract the current buffer for off-thread transcription.
 
         Returns (audio_snapshot, hints, buffer_wall_start, is_first_chunk), or None
-        if the buffer is silent (nothing to transcribe).
+        if the buffer is silent or empty (nothing to transcribe).
 
         Resets the internal buffer to the overlap tail immediately so the caller
         can continue feeding audio without waiting for transcription to finish.
         Call apply_result() from the audio loop thread once transcription completes.
         """
         buf = self._buffer
+
+        if len(buf) == 0:
+            return None
 
         rms = np.sqrt(np.mean(buf**2))
         if rms < self._silence_threshold:
