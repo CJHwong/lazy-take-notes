@@ -105,6 +105,14 @@ class CoreAudioTapSource:
                 raise self._error from None
             return None
 
+    def drain(self) -> None:
+        """Discard all buffered audio — called on pause so resume starts fresh."""
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
     def close(self) -> None:
         self._stop.set()
         if self._proc is not None:

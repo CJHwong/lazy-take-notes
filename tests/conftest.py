@@ -92,6 +92,7 @@ class FakeAudioSource:
         self._chunks = list(chunks or [])
         self.open_calls: list[tuple[int, int]] = []
         self.close_calls: int = 0
+        self.drain_calls: int = 0
         self._idx = 0
         self.mic_muted: bool = False
 
@@ -108,8 +109,10 @@ class FakeAudioSource:
     def close(self) -> None:
         self.close_calls += 1
 
-    def drain(self) -> np.ndarray | None:
-        return None
+    def drain(self) -> None:
+        """Discard remaining chunks — mirrors real AudioSource.drain() semantics."""
+        self.drain_calls += 1
+        self._idx = len(self._chunks)
 
 
 class FakePersistence:

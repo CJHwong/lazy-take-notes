@@ -69,7 +69,7 @@ class TestSounddeviceAudioSource:
 
     @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_drain_concatenates_chunks(self, mock_stream_cls, _mock_qd):
+    def test_drain_discards_buffered_chunks(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream_cls.return_value = MagicMock()
@@ -81,13 +81,14 @@ class TestSounddeviceAudioSource:
         callback(np.array([[0.1], [0.2]], dtype=np.float32), 2, None, None)
         callback(np.array([[0.3], [0.4]], dtype=np.float32), 2, None, None)
 
-        result = src.drain()
-        assert result is not None
-        np.testing.assert_allclose(result, [0.1, 0.2, 0.3, 0.4], atol=1e-6)
+        src.drain()
+
+        # After drain, read() should block-and-timeout because queue is empty.
+        assert src.read(timeout=0.01) is None
 
     @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
-    def test_drain_empty_returns_none(self, mock_stream_cls, _mock_qd):
+    def test_drain_on_empty_queue_is_noop(self, mock_stream_cls, _mock_qd):
         from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
 
         mock_stream_cls.return_value = MagicMock()
@@ -95,8 +96,8 @@ class TestSounddeviceAudioSource:
         src = SounddeviceAudioSource()
         src.open(16000, 1)
 
-        result = src.drain()
-        assert result is None
+        src.drain()  # should not raise
+        assert src.read(timeout=0.01) is None
 
     @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')

@@ -22,6 +22,10 @@ class AudioSource(Protocol):
         """Read a chunk of audio. Returns None on timeout."""
         ...
 
+    def drain(self) -> None:
+        """Discard any buffered audio. No-op for sources without internal buffers."""
+        ...
+
     def close(self) -> None:
         """Close the audio stream."""
         ...
