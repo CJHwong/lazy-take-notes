@@ -590,6 +590,15 @@ class ConfigApp(TextualApp):
                             placeholder='100000',
                         )
 
+                    with Vertical(classes='field-group'):
+                        yield Static('Templates', classes='field-group-title')
+                        yield _SwitchRow(
+                            'Show Built-in Templates',
+                            'cfg-show-builtin-templates',
+                            self._infra.show_builtin_templates,
+                            help_text='Show bundled example templates in the picker. Disable to see only your own.',
+                        )
+
             # ── Tab 4: Output ────────────────────────────────────────
             with TabPane('Output', id='tab-output'):
                 with VerticalScroll(classes='form-scroll'):
@@ -689,6 +698,7 @@ class ConfigApp(TextualApp):
             'llm_provider': provider,
             'transcription_provider': str(trans_provider),
             'theme': str(self.query_one('#cfg-theme', Select).value),
+            'show_builtin_templates': self.query_one('#cfg-show-builtin-templates', Switch).value,
             'ollama': {
                 'host': self.query_one('#cfg-ollama-host', Input).value.strip(),
             },

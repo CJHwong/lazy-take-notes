@@ -10,17 +10,29 @@ import pytest
 from textual.widgets import Input, ListView, Markdown
 
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader as yaml_loader_mod
-from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import all_template_names
+import lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker as tp_mod
+from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (
+    all_template_names,
+)
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (
     TemplatePicker,
     resolve_editor,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.builtin_templates_notice import (
+    BuiltinTemplatesNotice,
 )
 
 
 @pytest.fixture(autouse=True)
 def _isolate_user_templates(monkeypatch):
-    """Ensure user templates dir does not exist so only built-ins show."""
+    """Ensure user templates dir does not exist so only built-ins show.
+
+    Also suppress the built-in templates notice by pointing the flag path
+    to an existing file so the modal is not pushed in every test.
+    """
     monkeypatch.setattr(yaml_loader_mod, 'USER_TEMPLATES_DIR', Path('/nonexistent/user/templates'))
+    # __file__ always exists — cheap way to satisfy BUILTIN_TEMPLATES_NOTICED_PATH.exists()
+    monkeypatch.setattr(tp_mod, 'BUILTIN_TEMPLATES_NOTICED_PATH', Path(__file__))
 
 
 class TestTemplatePicker:
@@ -673,3 +685,119 @@ class TestEditTemplateKeyAndSuspend:
             picker.action_edit_template()
             # Pending reload should NOT be set (early return)
             assert picker._pending_reload_name is None
+
+
+class TestShowBuiltins:
+    @pytest.mark.asyncio
+    async def test_show_builtins_true_includes_all(self):
+        """Default show_builtins=True shows all built-in templates."""
+        picker = TemplatePicker(show_builtins=True)
+        async with picker.run_test():
+            items = picker.query('#sp-list TemplateItem')
+            assert len(items) == len(all_template_names())
+
+    @pytest.mark.asyncio
+    async def test_show_builtins_false_hides_builtins(self):
+        """show_builtins=False removes built-in-only templates from the list."""
+        picker = TemplatePicker(show_builtins=False)
+        async with picker.run_test():
+            items = picker.query('#sp-list TemplateItem')
+            # No user templates in this fixture, so the list should be empty
+            assert len(items) == 0
+
+    @pytest.mark.asyncio
+    async def test_show_builtins_false_keeps_user_templates(self, tmp_path: Path, monkeypatch):
+        """show_builtins=False still shows user templates."""
+        monkeypatch.setattr(yaml_loader_mod, 'USER_TEMPLATES_DIR', tmp_path)
+        (tmp_path / 'my_custom.yaml').write_text(_USER_TEMPLATE_YAML, encoding='utf-8')
+
+        picker = TemplatePicker(show_builtins=False)
+        async with picker.run_test():
+            items = picker.query('#sp-list TemplateItem')
+            assert len(items) == 1
+
+            from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
+
+            first = items[0]
+            assert isinstance(first, TemplateItem)
+            assert first.template_name == 'my_custom'
+
+    @pytest.mark.asyncio
+    async def test_show_builtins_false_user_override_of_builtin_still_shown(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ):
+        """A user override of a built-in name is shown even with show_builtins=False."""
+        monkeypatch.setattr(yaml_loader_mod, 'USER_TEMPLATES_DIR', tmp_path)
+        override = _USER_TEMPLATE_YAML.replace('my_custom', 'OVERRIDDEN').replace('en-US', 'en')
+        (tmp_path / 'default_en.yaml').write_text(override, encoding='utf-8')
+
+        picker = TemplatePicker(show_builtins=False)
+        async with picker.run_test():
+            assert 'default_en' in picker._templates
+            # It's a user template, so it should appear
+            from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplateItem
+
+            items = picker.query('#sp-list TemplateItem')
+            names = [i.template_name for i in items if isinstance(i, TemplateItem)]
+            assert 'default_en' in names
+
+
+class TestBuiltinTemplatesNoticeIntegration:
+    @pytest.mark.asyncio
+    async def test_notice_shown_when_flag_missing(self, tmp_path: Path, monkeypatch):
+        """The notice modal is pushed on mount when the flag file does not exist."""
+        flag = tmp_path / '.builtin_templates_noticed'
+        # Do NOT create the flag file
+        monkeypatch.setattr(tp_mod, 'BUILTIN_TEMPLATES_NOTICED_PATH', flag)
+
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+
+    @pytest.mark.asyncio
+    async def test_notice_not_shown_when_flag_exists(self, tmp_path: Path, monkeypatch):
+        """The notice modal is NOT pushed when the flag file exists."""
+        flag = tmp_path / '.builtin_templates_noticed'
+        flag.touch()
+        monkeypatch.setattr(tp_mod, 'BUILTIN_TEMPLATES_NOTICED_PATH', flag)
+
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert not isinstance(picker.screen, BuiltinTemplatesNotice)
+
+    @pytest.mark.asyncio
+    async def test_suppress_creates_flag_file(self, tmp_path: Path, monkeypatch):
+        """Pressing 'd' in the notice writes the flag file."""
+        flag = tmp_path / '.builtin_templates_noticed'
+        monkeypatch.setattr(tp_mod, 'BUILTIN_TEMPLATES_NOTICED_PATH', flag)
+
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert not flag.exists()
+
+            await pilot.press('d')
+            await pilot.pause()
+            assert flag.exists()
+            assert not isinstance(picker.screen, BuiltinTemplatesNotice)
+
+    @pytest.mark.asyncio
+    async def test_dismiss_without_suppress_no_flag(self, tmp_path: Path, monkeypatch):
+        """Pressing any other key dismisses the notice without writing the flag."""
+        flag = tmp_path / '.builtin_templates_noticed'
+        monkeypatch.setattr(tp_mod, 'BUILTIN_TEMPLATES_NOTICED_PATH', flag)
+
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+
+            await pilot.press('enter')
+            await pilot.pause()
+            assert not flag.exists()
+            assert not isinstance(picker.screen, BuiltinTemplatesNotice)

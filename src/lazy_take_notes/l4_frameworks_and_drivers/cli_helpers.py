@@ -80,7 +80,7 @@ def load_config(config_path, output_dir):
     return config, infra, template_loader
 
 
-def pick_template(template_loader):
+def pick_template(template_loader, *, show_builtins: bool = True):
     """Show the interactive template picker. Returns a SessionTemplate, or None if cancelled.
 
     Handles the create-template loop internally — if the user presses [n] to
@@ -97,7 +97,7 @@ def pick_template(template_loader):
     # pickers and main apps, eliminating inter-app terminal flicker entirely.
     _clear_normal_screen()
     while True:
-        picker_result = TemplatePicker().run()
+        picker_result = TemplatePicker(show_builtins=show_builtins).run()
         if picker_result is None:
             return None
         if picker_result == '__create_template__':
@@ -168,7 +168,7 @@ def run_transcribe(
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = load_config(config_path, output_dir)
 
-    template = pick_template(template_loader)
+    template = pick_template(template_loader, show_builtins=infra.show_builtin_templates)
     if template is None:
         return
 
@@ -245,7 +245,7 @@ def run_record(
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = load_config(config_path, output_dir)
 
-    template = pick_template(template_loader)
+    template = pick_template(template_loader, show_builtins=infra.show_builtin_templates)
     if template is None:
         return
 

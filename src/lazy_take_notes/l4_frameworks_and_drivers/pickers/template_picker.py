@@ -16,6 +16,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, ListItem, Markdown, Static
 
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l3_interface_adapters.gateways.paths import BUILTIN_TEMPLATES_NOTICED_PATH
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import (
     YamlTemplateLoader,
     all_template_names,
@@ -27,6 +28,9 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
     PickerListView,
     SearchablePicker,
+)
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.builtin_templates_notice import (
+    BuiltinTemplatesNotice,
 )
 
 
@@ -149,16 +153,34 @@ class TemplatePicker(SearchablePicker[str]):
     #sp-list-pane { max-width: 40; }
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, show_builtins: bool = True, **kwargs):
         super().__init__(**kwargs)
         loader = YamlTemplateLoader()
         self._user_names = user_template_names()
-        self._templates: dict[str, SessionTemplate] = {name: loader.load(name) for name in sorted(all_template_names())}
+        self._builtin_names = builtin_names()
+        self._show_builtins = show_builtins
+
+        all_names = sorted(all_template_names())
+        if not show_builtins:
+            all_names = [n for n in all_names if n in self._user_names or n not in self._builtin_names]
+
+        self._templates: dict[str, SessionTemplate] = {name: loader.load(name) for name in all_names}
         self._current_name: str | None = None
         # Set after [e] edit — cleared on AppFocus reload so GUI editors
         # (which return from subprocess.run immediately) get a second reload
         # when the user switches back to the terminal.
         self._pending_reload_name: str | None = None
+
+    def on_mount(self) -> None:  # noqa: D102 -- base class has the docstring; Textual dispatches both via MRO
+        if not BUILTIN_TEMPLATES_NOTICED_PATH.exists():
+            self.push_screen(
+                BuiltinTemplatesNotice(on_suppress=self._suppress_builtin_notice),
+            )
+
+    def _suppress_builtin_notice(self) -> None:
+        """Write flag file so the notice is not shown again."""
+        BUILTIN_TEMPLATES_NOTICED_PATH.parent.mkdir(parents=True, exist_ok=True)
+        BUILTIN_TEMPLATES_NOTICED_PATH.touch()
 
     def _make_list_view(self) -> _TemplateListView:
         return _TemplateListView(id='sp-list')
@@ -341,6 +363,12 @@ class TemplatePicker(SearchablePicker[str]):
                 break
 
     def action_select_item(self) -> None:
+        if len(self.screen_stack) > 1:
+            # Modal is active — don't let priority enter binding leak through.
+            # Dismiss the notice if it's showing; leave other modals alone.
+            if isinstance(self.screen, BuiltinTemplatesNotice):
+                self.screen.dismiss()
+            return
         if self._current_name is None:
             return
         self.exit(self._current_name)
