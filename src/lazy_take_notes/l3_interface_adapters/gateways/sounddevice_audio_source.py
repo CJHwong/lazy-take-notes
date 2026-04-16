@@ -50,15 +50,13 @@ class SounddeviceAudioSource:
         except queue.Empty:
             return None
 
-    def drain(self) -> np.ndarray | None:
-        """Read all available data from the queue."""
-        chunks = []
-        while not self._queue.empty():
+    def drain(self) -> None:
+        """Discard all buffered audio — called on pause so resume starts fresh."""
+        while True:
             try:
-                chunks.append(self._queue.get_nowait().flatten())
-            except queue.Empty:  # pragma: no cover -- timing-dependent; queue becomes empty mid-iteration
+                self._queue.get_nowait()
+            except queue.Empty:
                 break
-        return np.concatenate(chunks) if chunks else None
 
     def close(self) -> None:
         if self._stream is not None:

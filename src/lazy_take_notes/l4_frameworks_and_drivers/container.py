@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -25,6 +27,21 @@ from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig
 
 LLM_PROVIDERS_GROUP = 'lazy_take_notes.llm_providers'
 BUILTIN_LLM_PROVIDERS = ('ollama', 'openai')
+
+TRANSCRIPTION_PROVIDERS_GROUP = 'lazy_take_notes.transcription_providers'
+BUILTIN_TRANSCRIPTION_PROVIDERS = ('whisper-cpp',)
+
+
+@dataclass
+class TranscriptionBackend:
+    """Holds factories for creating a transcriber and model resolver.
+
+    Plugin transcription providers return an instance of this from their
+    factory callable so the container can wire up the correct backends.
+    """
+
+    create_transcriber: Callable[[], Transcriber]
+    create_model_resolver: Callable[[Callable[[int], None] | None], ModelResolver]
 
 
 class DependencyContainer:
@@ -49,9 +66,14 @@ class DependencyContainer:
         _infra = infra or InfraConfig()
         self.persistence: PersistenceGateway = FilePersistenceGateway(output_dir)
         self.llm_client: LLMClient = llm_client or self.resolve_llm_client(_infra)
-        self.transcriber: Transcriber = transcriber or SubprocessWhisperTranscriber()
-        self.audio_source: AudioSource | None = audio_source or (self._build_mixed_source() if build_audio else None)
-        self.model_resolver: ModelResolver = HfModelResolver()
+
+        backend = self.resolve_transcription_backend(_infra)
+        self._transcription_backend = backend
+        self.transcriber: Transcriber = transcriber or backend.create_transcriber()
+        self.audio_source: AudioSource | None = audio_source or (
+            self._build_mixed_source(config.transcription.silence_threshold) if build_audio else None
+        )
+        self.model_resolver: ModelResolver = backend.create_model_resolver(None)
 
         self.controller = SessionController(
             config=config,
@@ -61,7 +83,7 @@ class DependencyContainer:
         )
 
     @staticmethod
-    def _build_mixed_source() -> AudioSource:
+    def _build_mixed_source(silence_threshold: float = 0.01) -> AudioSource:
         from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: audio stack loaded only when needed
             MixedAudioSource,
         )
@@ -74,14 +96,22 @@ class DependencyContainer:
                 CoreAudioTapSource,
             )
 
-            return MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())
+            return MixedAudioSource(
+                SounddeviceAudioSource(),
+                CoreAudioTapSource(),
+                silence_threshold=silence_threshold,
+            )
 
         # Linux / Windows — use soundcard loopback
         from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import (  # noqa: PLC0415 -- deferred: non-macOS only
             SoundCardLoopbackSource,
         )
 
-        return MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())
+        return MixedAudioSource(
+            SounddeviceAudioSource(),
+            SoundCardLoopbackSource(),
+            silence_threshold=silence_threshold,
+        )
 
     @staticmethod
     def resolve_llm_client(infra: InfraConfig) -> LLMClient:
@@ -100,7 +130,27 @@ class DependencyContainer:
 
             return OllamaLLMClient(host=infra.ollama.host)
 
-        return _load_plugin_llm_client(infra)
+        return _load_plugin_provider(infra.llm_provider, LLM_PROVIDERS_GROUP, BUILTIN_LLM_PROVIDERS, infra)
+
+    @staticmethod
+    def resolve_transcription_backend(infra: InfraConfig) -> TranscriptionBackend:
+        """Build a transcription backend from built-in providers or plugin discovery."""
+        if infra.transcription_provider == 'whisper-cpp':
+            return TranscriptionBackend(
+                create_transcriber=SubprocessWhisperTranscriber,
+                create_model_resolver=lambda on_progress: HfModelResolver(on_progress=on_progress),
+            )
+        return _load_plugin_provider(
+            infra.transcription_provider,
+            TRANSCRIPTION_PROVIDERS_GROUP,
+            BUILTIN_TRANSCRIPTION_PROVIDERS,
+            infra,
+        )
+
+    @property
+    def model_resolver_factory(self) -> Callable[[Callable[[int], None] | None], ModelResolver]:
+        """Public access to the transcription backend's model resolver factory."""
+        return self._transcription_backend.create_model_resolver
 
     @staticmethod
     def config_loader() -> ConfigLoader:
@@ -111,18 +161,22 @@ class DependencyContainer:
         return YamlTemplateLoader()
 
 
-def _load_plugin_llm_client(infra: InfraConfig) -> LLMClient:
-    """Discover and load an LLM client from a plugin entry point.
+def _load_plugin_provider(
+    provider_name: str,
+    group: str,
+    builtins: tuple[str, ...],
+    infra: InfraConfig,
+):
+    """Discover and load a provider from a plugin entry point.
 
-    Scans ``lazy_take_notes.llm_providers`` for an entry point whose name
-    matches ``infra.llm_provider``. The entry point must resolve to a
-    callable that accepts ``InfraConfig`` and returns an ``LLMClient``.
+    Scans *group* for an entry point matching *provider_name*. The entry
+    point must resolve to a callable ``(InfraConfig) -> T``.
     """
-    eps = list(entry_points(group=LLM_PROVIDERS_GROUP))
+    eps = list(entry_points(group=group))
     for ep in eps:
-        if ep.name == infra.llm_provider:
+        if ep.name == provider_name:
             factory = ep.load()
             return factory(infra)
-    available = [*BUILTIN_LLM_PROVIDERS, *(ep.name for ep in eps)]
-    msg = f'Unknown LLM provider {infra.llm_provider!r}. Available: {", ".join(available)}'
+    available = [*builtins, *(ep.name for ep in eps)]
+    msg = f'Unknown provider {provider_name!r}. Available: {", ".join(available)}'
     raise ValueError(msg)

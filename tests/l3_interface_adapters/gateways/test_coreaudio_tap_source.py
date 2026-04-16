@@ -222,6 +222,29 @@ class TestCoreAudioTapSource:
             block_event.set()
             src.close()
 
+    def test_drain_discards_buffered_chunks(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        # Reader pushes two chunks then EOF
+        chunks = [_float32_bytes([0.1, 0.2]), _float32_bytes([0.3, 0.4]), b'']
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.side_effect = chunks
+        mock_proc.poll.return_value = 0
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)  # let reader thread enqueue chunks
+            src.drain()
+            # After drain, no data remains.
+            assert src.read(timeout=0.01) is None
+            src.close()
+
     def test_close_kills_on_timeout(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')
 

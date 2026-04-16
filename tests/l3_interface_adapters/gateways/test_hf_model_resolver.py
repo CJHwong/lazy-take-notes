@@ -13,6 +13,7 @@ from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (
     WHISPER_CPP_MODELS,
     HfModelResolver,
     _make_progress_class,  # noqa: PLC2701 -- testing private helper
+    expand_model_alias,
 )
 
 
@@ -137,6 +138,93 @@ class TestProgressClass:
         cls = _make_progress_class(lambda p: None)
         reporter = cls(total=100)
         reporter.refresh()
+
+
+class TestExpandModelAlias:
+    def test_breeze_alias_expands(self):
+        assert expand_model_alias('breeze-q8') == 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+
+    def test_whisper_cpp_alias_expands(self):
+        assert expand_model_alias('large-v3-turbo-q8_0') == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
+
+    def test_hf_uri_passes_through(self):
+        uri = 'hf://my-org/my-repo/model.bin'
+        assert expand_model_alias(uri) == uri
+
+    def test_unknown_name_passes_through(self):
+        assert expand_model_alias('my-custom-model') == 'my-custom-model'
+
+    def test_absolute_path_passes_through(self):
+        assert expand_model_alias('/path/to/model.bin') == '/path/to/model.bin'
+
+
+class TestHfUri:
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_valid_hf_uri_resolves(self, mock_download, tmp_path):
+        mock_download.return_value = str(tmp_path / 'model.bin')
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver = HfModelResolver()
+            result = resolver.resolve('hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin')
+        mock_download.assert_called_once()
+        call_kwargs = mock_download.call_args.kwargs
+        assert call_kwargs['repo_id'] == 'ggerganov/whisper.cpp'
+        assert call_kwargs['filename'] == 'ggml-large-v3-turbo-q8_0.bin'
+        assert 'ggerganov__whisper.cpp' in str(call_kwargs['local_dir'])
+        assert result == str(tmp_path / 'model.bin')
+
+    def test_malformed_hf_uri_no_path(self):
+        resolver = HfModelResolver()
+        with pytest.raises(ModelResolutionError, match='Malformed hf:// URI'):
+            resolver.resolve('hf://')
+
+    def test_malformed_hf_uri_repo_only(self):
+        resolver = HfModelResolver()
+        with pytest.raises(ModelResolutionError, match='Malformed hf:// URI'):
+            resolver.resolve('hf://repo-only')
+
+    def test_malformed_hf_uri_no_filename(self):
+        resolver = HfModelResolver()
+        with pytest.raises(ModelResolutionError, match='Malformed hf:// URI'):
+            resolver.resolve('hf://owner/repo')
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_hf_uri_with_progress(self, mock_download, tmp_path):
+        mock_download.return_value = str(tmp_path / 'model.bin')
+        calls = []
+        resolver = HfModelResolver(on_progress=lambda p: calls.append(p))
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver.resolve('hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin')
+        assert mock_download.called
+        assert 'tqdm_class' in mock_download.call_args.kwargs
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_hf_uri_no_tqdm_without_progress(self, mock_download, tmp_path):
+        mock_download.return_value = str(tmp_path / 'model.bin')
+        resolver = HfModelResolver()
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver.resolve('hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin')
+        assert 'tqdm_class' not in mock_download.call_args.kwargs
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_hf_uri_nested_filename(self, mock_download, tmp_path):
+        """Filenames with subdirectories (e.g. hf://owner/repo/sub/file.bin) are supported."""
+        mock_download.return_value = str(tmp_path / 'model.bin')
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver = HfModelResolver()
+            resolver.resolve('hf://owner/repo/subdir/model.bin')
+        assert mock_download.call_args.kwargs['filename'] == 'subdir/model.bin'
 
 
 class TestCacheHit:

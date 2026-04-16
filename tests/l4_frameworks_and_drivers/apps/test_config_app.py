@@ -489,6 +489,78 @@ class TestConfigAppAppearance:
             assert app.query_one('#cfg-theme', Select).value == 'nord'
 
 
+class TestConfigAppTranscriptionProvider:
+    @pytest.mark.asyncio
+    async def test_transcription_provider_select_exists(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            select = app.query_one('#cfg-trans-provider', Select)
+            assert select.value == 'whisper-cpp'
+
+    @pytest.mark.asyncio
+    async def test_save_roundtrips_transcription_provider(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['transcription_provider'] == 'whisper-cpp'
+
+    @pytest.mark.asyncio
+    async def test_repopulate_updates_transcription_provider(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._infra.transcription_provider = 'custom-engine'
+            app._repopulate_fields()
+            await pilot.pause()
+            assert app.query_one('#cfg-trans-provider', Select).value == 'custom-engine'
+
+    @pytest.mark.asyncio
+    async def test_loads_config_with_custom_provider(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(
+            tmp_path,
+            monkeypatch,
+            config_data={'transcription_provider': 'custom-stt'},
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-trans-provider', Select).value == 'custom-stt'
+
+    @pytest.mark.asyncio
+    async def test_plugin_provider_hides_model_fields(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Default whisper-cpp: model fields visible
+            assert app.query_one('#trans-model-fields').display is True
+            assert app.query_one('#plugin-trans-model-note').display is False
+
+            # Simulate switching to a plugin provider that manages models
+            select = app.query_one('#cfg-trans-provider', Select)
+            select.set_options([('whisper-cpp', 'whisper-cpp'), ('plugin-stt', 'plugin-stt')])
+            with patch(
+                f'{_CONFIG_MOD}._plugin_manages_models',
+                return_value=True,
+            ):
+                select.value = 'plugin-stt'
+                await pilot.pause()
+
+            assert app.query_one('#trans-model-fields').display is False
+            assert app.query_one('#plugin-trans-model-note').display is True
+
+
 class TestConfigAppQuit:
     @pytest.mark.asyncio
     async def test_escape_exits(self, tmp_path, monkeypatch):

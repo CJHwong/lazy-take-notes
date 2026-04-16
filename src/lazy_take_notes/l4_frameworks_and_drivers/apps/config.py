@@ -31,7 +31,9 @@ from lazy_take_notes.l4_frameworks_and_drivers.config import (
 )
 from lazy_take_notes.l4_frameworks_and_drivers.container import (
     BUILTIN_LLM_PROVIDERS,
+    BUILTIN_TRANSCRIPTION_PROVIDERS,
     LLM_PROVIDERS_GROUP,
+    TRANSCRIPTION_PROVIDERS_GROUP,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
@@ -204,26 +206,26 @@ class _SelectRow(Vertical):
         yield Select(choices, value=value, id=self._field_id, allow_blank=False)
 
 
-def _discover_llm_providers() -> list[str]:
-    """Return built-in + plugin-registered LLM provider names."""
+def _discover_providers(group: str, builtins: tuple[str, ...]) -> list[str]:
+    """Return built-in + plugin-registered provider names for an entry point group."""
     from importlib.metadata import entry_points  # noqa: PLC0415 -- deferred: not needed on --help
 
-    plugin_names = [ep.name for ep in entry_points(group=LLM_PROVIDERS_GROUP)]
-    return [*BUILTIN_LLM_PROVIDERS, *(n for n in plugin_names if n not in BUILTIN_LLM_PROVIDERS)]
+    plugin_names = [ep.name for ep in entry_points(group=group)]
+    return [*builtins, *(n for n in plugin_names if n not in builtins)]
 
 
-def _provider_manages_models(provider: str) -> bool:
+def _plugin_manages_models(provider: str, group: str, builtins: tuple[str, ...]) -> bool:
     """Check if a plugin provider manages its own model selection.
 
     Returns True when the provider's factory has ``manages_models = True``.
     Built-in providers always return False (they use the model fields).
     """
-    if provider in BUILTIN_LLM_PROVIDERS:
+    if provider in builtins:
         return False
 
     from importlib.metadata import entry_points  # noqa: PLC0415 -- deferred: only on provider change
 
-    for ep in entry_points(group=LLM_PROVIDERS_GROUP):
+    for ep in entry_points(group=group):
         if ep.name == provider:
             factory = ep.load()
             return getattr(factory, 'manages_models', False)
@@ -409,7 +411,7 @@ class ConfigApp(TextualApp):
                     yield _SelectRow(
                         'AI Provider',
                         'cfg-llm-provider',
-                        _discover_llm_providers(),
+                        _discover_providers(LLM_PROVIDERS_GROUP, BUILTIN_LLM_PROVIDERS),
                         self._infra.llm_provider,
                         help_text=(
                             '"ollama" runs models locally (free, private). '
@@ -482,22 +484,42 @@ class ConfigApp(TextualApp):
                         classes='section-desc',
                     )
 
-                    with Vertical(classes='field-group'):
+                    yield _SelectRow(
+                        'Speech-to-Text Engine',
+                        'cfg-trans-provider',
+                        _discover_providers(TRANSCRIPTION_PROVIDERS_GROUP, BUILTIN_TRANSCRIPTION_PROVIDERS),
+                        self._infra.transcription_provider,
+                        help_text=(
+                            '"whisper-cpp" uses local Whisper inference (default). '
+                            'Plugin engines appear when installed.'
+                        ),
+                    )
+
+                    with Vertical(id='trans-model-fields', classes='field-group'):
                         yield Static('Model', classes='field-group-title')
                         yield _FieldRow(
                             'Whisper Model',
                             'cfg-trans-model',
                             str(trans.get('model', '')),
-                            help_text='Larger models are more accurate but slower.',
-                            placeholder='large-v3-turbo-q8_0',
+                            help_text=(
+                                'Use hf://owner/repo/file for any HuggingFace GGUF model. '
+                                'Short aliases (e.g. large-v3-turbo-q8_0) also work.'
+                            ),
+                            placeholder='hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin',
                         )
                         yield _FieldRow(
                             'Language-specific Models',
                             'cfg-trans-models',
                             _dict_to_inline(trans.get('models', {})),
-                            help_text='Override per language. Format: "zh: breeze-q8, ja: model-name"',
-                            placeholder='zh: breeze-q8',
+                            help_text=('Override per language. Format: "zh: hf://owner/repo/file.bin, ja: model-name"'),
+                            placeholder='zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin',
                         )
+
+                    yield Static(
+                        'Models are managed by the engine plugin. Edit config.yaml to configure.',
+                        id='plugin-trans-model-note',
+                        classes='section-desc',
+                    )
 
                     with Collapsible(title='Advanced audio settings (usually no need to change)', collapsed=True):
                         yield _FieldRow(
@@ -662,8 +684,10 @@ class ConfigApp(TextualApp):
     def _collect_form_data(self) -> dict:
         """Read all form fields and build a config dict."""
         provider = self.query_one('#cfg-llm-provider', Select).value
+        trans_provider = self.query_one('#cfg-trans-provider', Select).value
         data: dict = {
             'llm_provider': provider,
+            'transcription_provider': str(trans_provider),
             'theme': str(self.query_one('#cfg-theme', Select).value),
             'ollama': {
                 'host': self.query_one('#cfg-ollama-host', Input).value.strip(),
@@ -713,18 +737,46 @@ class ConfigApp(TextualApp):
         """Apply saved theme and set initial visibility of model fields."""
         self.theme = self._infra.theme
         self._sync_model_fields_visibility(self._infra.llm_provider)
+        self._sync_transcription_model_fields_visibility(self._infra.transcription_provider)
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Toggle model fields when provider changes; preview theme on change."""
         if event.select.id == 'cfg-llm-provider':
             self._sync_model_fields_visibility(str(event.value))
+        elif event.select.id == 'cfg-trans-provider':
+            self._sync_transcription_model_fields_visibility(str(event.value))
         elif event.select.id == 'cfg-theme':
             self.theme = str(event.value)
 
     def _sync_model_fields_visibility(self, provider: str) -> None:
-        hide_models = _provider_manages_models(provider)
-        self.query_one('#model-fields').display = not hide_models
-        self.query_one('#plugin-model-note').display = hide_models
+        self._sync_provider_visibility(
+            provider,
+            LLM_PROVIDERS_GROUP,
+            BUILTIN_LLM_PROVIDERS,
+            'model-fields',
+            'plugin-model-note',
+        )
+
+    def _sync_transcription_model_fields_visibility(self, provider: str) -> None:
+        self._sync_provider_visibility(
+            provider,
+            TRANSCRIPTION_PROVIDERS_GROUP,
+            BUILTIN_TRANSCRIPTION_PROVIDERS,
+            'trans-model-fields',
+            'plugin-trans-model-note',
+        )
+
+    def _sync_provider_visibility(
+        self,
+        provider: str,
+        group: str,
+        builtins: tuple[str, ...],
+        fields_id: str,
+        note_id: str,
+    ) -> None:
+        hide = _plugin_manages_models(provider, group, builtins)
+        self.query_one(f'#{fields_id}').display = not hide
+        self.query_one(f'#{note_id}').display = hide
 
     def action_save_config(self) -> None:
         """Validate form data, then write to config.yaml."""
@@ -792,15 +844,19 @@ class ConfigApp(TextualApp):
         self._repopulate_fields()
         self.notify('Reloaded from disk')
 
+    def _repopulate_provider_select(self, widget_id: str, provider: str) -> None:
+        """Update a provider Select widget, adding the value if not in options."""
+        select = self.query_one(widget_id, Select)
+        current_values = [str(v) for _, v in select._options]
+        if provider not in current_values:
+            select.set_options([(n, n) for n in [*current_values, provider]])
+        select.value = provider
+
     def _repopulate_fields(self) -> None:
         """Push current self._raw / self._infra values back into form widgets."""
-        provider_select = self.query_one('#cfg-llm-provider', Select)
-        provider = self._infra.llm_provider
-        current_values = [str(v) for _, v in provider_select._options]
-        if provider not in current_values:
-            all_names = [*current_values, provider]
-            provider_select.set_options([(n, n) for n in all_names])
-        provider_select.value = provider
+        self._repopulate_provider_select('#cfg-llm-provider', self._infra.llm_provider)
+        self._repopulate_provider_select('#cfg-trans-provider', self._infra.transcription_provider)
+
         self.query_one('#cfg-ollama-host', Input).value = self._infra.ollama.host
         self.query_one('#cfg-openai-base-url', Input).value = self._infra.openai.base_url
         self.query_one('#cfg-openai-api-key', Input).value = self._infra.openai.api_key or ''

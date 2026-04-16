@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import math
 import queue
 import threading
 import time
@@ -176,15 +177,59 @@ def run_audio_worker(
         _silence_logged_at: float = 0.0
         _consecutive_zero_chunks: int = 0
         _zero_warned: bool = False
+        _was_paused = False
         try:
             while not is_cancelled():
                 if pause_event is not None and pause_event.is_set():
-                    use_case.reset_buffer()
+                    if not _was_paused:
+                        # Pause-entry: commit buffered audio so the user's last
+                        # sentence isn't silently lost by reset_buffer().
+
+                        # Wait for in-flight transcription (single-use subprocess).
+                        if _transcript_future is not None:
+                            try:
+                                _transcript_future.result(timeout=120)
+                                _collect_future()
+                            except Exception as e:
+                                log.error(
+                                    'Flushing in-flight transcription on pause failed: %s',
+                                    e,
+                                    exc_info=True,
+                                )
+
+                        # Flush remaining buffer through the transcriber.
+                        prepared = use_case.prepare_buffer()
+                        if prepared is not None and len(prepared[0]) > 0:
+                            flush_buf, flush_hints, flush_wall_start, flush_is_first = prepared
+                            log.debug(
+                                'pause-flush transcribing %d samples',
+                                len(flush_buf),
+                            )
+                            post_message(TranscriptionStatus(active=True))
+                            try:
+                                flush_segs = transcriber.transcribe(flush_buf, language, flush_hints)
+                                new_segs = use_case.apply_result(flush_segs, flush_wall_start, flush_is_first)
+                                if new_segs:
+                                    all_segments.extend(new_segs)
+                                    post_message(TranscriptChunk(segments=new_segs))
+                            except Exception as e:
+                                log.error('Pause flush transcription failed: %s', e, exc_info=True)
+                            finally:
+                                post_message(TranscriptionStatus(active=False))
+
+                        # Discard audio that arrived during the flush.
+                        audio_source.drain()
+                        use_case.reset_buffer()
+                        _was_paused = True
+
+                    # During pause: keep draining so producer queues don't grow.
+                    audio_source.drain()
                     _collect_future()
                     time.sleep(0.1)
                     _last_data_time = time.monotonic()  # don't count pause as silence
                     continue
 
+                _was_paused = False
                 _collect_future()
 
                 data = audio_source.read(timeout=0.1)
@@ -226,8 +271,8 @@ def run_audio_worker(
                 use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
                 use_case.feed_audio(data)
 
-                # Accumulate stats for periodic logging
-                chunk_rms = float(np.sqrt(np.mean(data**2)))
+                # np.dot avoids a temp data**2 allocation on the ~31 Hz hot path.
+                chunk_rms = math.sqrt(float(np.dot(data, data)) / len(data))
                 _stats_rms_sum += chunk_rms
                 _stats_rms_count += 1
                 _stats_zero_samples += int(np.count_nonzero(data == 0.0))
@@ -275,6 +320,7 @@ def run_audio_worker(
                         zero_pct,
                         _stats_transcriptions,
                     )
+
                     _stats_last_time = now_abs
 
                 if use_case.should_trigger() and _transcript_future is None:

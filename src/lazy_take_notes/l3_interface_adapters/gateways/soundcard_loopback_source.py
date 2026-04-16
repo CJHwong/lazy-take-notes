@@ -142,6 +142,14 @@ class SoundCardLoopbackSource:
         except queue.Empty:
             return None
 
+    def drain(self) -> None:
+        """Discard all buffered audio — called on pause so resume starts fresh."""
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
     def close(self) -> None:
         self._stop.set()
         # Join the reader thread BEFORE destroying the recorder — otherwise

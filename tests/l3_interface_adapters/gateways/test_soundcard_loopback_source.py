@@ -150,6 +150,28 @@ class TestSoundCardLoopbackSource:
 
         assert result is None
 
+    def test_drain_discards_buffered_chunks(self, monkeypatch):
+        monkeypatch.setattr(sys, 'platform', 'linux')
+
+        loopback_device = _make_loopback()
+        mock_recorder = _make_recorder()  # non-blocking, keeps producing chunks
+        loopback_device.recorder.return_value = mock_recorder
+
+        patches = _patch_sc([loopback_device])
+        with patches[0], patches[1]:
+            src = SoundCardLoopbackSource()
+            src.open(16000, 1)
+            time.sleep(0.05)  # let reader thread enqueue a few chunks
+            src.drain()
+            # Stop the reader producing before asserting so we can see the drain
+            # actually emptied the queue (next read must time out).
+            src._stop.set()  # noqa: SLF001 -- white-box: halt reader to isolate drain effect
+            time.sleep(0.02)
+            # Drain once more to catch anything the reader snuck in between set() and halt.
+            src.drain()
+            assert src.read(timeout=0.01) is None
+            src.close()
+
     def test_close_stops_recorder(self, monkeypatch):
         monkeypatch.setattr(sys, 'platform', 'linux')
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from textual.binding import Binding
 
@@ -17,6 +18,9 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
+
+if TYPE_CHECKING:
+    from lazy_take_notes.l2_use_cases.ports.model_resolver import ModelResolver
 
 log = logging.getLogger('ltn.app')
 
@@ -37,6 +41,7 @@ class TranscribeApp(BaseApp):
         audio_path: Path | None = None,
         transcriber: Transcriber | None = None,
         subtitle_segments: list[TranscriptSegment] | None = None,
+        model_resolver_factory: Callable[[Callable[[int], None] | None], ModelResolver] | None = None,
         **kwargs,
     ) -> None:
         if audio_path is None and subtitle_segments is None:
@@ -46,6 +51,7 @@ class TranscribeApp(BaseApp):
         self._audio_path = audio_path
         self._transcriber = transcriber
         self._subtitle_segments = subtitle_segments
+        self._model_resolver_factory = model_resolver_factory
         self._file_shutdown = threading.Event()
         self._worker_done = False
         self._pending_quit = False
@@ -129,6 +135,7 @@ class TranscribeApp(BaseApp):
                 )
             ),
             transcriber=self._transcriber,
+            model_resolver_factory=self._model_resolver_factory,
         )
 
     # --- Message Handlers ---
