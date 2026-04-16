@@ -29,12 +29,22 @@ class MixedAudioSource:
 
     Output is peak-limited: when the combined signal would exceed 0.99 (float32) it is
     scaled so the peak lands at 0.99, otherwise it passes through at full amplitude.
-    This replaces a naive unconditional * 0.5 attenuation, which halved the mic signal
-    even when the system channel was effectively silent — enough to drop quiet speakers
-    below the transcription VAD gate.
+
+    Auto-amplification: when the mic signal is consistently below the VAD silence
+    threshold but above the noise floor (~0.003), the mixer automatically boosts the
+    mic before mixing so speech clears the gate. Gain is computed from an exponential
+    moving average of mic RMS and capped at max_mic_gain (default 10x). The peak
+    limiter prevents the amplified signal from clipping.
     """
 
-    def __init__(self, mic: AudioSource, system_audio: AudioSource) -> None:
+    def __init__(
+        self,
+        mic: AudioSource,
+        system_audio: AudioSource,
+        *,
+        silence_threshold: float = 0.01,
+        max_mic_gain: float = 10.0,
+    ) -> None:
         self._mic = mic
         self._system = system_audio
         self._mic_q: queue.Queue[np.ndarray] = queue.Queue()
@@ -48,10 +58,15 @@ class MixedAudioSource:
         # Written by main thread, read by audio worker thread; bool assignment is
         # atomic under the GIL so no lock is needed.
         self.mic_muted: bool = False
-        # RMS of the mic signal from the most recent read() — exposed so the audio
-        # worker can detect "mic gain is too low" without re-separating channels.
-        # Updated on every successful read; reset to 0 on drain().
+        # Pre-amplification mic RMS from the most recent read().
         self.last_mic_rms: float = 0.0
+        # Auto-amplification state.
+        self._target_mic_rms = silence_threshold * 2.5
+        self._noise_floor = 0.003
+        self._max_mic_gain = max_mic_gain
+        self._mic_rms_ema: float = 0.0
+        self._mic_gain: float = 1.0
+        self._gain_logged: bool = False
 
     def open(self, sample_rate: int, channels: int) -> None:
         log.info(
@@ -95,13 +110,36 @@ class MixedAudioSource:
                 break
         mic = np.concatenate([first, *extras]) if extras else first
 
-        # Pre-mute, pre-mix mic RMS for low-gain diagnostics. np.dot avoids
-        # allocating a temporary mic**2 array on every read (~31 Hz hot path).
+        # Pre-mute, pre-mix mic RMS. np.dot avoids a temporary mic**2 allocation.
         self.last_mic_rms = math.sqrt(float(np.dot(mic, mic)) / mic.size) if mic.size else 0.0
 
+        # Update EMA of mic RMS (~2s convergence at 31 Hz with alpha=0.05).
+        if self.last_mic_rms > 0:
+            if self._mic_rms_ema == 0.0:
+                self._mic_rms_ema = self.last_mic_rms  # seed on first non-zero read
+            else:
+                self._mic_rms_ema += 0.05 * (self.last_mic_rms - self._mic_rms_ema)
+
+        # Auto-amplify: when EMA indicates "speaking but below VAD gate", boost
+        # mic so speech clears silence_threshold. Peak limiter catches overflow.
+        if self._mic_rms_ema > self._noise_floor and self._mic_rms_ema < self._target_mic_rms:
+            self._mic_gain = min(self._target_mic_rms / self._mic_rms_ema, self._max_mic_gain)
+            if not self._gain_logged:
+                log.info(
+                    'auto-amplifying mic: ema=%.4f target=%.4f gain=%.1fx',
+                    self._mic_rms_ema,
+                    self._target_mic_rms,
+                    self._mic_gain,
+                )
+                self._gain_logged = True
+        else:
+            self._mic_gain = 1.0
+
+        if self._mic_gain > 1.0:
+            mic = mic * self._mic_gain
+
         # Zero mic data when muted — reader threads keep running to preserve
-        # stream state; we just silence the mic contribution. In-place to avoid
-        # allocation on every read (~30 Hz hot path).
+        # stream state; we just silence the mic contribution.
         if self.mic_muted:
             mic *= 0
 
@@ -151,6 +189,9 @@ class MixedAudioSource:
                     break
         self._sys_buf = np.array([], dtype=np.float32)
         self.last_mic_rms = 0.0
+        self._mic_rms_ema = 0.0
+        self._mic_gain = 1.0
+        self._gain_logged = False
         self._mic.drain()
         self._system.drain()
 

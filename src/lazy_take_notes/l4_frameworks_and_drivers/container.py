@@ -70,7 +70,9 @@ class DependencyContainer:
         backend = self.resolve_transcription_backend(_infra)
         self._transcription_backend = backend
         self.transcriber: Transcriber = transcriber or backend.create_transcriber()
-        self.audio_source: AudioSource | None = audio_source or (self._build_mixed_source() if build_audio else None)
+        self.audio_source: AudioSource | None = audio_source or (
+            self._build_mixed_source(config.transcription.silence_threshold) if build_audio else None
+        )
         self.model_resolver: ModelResolver = backend.create_model_resolver(None)
 
         self.controller = SessionController(
@@ -81,7 +83,7 @@ class DependencyContainer:
         )
 
     @staticmethod
-    def _build_mixed_source() -> AudioSource:
+    def _build_mixed_source(silence_threshold: float = 0.01) -> AudioSource:
         from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import (  # noqa: PLC0415 -- deferred: audio stack loaded only when needed
             MixedAudioSource,
         )
@@ -94,14 +96,22 @@ class DependencyContainer:
                 CoreAudioTapSource,
             )
 
-            return MixedAudioSource(SounddeviceAudioSource(), CoreAudioTapSource())
+            return MixedAudioSource(
+                SounddeviceAudioSource(),
+                CoreAudioTapSource(),
+                silence_threshold=silence_threshold,
+            )
 
         # Linux / Windows — use soundcard loopback
         from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import (  # noqa: PLC0415 -- deferred: non-macOS only
             SoundCardLoopbackSource,
         )
 
-        return MixedAudioSource(SounddeviceAudioSource(), SoundCardLoopbackSource())
+        return MixedAudioSource(
+            SounddeviceAudioSource(),
+            SoundCardLoopbackSource(),
+            silence_threshold=silence_threshold,
+        )
 
     @staticmethod
     def resolve_llm_client(infra: InfraConfig) -> LLMClient:

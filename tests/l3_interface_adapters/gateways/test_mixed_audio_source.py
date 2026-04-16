@@ -201,9 +201,10 @@ class TestMixedAudioSource:
     def test_silent_sys_preserves_full_mic_amplitude(self):
         """Regression: sys producing zero-filled chunks (CoreAudioTap's idle behaviour)
         must not cause mic attenuation — that was the bug that dropped quiet speakers
-        below the transcription VAD gate.
+        below the transcription VAD gate. Mic values set above the amplification
+        target so this isolates peak-limit behaviour from auto-amplify.
         """
-        mic = FakeAudioSource(chunks=[np.array([0.02, 0.03, 0.015], dtype=np.float32)])
+        mic = FakeAudioSource(chunks=[np.array([0.04, 0.05, 0.03], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.zeros(3, dtype=np.float32)])
         src = MixedAudioSource(mic, sys_audio)
         src.open(16000, 1)
@@ -213,9 +214,89 @@ class TestMixedAudioSource:
         src.close()
 
         assert result is not None
-        # sys is all zeros → combined = mic, peak well under 0.99, no scale.
-        # Old * 0.5 behaviour would have halved these quiet mic samples to 0.01/0.015/0.0075.
-        np.testing.assert_allclose(result, [0.02, 0.03, 0.015], atol=1e-5)
+        # sys is all zeros → combined = mic, peak 0.05 < 0.99, no scale.
+        np.testing.assert_allclose(result, [0.04, 0.05, 0.03], atol=1e-5)
+
+    def test_auto_amplify_quiet_mic(self):
+        """Mic below silence_threshold target is amplified so speech clears VAD gate.
+        White-box: push chunks into _mic_q directly to control timing per-read."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01)
+        src.open(16000, 1)
+
+        quiet = np.full(100, 0.005, dtype=np.float32)
+
+        # Feed several reads to let EMA converge to ~0.005.
+        for _ in range(10):
+            src._mic_q.put(quiet.copy())  # noqa: SLF001
+            src.read(timeout=0.5)
+
+        # Next read with converged EMA: gain ≈ 0.025 / 0.005 = 5x.
+        src._mic_q.put(quiet.copy())  # noqa: SLF001
+        result = src.read(timeout=0.5)
+        src.close()
+
+        assert result is not None
+        result_rms = float(np.sqrt(np.mean(result**2)))
+        assert result_rms > 0.02, f'Expected amplified RMS > 0.02, got {result_rms}'
+
+    def test_no_amplify_normal_mic(self):
+        """Mic above target RMS should not be amplified."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        src = MixedAudioSource(mic, sys_audio)
+        src.open(16000, 1)
+
+        normal = np.full(100, 0.05, dtype=np.float32)
+        src._mic_q.put(normal.copy())  # noqa: SLF001
+        result = src.read(timeout=0.5)
+        src.close()
+
+        assert result is not None
+        np.testing.assert_allclose(result, 0.05, atol=1e-5)
+
+    def test_no_amplify_dead_mic(self):
+        """Mic below noise floor (dead/disconnected) should not be amplified."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        src = MixedAudioSource(mic, sys_audio)
+        src.open(16000, 1)
+
+        dead = np.full(100, 0.0001, dtype=np.float32)
+        for _ in range(5):
+            src._mic_q.put(dead.copy())  # noqa: SLF001
+            src.read(timeout=0.5)
+
+        src._mic_q.put(dead.copy())  # noqa: SLF001
+        result = src.read(timeout=0.5)
+        src.close()
+
+        assert result is not None
+        np.testing.assert_allclose(result, 0.0001, atol=1e-6)
+
+    def test_amplify_gain_capped(self):
+        """Gain must not exceed max_mic_gain even when uncapped gain would be higher."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        # mic at 0.005, target 0.025 → uncapped gain = 5x, but cap at 3x.
+        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01, max_mic_gain=3.0)
+        src.open(16000, 1)
+
+        quiet = np.full(100, 0.005, dtype=np.float32)
+        for _ in range(10):
+            src._mic_q.put(quiet.copy())  # noqa: SLF001
+            src.read(timeout=0.5)
+
+        src._mic_q.put(quiet.copy())  # noqa: SLF001
+        result = src.read(timeout=0.5)
+        src.close()
+
+        assert result is not None
+        result_rms = float(np.sqrt(np.mean(result**2)))
+        # Capped at 3x: output ~0.015, not 5x = ~0.025.
+        assert result_rms < 0.018, f'Expected capped RMS < 0.018, got {result_rms}'
+        assert result_rms > 0.012, f'Expected amplified RMS > 0.012, got {result_rms}'
 
     def test_drain_clears_queues_and_source_buffers(self):
         """drain() must empty our queues AND delegate to the underlying sources."""

@@ -320,6 +320,7 @@ def run_audio_worker(
                         zero_pct,
                         _stats_transcriptions,
                     )
+
                     _stats_last_time = now_abs
 
                 if use_case.should_trigger() and _transcript_future is None:
