@@ -86,6 +86,7 @@ class InfraConfig(BaseModel):
     llm_provider: str = 'ollama'  # 'ollama' | 'openai' | plugin-registered name
     transcription_provider: str = 'whisper-cpp'
     theme: str = 'textual-dark'  # Textual built-in theme name
+    show_builtin_templates: bool = True
     ollama: OllamaProviderConfig = Field(default_factory=OllamaProviderConfig)
     openai: OpenAIProviderConfig = Field(default_factory=OpenAIProviderConfig)
 
