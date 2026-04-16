@@ -231,6 +231,11 @@ class TemplateBuilderApp(TextualApp):
         )
 
     def on_mount(self) -> None:
+        from lazy_take_notes.l4_frameworks_and_drivers.config import (  # noqa: PLC0415 -- deferred: avoid import at module level
+            load_theme,
+        )
+
+        self.theme = load_theme()
         self._append_chat('assistant', _WELCOME)
         self.query_one('#tb-input', Input).focus()
 
