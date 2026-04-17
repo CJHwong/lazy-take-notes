@@ -50,6 +50,27 @@ class TestBuildDigestPrompt:
         result = build_digest_prompt(tmpl, ['x'], user_context='   \n  ')
         assert 'User corrections and additions:' not in result
 
+    def test_source_url_appended_when_provided(self):
+        tmpl = YamlTemplateLoader().load('default_zh_tw')
+        result = build_digest_prompt(tmpl, ['x'], source_url='https://www.youtube.com/watch?v=abc')
+        assert 'Source URL: https://www.youtube.com/watch?v=abc' in result
+
+    def test_source_url_appended_in_final_prompt(self):
+        tmpl = YamlTemplateLoader().load('default_zh_tw')
+        result = build_digest_prompt(
+            tmpl,
+            ['x'],
+            is_final=True,
+            full_transcript='some text',
+            source_url='https://www.youtube.com/watch?v=abc',
+        )
+        assert 'Source URL: https://www.youtube.com/watch?v=abc' in result
+
+    def test_no_source_url_leaves_no_url_line(self):
+        tmpl = YamlTemplateLoader().load('default_zh_tw')
+        result = build_digest_prompt(tmpl, ['x'])
+        assert 'Source URL:' not in result
+
 
 class TestBuildQuickActionPrompt:
     def test_fills_placeholders(self):

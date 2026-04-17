@@ -12,23 +12,29 @@ def build_digest_prompt(
     is_final: bool = False,
     full_transcript: str = '',
     user_context: str = '',
+    source_url: str | None = None,
 ) -> str:
     """Build the user prompt for a digest cycle."""
     new_lines = '\n'.join(buffer)
     context_section = f'User corrections and additions:\n{user_context.strip()}' if user_context.strip() else ''
 
     if is_final:
-        return template.final_user_template.format(
+        prompt = template.final_user_template.format(
             line_count=len(buffer),
             new_lines=new_lines,
             user_context=context_section,
             full_transcript=full_transcript or '(no full transcript)',
         )
-    return template.digest_user_template.format(
-        line_count=len(buffer),
-        new_lines=new_lines,
-        user_context=context_section,
-    )
+    else:
+        prompt = template.digest_user_template.format(
+            line_count=len(buffer),
+            new_lines=new_lines,
+            user_context=context_section,
+        )
+
+    if source_url:
+        prompt += f'\nSource URL: {source_url}'
+    return prompt
 
 
 def build_quick_action_prompt(

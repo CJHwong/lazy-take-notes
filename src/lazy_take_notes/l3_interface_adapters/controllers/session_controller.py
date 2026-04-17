@@ -31,10 +31,12 @@ class SessionController:
         template: SessionTemplate,
         llm_client: LLMClient,
         persistence: PersistenceGateway,
+        source_url: str | None = None,
     ) -> None:
         self._config = config
         self._template = template
         self._persistence = persistence
+        self._source_url = source_url
 
         self._digest_uc = RunDigestUseCase(llm_client)
         self._compact_uc = CompactMessagesUseCase()
@@ -73,6 +75,7 @@ class SessionController:
             is_final=is_final,
             full_transcript=full_transcript,
             user_context=self.user_context,
+            source_url=self._source_url,
         )
 
         if result.data is not None:

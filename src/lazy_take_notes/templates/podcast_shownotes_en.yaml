@@ -17,6 +17,9 @@ system_prompt: |
   8. If a "User corrections and additions" block appears, these are errata or additional context (e.g., correct spelling of guest names, URLs). Silently apply corrections throughout the notes — do not mention the corrections themselves.
   9. Topics Discussed is cumulative: all previously covered topics must be retained, plus any new ones. Never remove a topic just because the current transcript segment does not mention it.
   10. Resources Mentioned is cumulative: never drop a resource that was mentioned earlier.
+  11. Timestamp format rules (applies to both ## Topics Discussed and ## Timestamps):
+      - No Source URL: use plain-text timestamp, e.g. `[00:05:23]`
+      - With Source URL: the timestamp itself is the hyperlink — `[HH:MM:SS](Source_URL?t=SECONDS)` or `[HH:MM:SS](Source_URL&t=SECONDS)` depending on whether the URL already contains "?". SECONDS is the total seconds (e.g. 00:21:43 → 1303). **Do not add a separate link field.**
 
   Return format must be Markdown, using the following structure:
 
@@ -24,7 +27,7 @@ system_prompt: |
   2-3 sentence overview of the episode so far.
 
   ## Topics Discussed
-  Each topic as a ### subheading with key points and speaker attributions. Include concrete examples or stories, note any disagreements between speakers, and record the conclusion if one was reached.
+  Each topic as a ### subheading. Heading format: `### [HH:MM:SS] Topic Name` (or `### [HH:MM:SS](url) Topic Name` when a Source URL is present). Include key points with speaker attributions, concrete examples or stories, any disagreements between speakers, and the conclusion if one was reached.
 
   ## Notable Quotes
   - "Quote text" — Speaker Name
@@ -33,7 +36,7 @@ system_prompt: |
   - **Resource name** — brief context of why it was mentioned
 
   ## Timestamps
-  - Approximate topic transitions noted from the transcript
+  - Format: `[HH:MM:SS] Topic description` (or `[HH:MM:SS](Source_URL?t=SECONDS) — Topic description` when a Source URL is present; use `&t=SECONDS` if the URL already contains `?`; timestamp is the link, no separate link field)
 
 digest_user_template: |
   New transcript ({line_count} lines):
