@@ -35,6 +35,13 @@ class MixedAudioSource:
     mic before mixing so speech clears the gate. Gain is computed from an exponential
     moving average of mic RMS and capped at max_mic_gain (default 10x). The peak
     limiter prevents the amplified signal from clipping.
+
+    Amp is gated by a second EMA of system-audio RMS: when system audio is currently
+    playing (sys RMS above noise floor) the gain is held at 1x. Without this gate,
+    speaker-to-mic acoustic bleed gets boosted alongside genuine speech, and the
+    remote voice appears in the mix twice — once via the system tap, once via the
+    amplified mic copy — producing a doubled / phased output that degrades both
+    recording quality and transcription accuracy.
     """
 
     def __init__(
@@ -65,6 +72,7 @@ class MixedAudioSource:
         self._noise_floor = 0.003
         self._max_mic_gain = max_mic_gain
         self._mic_rms_ema: float = 0.0
+        self._sys_rms_ema: float = 0.0
         self._mic_gain: float = 1.0
         self._gain_logged: bool = False
 
@@ -120,9 +128,16 @@ class MixedAudioSource:
             else:
                 self._mic_rms_ema += 0.05 * (self.last_mic_rms - self._mic_rms_ema)
 
-        # Auto-amplify: when EMA indicates "speaking but below VAD gate", boost
-        # mic so speech clears silence_threshold. Peak limiter catches overflow.
-        if self._mic_rms_ema > self._noise_floor and self._mic_rms_ema < self._target_mic_rms:
+        # Auto-amplify: when EMA indicates "speaking but below VAD gate" AND the
+        # system audio EMA shows the loopback is silent, boost mic so speech clears
+        # silence_threshold. The sys-quiet gate prevents amplifying acoustic bleed
+        # (speaker → mic) when the user is on speakers — without it, the remote
+        # voice gets doubled in the mix. Peak limiter catches overflow.
+        if (
+            self._mic_rms_ema > self._noise_floor
+            and self._mic_rms_ema < self._target_mic_rms
+            and self._sys_rms_ema <= self._noise_floor
+        ):
             self._mic_gain = min(self._target_mic_rms / self._mic_rms_ema, self._max_mic_gain)
             if not self._gain_logged:
                 log.info(
@@ -166,6 +181,14 @@ class MixedAudioSource:
             sys = np.pad(self._sys_buf, (0, n - len(self._sys_buf)))
             self._sys_buf = np.array([], dtype=np.float32)
 
+        # Track system audio activity for next read's amp gate (one-chunk lag is
+        # well below the EMA time constant). Same alpha as mic EMA for symmetry.
+        sys_rms = math.sqrt(float(np.dot(sys, sys)) / sys.size) if sys.size else 0.0
+        if self._sys_rms_ema == 0.0:
+            self._sys_rms_ema = sys_rms
+        else:
+            self._sys_rms_ema += 0.05 * (sys_rms - self._sys_rms_ema)
+
         # Peak limiter: scale to 0.99 only when clipping. Two scalar reductions
         # (max + min) instead of np.abs() to avoid a temp-array allocation on
         # every read (~31 Hz hot path).
@@ -190,6 +213,7 @@ class MixedAudioSource:
         self._sys_buf = np.array([], dtype=np.float32)
         self.last_mic_rms = 0.0
         self._mic_rms_ema = 0.0
+        self._sys_rms_ema = 0.0
         self._mic_gain = 1.0
         self._gain_logged = False
         self._mic.drain()
