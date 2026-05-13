@@ -298,6 +298,34 @@ class TestMixedAudioSource:
         assert result_rms < 0.018, f'Expected capped RMS < 0.018, got {result_rms}'
         assert result_rms > 0.012, f'Expected amplified RMS > 0.012, got {result_rms}'
 
+    def test_no_amplify_when_system_audio_is_active(self):
+        """When system audio is playing, mic must NOT be auto-amplified — otherwise
+        speaker-to-mic acoustic bleed gets boosted and the remote voice ends up in
+        the mix twice (once via the loopback tap, once via the amplified mic copy).
+        That doubling/phasing was the original 'voice tracks mix together' bug."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01)
+        src.open(16000, 1)
+
+        # mic carries quiet acoustic bleed (in the [noise_floor, target] band that
+        # would normally trigger amp), sys carries the actual playing voice.
+        bleed = np.full(100, 0.005, dtype=np.float32)
+        sys_active = np.full(100, 0.05, dtype=np.float32)
+
+        for _ in range(20):  # let both EMAs converge
+            src._mic_q.put(bleed.copy())  # noqa: SLF001
+            src._sys_q.put(sys_active.copy())  # noqa: SLF001
+            src.read(timeout=0.5)
+
+        src._mic_q.put(bleed.copy())  # noqa: SLF001
+        src._sys_q.put(sys_active.copy())  # noqa: SLF001
+        src.read(timeout=0.5)
+        src.close()
+
+        # Without the sys-active gate the gain would be ~5x. The gate must hold it at 1x.
+        assert src._mic_gain == 1.0, f'Expected gain held at 1.0x, got {src._mic_gain}x'  # noqa: SLF001
+
     def test_drain_clears_queues_and_source_buffers(self):
         """drain() must empty our queues AND delegate to the underlying sources."""
         mic = FakeAudioSource(chunks=[np.array([0.1, 0.2], dtype=np.float32)])
