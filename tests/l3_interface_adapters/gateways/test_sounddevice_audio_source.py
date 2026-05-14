@@ -9,7 +9,12 @@ import numpy as np
 MODULE = 'lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source'
 
 
-_FAKE_DEVICE_INFO = {'name': 'Test Input', 'default_samplerate': 48000.0}
+# Default fixture uses native rate = target rate, so ratio=1 (passthrough — no decimation).
+# Tests that exercise decimation supply a separate device info with a non-target native rate.
+_FAKE_DEVICE_INFO = {'name': 'Test Input', 'default_samplerate': 16000.0}
+_FAKE_DEVICE_INFO_48K = {'name': 'Test Input 48k', 'default_samplerate': 48000.0}
+_FAKE_DEVICE_INFO_96K = {'name': 'Test Input 96k', 'default_samplerate': 96000.0}
+_FAKE_DEVICE_INFO_44_1K = {'name': 'Test Input 44.1k', 'default_samplerate': 44100.0}
 
 
 class TestSounddeviceAudioSource:
@@ -31,6 +36,37 @@ class TestSounddeviceAudioSource:
         assert call_kwargs['dtype'] == 'float32'
         mock_stream.start.assert_called_once()
 
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO_96K)
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_open_at_native_rate_for_integer_decimation(self, mock_stream_cls, _mock_qd):
+        """When native rate is an integer multiple of the target, open at native
+        and decimate in Python — bypasses PortAudio's resampling which silently
+        under-delivers samples on macOS CoreAudio at 96k → 16k."""
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+        mock_stream_cls.return_value = MagicMock()
+
+        SounddeviceAudioSource().open(16000, 1)
+
+        call_kwargs = mock_stream_cls.call_args.kwargs
+        # Stream opened at native rate, blocksize a multiple of the decimation ratio
+        assert call_kwargs['samplerate'] == 96000
+        assert call_kwargs['blocksize'] % 6 == 0
+
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO_44_1K)
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_open_falls_back_to_target_rate_for_non_integer_ratio(self, mock_stream_cls, _mock_qd):
+        """Devices whose native rate isn't a clean multiple of the target (e.g.
+        44.1 kHz) fall back to PortAudio's resampling. Documented limitation."""
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+        mock_stream_cls.return_value = MagicMock()
+
+        SounddeviceAudioSource().open(16000, 1)
+
+        call_kwargs = mock_stream_cls.call_args.kwargs
+        assert call_kwargs['samplerate'] == 16000
+
     @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
     def test_callback_wires_to_queue(self, mock_stream_cls, _mock_qd):
@@ -44,7 +80,7 @@ class TestSounddeviceAudioSource:
 
         # Extract the callback from the InputStream constructor
         callback = mock_stream_cls.call_args.kwargs['callback']
-        # Simulate audio data arriving
+        # Simulate audio data arriving (passthrough path: ratio=1, no decimation)
         fake_data = np.array([[0.1], [0.2]], dtype=np.float32)
         callback(fake_data, 2, None, None)
 
@@ -52,6 +88,48 @@ class TestSounddeviceAudioSource:
         result = src.read(timeout=0.1)
         assert result is not None
         np.testing.assert_allclose(result, [0.1, 0.2], atol=1e-6)
+
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO_48K)
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_callback_decimates_when_ratio_greater_than_one(self, mock_stream_cls, _mock_qd):
+        """48 kHz native → 16 kHz target → ratio 3. Each group of 3 input samples
+        averages into one output sample at the target rate."""
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+        mock_stream_cls.return_value = MagicMock()
+
+        src = SounddeviceAudioSource()
+        src.open(16000, 1)
+
+        callback = mock_stream_cls.call_args.kwargs['callback']
+        # 6 input frames @ 48k → 2 output frames @ 16k. Pairs averaged.
+        fake_data = np.array(
+            [[0.0], [0.3], [0.6], [0.9], [0.6], [0.3]],
+            dtype=np.float32,
+        )
+        callback(fake_data, 6, None, None)
+
+        result = src.read(timeout=0.1)
+        assert result is not None
+        # Groups: mean([0.0, 0.3, 0.6]) = 0.3 ; mean([0.9, 0.6, 0.3]) = 0.6
+        np.testing.assert_allclose(result, [0.3, 0.6], atol=1e-5)
+
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO_48K)
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_callback_skips_when_frames_smaller_than_ratio(self, mock_stream_cls, _mock_qd):
+        """If a callback delivers fewer frames than the decimation ratio, drop
+        them — blocksize is configured to prevent this, but be defensive."""
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+        mock_stream_cls.return_value = MagicMock()
+
+        src = SounddeviceAudioSource()
+        src.open(16000, 1)
+
+        callback = mock_stream_cls.call_args.kwargs['callback']
+        callback(np.array([[0.1], [0.2]], dtype=np.float32), 2, None, None)
+
+        assert src.read(timeout=0.01) is None
 
     @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
     @patch(f'{MODULE}.sd.InputStream')
