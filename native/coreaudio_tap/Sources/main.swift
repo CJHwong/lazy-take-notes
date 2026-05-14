@@ -34,8 +34,13 @@ let maxRestarts = 10
 /// out the output buffer.  Cleared automatically after a successful restart.
 var forceZeros = false
 
-// 64 KB buffered stdout — eliminates per-callback syscalls; flushed on exit.
-setvbuf(stdout, nil, _IOFBF, 65536)
+// Unbuffered stdout — every audio chunk goes straight to the pipe. The previous
+// 64 KB buffered mode held up to ~1 s of audio (10 callbacks × ~6.4 KB each) before
+// flushing, which surfaced in the Python consumer as a 1–2 s lag on the live level
+// meter — the meter kept moving after the meeting ended because the system-audio
+// pipe was still draining buffered loud audio from before. At ~10 callbacks/sec the
+// extra syscall cost is in the microseconds, well worth eliminating the latency.
+setvbuf(stdout, nil, _IONBF, 0)
 
 signal(SIGTERM) { _ in shouldStop = true }
 signal(SIGINT)  { _ in shouldStop = true }
