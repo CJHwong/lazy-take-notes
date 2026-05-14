@@ -161,11 +161,18 @@ class MixedAudioSource:
         # Drain ALL available system chunks into the rolling buffer non-blocking.
         # get_nowait() is intentional: blocking here would stall the mic path and
         # cause _mic_q to accumulate unboundedly.
+        # Collect into a list first and concatenate once — the prior pattern of
+        # re-concatenating onto _sys_buf inside the loop was O(K²) in the number
+        # of queued chunks, which produced multi-second stalls on a single read()
+        # when the consumer had fallen behind by minutes (3000 chunks → ~2.6 s).
+        pending: list[np.ndarray] = []
         while True:
             try:
-                self._sys_buf = np.concatenate([self._sys_buf, self._sys_q.get_nowait()])
+                pending.append(self._sys_q.get_nowait())
             except queue.Empty:
                 break
+        if pending:
+            self._sys_buf = np.concatenate([self._sys_buf, *pending]) if self._sys_buf.size else np.concatenate(pending)
 
         if len(self._sys_buf) == 0:
             return mic  # no system audio yet; pass mic through at full amplitude

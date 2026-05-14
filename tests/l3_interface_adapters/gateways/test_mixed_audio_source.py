@@ -326,6 +326,49 @@ class TestMixedAudioSource:
         # Without the sys-active gate the gain would be ~5x. The gate must hold it at 1x.
         assert src._mic_gain == 1.0, f'Expected gain held at 1.0x, got {src._mic_gain}x'  # noqa: SLF001
 
+    def test_sys_queue_backlog_drained_into_one_concat(self):
+        """When the consumer has fallen behind by many sys chunks, the catch-up
+        drain inside read() must complete in linear time. The prior implementation
+        re-concatenated onto _sys_buf inside the per-chunk loop (O(K²) memcpy),
+        which stalled a single read() for seconds when K reached the thousands —
+        directly causing the user-reported long-meeting lag spiral.
+
+        We can't easily assert on wall time here (CI noise), but we can pin the
+        observable semantics: every queued sys chunk's samples end up in _sys_buf
+        (or get consumed into the mixed output) regardless of how many were queued.
+        Concat ordering matters: the first-queued chunk's samples should land
+        before later ones."""
+        mic = FakeAudioSource()
+        sys_audio = FakeAudioSource()
+        src = MixedAudioSource(mic, sys_audio)
+        src.open(16000, 1)
+
+        # Pre-load 200 sys chunks (each tagged with a sentinel value so order is checkable).
+        sys_chunk_n = 100
+        n_chunks = 200
+        for i in range(n_chunks):
+            tag = (i + 1) / 1000.0  # 0.001, 0.002, ... distinct per chunk
+            src._sys_q.put(np.full(sys_chunk_n, tag, dtype=np.float32))  # noqa: SLF001
+
+        # Mic chunk small enough that one read consumes only the first sys chunk's samples,
+        # leaving the rest in _sys_buf where we can inspect ordering.
+        src._mic_q.put(np.zeros(10, dtype=np.float32))  # noqa: SLF001
+        result = src.read(timeout=0.5)
+        assert result is not None
+
+        # After the read, _sys_buf should hold the remaining (n_chunks * sys_chunk_n) - 10 samples
+        # with the original chunk ordering preserved.
+        remaining = src._sys_buf  # noqa: SLF001
+        expected_total = n_chunks * sys_chunk_n - 10
+        assert len(remaining) == expected_total, f'Expected {expected_total} samples remaining, got {len(remaining)}'
+        # The first chunk had tag 0.001; the consumed 10 samples came from it. The
+        # next sys_chunk_n - 10 samples should still be tag 0.001, then chunk 2 starts.
+        np.testing.assert_allclose(remaining[: sys_chunk_n - 10], 0.001, atol=1e-6)
+        np.testing.assert_allclose(remaining[sys_chunk_n - 10 : 2 * sys_chunk_n - 10], 0.002, atol=1e-6)
+        # Spot-check the last chunk landed at the end.
+        np.testing.assert_allclose(remaining[-sys_chunk_n:], n_chunks / 1000.0, atol=1e-6)
+        src.close()
+
     def test_drain_clears_queues_and_source_buffers(self):
         """drain() must empty our queues AND delegate to the underlying sources."""
         mic = FakeAudioSource(chunks=[np.array([0.1, 0.2], dtype=np.float32)])
