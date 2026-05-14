@@ -18,8 +18,12 @@ _DB_FLOOR = -60.0
 _DB_RANGE = 49.0  # -60 to -11
 
 
-def _rms_to_char(rms: float) -> str:
-    if math.isnan(rms) or rms < 1e-7:
+def _rms_to_char(rms: float, silence_threshold: float = 0.0) -> str:
+    # Treat anything the VAD considers silent as visually silent too. Without this,
+    # quiet mic ambient (~0.003 RMS = -50 dB) sat above the -60 dB floor and the
+    # wave kept showing visible bars after the meeting ended — looked like "lag"
+    # to the user even though the pipeline had already reported silent audio.
+    if math.isnan(rms) or rms < max(silence_threshold, 1e-7):
         return _WAVE_CHARS[0]
     if math.isinf(rms):
         return _WAVE_CHARS[7]
@@ -53,6 +57,11 @@ class StatusBar(Static):
     buf_count: reactive[int] = reactive(0)
     buf_max: reactive[int] = reactive(15)
     audio_level: reactive[float] = reactive(0.0)
+    # Below this RMS, render the wave as fully silent (▁). Apps set this from
+    # the user's configured silence_threshold so the meter and the VAD agree on
+    # what counts as silent. Default 0 keeps backward compat for tests that
+    # construct StatusBar without configuring it.
+    silence_threshold: reactive[float] = reactive(0.0)
     last_digest_time: reactive[float] = reactive(0.0)
     mic_muted: reactive[bool] = reactive(False)
     mode_label: reactive[str] = reactive('')
@@ -157,7 +166,7 @@ class StatusBar(Static):
             else:
                 left_parts.append(f'last {int(since / 60)}m ago')
         if self.recording:
-            wave = ''.join(_rms_to_char(v) for v in self._level_history)
+            wave = ''.join(_rms_to_char(v, self.silence_threshold) for v in self._level_history)
             left_parts.append(wave)
         if self.transcribing:
             left_parts.append('⟳ Transcribing\u2026')

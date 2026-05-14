@@ -47,6 +47,21 @@ class TestRmsToChar:
         assert indices == sorted(indices)
         assert indices[-1] > indices[0]
 
+    def test_silence_threshold_renders_as_lowest_bar(self):
+        """RMS at or below silence_threshold should render as ▁ — aligns the wave
+        with the VAD's notion of silent. Without this, quiet mic ambient (e.g.
+        0.003 RMS) sat above the -60 dB floor and kept the wave visibly active
+        long after the system audio actually stopped, looking like consumer-loop
+        lag when it was actually the meter being more sensitive than the VAD."""
+        # Without the threshold passed, 0.003 RMS (≈ -50 dB) maps to ▂ via the
+        # dB floor at -60 dB. That's exactly the symptom this fix addresses.
+        assert _rms_to_char(0.003) == '▂'
+        # With silence_threshold matching the VAD's, 0.003 renders as ▁.
+        assert _rms_to_char(0.003, silence_threshold=0.01) == '▁'
+        assert _rms_to_char(0.0099, silence_threshold=0.01) == '▁'
+        # Above the threshold, the dB scale takes over as before.
+        assert _rms_to_char(0.05, silence_threshold=0.01) != '▁'
+
 
 def _make_app(tmp_path):
     from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController

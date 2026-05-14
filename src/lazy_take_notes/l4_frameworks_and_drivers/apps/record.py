@@ -83,7 +83,9 @@ class RecordApp(BaseApp):
 
     def on_mount(self) -> None:
         super().on_mount()
-        self.query_one('#status-bar', StatusBar).mode_label = 'Record'
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.mode_label = 'Record'
+        bar.silence_threshold = self._config.transcription.silence_threshold
         self._start_audio_worker()
         if not CONSENT_NOTICED_PATH.exists():
             self.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
