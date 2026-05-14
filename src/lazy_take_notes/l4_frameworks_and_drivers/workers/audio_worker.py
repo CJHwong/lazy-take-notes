@@ -311,14 +311,36 @@ def run_audio_worker(
                     rms_avg = _stats_rms_sum / _stats_rms_count if _stats_rms_count else 0.0
                     zero_pct = (_stats_zero_samples / _stats_total_samples * 100) if _stats_total_samples else 0.0
                     minutes, secs = divmod(int(elapsed), 60)
+                    # Consumer drift: samples the worker has consumed vs samples
+                    # that should have been produced if real-time were the only
+                    # constraint. Positive drift => the audio_worker is behind
+                    # real time (queues somewhere have backlog); zero drift =>
+                    # consumer keeping up and any perceived lag is downstream
+                    # of the worker (UI, rendering, terminal).
+                    expected_samples = int(elapsed * SAMPLE_RATE)
+                    drift_samples = expected_samples - total_samples_fed
+                    drift_s = drift_samples / SAMPLE_RATE
+                    # Queue sizes — only meaningful for MixedAudioSource; gracefully
+                    # ignore for any source that doesn't expose these.
+                    mic_q = getattr(audio_source, '_mic_q', None)
+                    sys_q = getattr(audio_source, '_sys_q', None)
+                    sys_buf = getattr(audio_source, '_sys_buf', None)
+                    qmic = mic_q.qsize() if mic_q is not None else -1
+                    qsys = sys_q.qsize() if sys_q is not None else -1
+                    qbuf = len(sys_buf) if sys_buf is not None else -1
                     log.info(
-                        'Audio stats [%d:%02d]: %d samples, rms=%.3f, zero=%.1f%%, transcriptions=%d',
+                        'Audio stats [%d:%02d]: %d samples, rms=%.3f, zero=%.1f%%, '
+                        'transcriptions=%d, drift=%+.2fs, mic_q=%d, sys_q=%d, sys_buf=%d',
                         minutes,
                         secs,
                         total_samples_fed,
                         rms_avg,
                         zero_pct,
                         _stats_transcriptions,
+                        drift_s,
+                        qmic,
+                        qsys,
+                        qbuf,
                     )
 
                     _stats_last_time = now_abs
