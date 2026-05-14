@@ -37,7 +37,15 @@ class TranscribeAudioUseCase:
         self._min_speech_samples = int(SAMPLE_RATE * 2.0)
         self._silence_threshold = silence_threshold
 
-        self._buffer = np.array([], dtype=np.float32)
+        # Audio buffer is stored in a pre-allocated array that grows exponentially
+        # on demand. The valid prefix is `_storage[:_buffer_size]`; reads go through
+        # the `_buffer` view. This makes feed_audio amortised O(1) in the chunk
+        # size instead of O(buffer_size) — the previous np.concatenate-per-feed
+        # turned long meetings under whisper backpressure into a quadratic CPU
+        # sink that saturated the audio_worker consumer loop and caused live
+        # level-meter lag.
+        self._storage = np.zeros(SAMPLE_RATE * 10, dtype=np.float32)
+        self._buffer_size = 0
         self._is_first_chunk = True
         self._session_offset: float = 0.0  # wall-clock offset of buffer start
 
@@ -45,17 +53,55 @@ class TranscribeAudioUseCase:
     def overlap(self) -> float:
         return self._overlap_samples / SAMPLE_RATE
 
+    @property
+    def _buffer(self) -> np.ndarray:
+        """View of the current valid audio samples — read-only conceptually.
+
+        Callers that previously did `self._buffer = X` must instead use
+        `_replace_buffer(X)` so the underlying storage stays in sync.
+        """
+        return self._storage[: self._buffer_size]
+
+    def _replace_buffer(self, value: np.ndarray) -> None:
+        """Reset buffer contents to `value`. Handles overlap-safe self-copies."""
+        n = len(value)
+        if n == 0:
+            self._buffer_size = 0
+            return
+        if n > len(self._storage):
+            new_cap = max(n, len(self._storage) * 2)
+            self._storage = np.zeros(new_cap, dtype=np.float32)
+            self._storage[:n] = value
+        else:
+            # `value` may be a view into self._storage (e.g. self._buffer[-overlap:]).
+            # Slice-assigning across overlapping regions on the same array is undefined,
+            # so take a copy when the source aliases our storage.
+            src = value.copy() if value.base is self._storage else value
+            self._storage[:n] = src
+        self._buffer_size = n
+
     def set_session_offset(self, offset: float) -> None:
         """Set the current wall-clock offset in seconds from session start."""
         self._session_offset = offset
 
     def feed_audio(self, data: np.ndarray) -> None:
-        """Append raw audio samples to the internal buffer."""
-        self._buffer = np.concatenate([self._buffer, data.flatten()])
+        """Append raw audio samples to the internal buffer (amortised O(1))."""
+        flat = data.flatten() if data.ndim > 1 else data
+        n = len(flat)
+        if n == 0:
+            return
+        needed = self._buffer_size + n
+        if needed > len(self._storage):
+            new_cap = max(needed, len(self._storage) * 2)
+            new_storage = np.zeros(new_cap, dtype=np.float32)
+            new_storage[: self._buffer_size] = self._storage[: self._buffer_size]
+            self._storage = new_storage
+        self._storage[self._buffer_size : needed] = flat
+        self._buffer_size = needed
 
     def reset_buffer(self) -> None:
         """Discard accumulated audio (e.g. after pause)."""
-        self._buffer = np.array([], dtype=np.float32)
+        self._buffer_size = 0
 
     def should_trigger(self) -> bool:
         """Check if the buffer should be processed."""
@@ -87,7 +133,7 @@ class TranscribeAudioUseCase:
 
         rms = np.sqrt(np.mean(buf**2))
         if rms < self._silence_threshold:
-            self._buffer = (
+            self._replace_buffer(
                 buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
             )
             return None
@@ -97,7 +143,9 @@ class TranscribeAudioUseCase:
         current_hints = list(self._current_hints)
         is_first = self._is_first_chunk
 
-        self._buffer = buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
+        self._replace_buffer(
+            buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
+        )
         self._is_first_chunk = False
 
         return snapshot, current_hints, buffer_wall_start, is_first
@@ -144,7 +192,7 @@ class TranscribeAudioUseCase:
         # Skip if entire buffer is silence
         rms = np.sqrt(np.mean(buf**2))
         if rms < self._silence_threshold:
-            self._buffer = (
+            self._replace_buffer(
                 buf[-self._overlap_samples :] if self._overlap_samples > 0 else np.array([], dtype=np.float32)
             )
             return []
@@ -182,9 +230,9 @@ class TranscribeAudioUseCase:
 
         # Retain overlap tail
         if self._overlap_samples > 0:
-            self._buffer = buf[-self._overlap_samples :]
+            self._replace_buffer(buf[-self._overlap_samples :])
         else:
-            self._buffer = np.array([], dtype=np.float32)
+            self._replace_buffer(np.array([], dtype=np.float32))
 
         return new_segments
 
