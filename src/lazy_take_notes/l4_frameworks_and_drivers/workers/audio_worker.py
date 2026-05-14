@@ -77,10 +77,20 @@ def run_audio_worker(
     save_audio: bool = False,
     transcriber=None,
     audio_source: AudioSource | None = None,
+    level_setter=None,
 ) -> list[TranscriptSegment]:
     """Audio capture and transcription loop.
 
     Designed to run inside a Textual @work(thread=True) worker.
+
+    The optional `level_setter` callable lets callers bypass the post_message
+    queue for the high-rate AudioLevel update. The default writes an AudioLevel
+    message — fine for tests and short sessions. For long sessions, posting at
+    10 Hz can outpace the consumer (rendering / message-handler load) and
+    levels back up in Textual's queue, showing up as the wave lagging real
+    time. An app-provided level_setter that just stores the latest float in a
+    shared slot keeps the meter snappy under load: writes overwrite each other
+    rather than queueing, and the consumer polls the latest value.
     """
     # Load model
     post_message(AudioWorkerStatus(status='loading_model'))
@@ -302,7 +312,10 @@ def run_audio_worker(
                     if not np.isfinite(rms):
                         rms = 0.0
                     _level_accum.clear()
-                    post_message(AudioLevel(rms=rms))
+                    if level_setter is not None:
+                        level_setter(rms)
+                    else:
+                        post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
 
                 # Periodic stats every 30s

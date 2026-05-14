@@ -57,6 +57,11 @@ class RecordApp(BaseApp):
         self._audio_shutdown = threading.Event()
         self._audio_stopped = False
         self._pending_quit = False
+        # Latest audio RMS — written from the worker thread, read by a timer on
+        # the UI loop. Float assignment is atomic under the GIL; no lock needed.
+        # Using a slot instead of AudioLevel messages keeps the meter responsive
+        # under load: producer writes overwrite each other rather than queueing.
+        self._latest_audio_level: float = 0.0
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
@@ -86,6 +91,8 @@ class RecordApp(BaseApp):
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'Record'
         bar.silence_threshold = self._config.transcription.silence_threshold
+        # Poll the worker's latest-RMS slot at the meter's display cadence.
+        self.set_interval(0.1, self._poll_audio_level)
         self._start_audio_worker()
         if not CONSENT_NOTICED_PATH.exists():
             self.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
@@ -149,7 +156,23 @@ class RecordApp(BaseApp):
             save_audio=self._config.output.save_audio,
             transcriber=self._transcriber,
             audio_source=self._audio_source,
+            level_setter=self._set_latest_audio_level,
         )
+
+    def _set_latest_audio_level(self, rms: float) -> None:
+        """Worker-thread entry point — writes the latest RMS to a slot polled
+        by the UI timer. Float assignment is atomic under the GIL."""
+        self._latest_audio_level = rms
+
+    def _poll_audio_level(self) -> None:
+        """UI-thread timer — copies the latest RMS into the StatusBar reactive.
+        Decouples the producer's 10 Hz post rate from the UI render rate so the
+        wave can't fall behind real time when the loop is under load."""
+        try:
+            bar = self.query_one('#status-bar', StatusBar)
+            bar.audio_level = self._latest_audio_level
+        except Exception:  # noqa: S110, BLE001 -- TUI race guard; widget may not exist during teardown
+            pass
 
     def _cancel_audio_workers(self) -> None:
         self._audio_shutdown.set()

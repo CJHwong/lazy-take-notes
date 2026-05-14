@@ -301,6 +301,42 @@ class TestAudioWorkerTranscription:
         # Return value includes segments
         assert len(result) >= 1
 
+    def test_level_setter_callback_bypasses_audio_level_message(self):
+        """When a level_setter is provided, the worker writes RMS to it and
+        skips posting AudioLevel messages. Lets RecordApp decouple the high-rate
+        level update from Textual's message queue so the wave can't fall behind
+        real time under render load."""
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = FakeAudioSource(chunks=[chunk, chunk, chunk])
+
+        messages: list = []
+        rms_writes: list[float] = []
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count > 5
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='zh',
+            chunk_duration=0.1,
+            overlap=0.0,
+            silence_threshold=0.001,
+            transcriber=FakeTranscriber(),
+            audio_source=fake_source,
+            level_setter=rms_writes.append,
+        )
+
+        # level_setter received at least one RMS write
+        assert len(rms_writes) >= 1
+        assert rms_writes[0] > 0
+        # AudioLevel messages were NOT posted — the slot pattern replaced them
+        assert not [m for m in messages if isinstance(m, AudioLevel)]
+
     def test_transcription_posts_status_active_and_inactive(self):
         """TranscriptionStatus(active=True) posted before transcription, False after."""
         segments = [TranscriptSegment(text='hello', wall_start=0.0, wall_end=1.0)]
