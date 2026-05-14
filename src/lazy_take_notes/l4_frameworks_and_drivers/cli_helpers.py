@@ -145,6 +145,8 @@ def run_transcribe(
     label: str | None = None,
     llm_client: LLMClient | None = None,
     transcriber: Transcriber | None = None,
+    source_url: str | None = None,
+    source_title: str | None = None,
 ) -> None:
     """Run a complete transcription session — the high-level plugin entry point.
 
@@ -186,6 +188,8 @@ def run_transcribe(
         build_audio=False,
         llm_client=llm_client,
         transcriber=transcriber,
+        source_url=source_url,
+        source_title=source_title,
     )
 
     app = TranscribeApp(

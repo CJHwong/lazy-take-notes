@@ -55,6 +55,43 @@ class TestOnTranscriptSegments:
         assert ctrl.on_transcript_segments(segs) is False
 
 
+class TestSourceUrl:
+    @pytest.mark.asyncio
+    async def test_source_url_injected_into_prompt(self):
+        config = build_app_config({})
+        template = YamlTemplateLoader().load('default_zh_tw')
+        fake_llm = FakeLLMClient(response=VALID_DIGEST, prompt_tokens=50)
+        fake_persist = FakePersistence()
+        ctrl = SessionController(
+            config=config,
+            template=template,
+            llm_client=fake_llm,
+            persistence=fake_persist,
+            source_url='https://www.youtube.com/watch?v=test99',
+        )
+        ctrl.digest_state.buffer = ['Line 1']
+        ctrl.digest_state.all_lines = ['Line 1']
+
+        result = await ctrl.run_digest()
+
+        assert result.ok
+        _, messages = fake_llm.chat_calls[0]
+        user_msg = messages[-1].content
+        assert 'Source URL: https://www.youtube.com/watch?v=test99' in user_msg
+
+    @pytest.mark.asyncio
+    async def test_no_source_url_omits_url_line(self, controller):
+        ctrl, fake_llm, _ = controller
+        ctrl.digest_state.buffer = ['Line 1']
+        ctrl.digest_state.all_lines = ['Line 1']
+
+        await ctrl.run_digest()
+
+        _, messages = fake_llm.chat_calls[0]
+        user_msg = messages[-1].content
+        assert 'Source URL:' not in user_msg
+
+
 class TestRunDigest:
     @pytest.mark.asyncio
     async def test_success(self, controller):

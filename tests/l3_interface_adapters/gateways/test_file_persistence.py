@@ -73,6 +73,42 @@ class TestSaveDigestMd:
         assert 'Second version' in content
         assert 'First version' not in content
 
+    def test_source_url_and_title_prepended_as_header(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(
+            tmp_output_dir,
+            source_url='https://www.youtube.com/watch?v=abc123',
+            source_title='My Video Title',
+        )
+        path = gw.save_digest_md('Some content', 1)
+        content = path.read_text(encoding='utf-8')
+        assert content.startswith('https://www.youtube.com/watch?v=abc123')
+        assert '# [My Video Title](https://www.youtube.com/watch?v=abc123)' in content
+        # Header must appear before the digest header
+        url_pos = content.index('https://www.youtube.com/watch?v=abc123')
+        digest_pos = content.index('# Digest #1')
+        assert url_pos < digest_pos
+
+    def test_no_header_when_source_url_missing(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir, source_title='A Title')
+        content = gw.save_digest_md('content', 1).read_text(encoding='utf-8')
+        assert content.startswith('# Digest #1')
+
+    def test_no_header_when_source_title_missing(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(tmp_output_dir, source_url='https://www.youtube.com/watch?v=abc')
+        content = gw.save_digest_md('content', 1).read_text(encoding='utf-8')
+        assert content.startswith('# Digest #1')
+
+    def test_history_never_gets_source_header(self, tmp_output_dir: Path):
+        gw = FilePersistenceGateway(
+            tmp_output_dir,
+            source_url='https://www.youtube.com/watch?v=abc123',
+            source_title='My Video',
+        )
+        path = gw.save_history('content', 1)
+        content = path.read_text(encoding='utf-8')
+        assert content.startswith('# Digest #1')
+        assert 'youtube.com' not in content
+
 
 class TestSaveSessionContext:
     def test_creates_file(self, tmp_output_dir: Path):
