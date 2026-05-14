@@ -77,7 +77,9 @@ class TranscribeApp(BaseApp):
 
     def on_mount(self) -> None:
         super().on_mount()
-        self.query_one('#status-bar', StatusBar).mode_label = 'Transcribe'
+        bar = self.query_one('#status-bar', StatusBar)
+        bar.mode_label = 'Transcribe'
+        bar.silence_threshold = self._config.transcription.silence_threshold
         self._start_file_worker()
 
     def _start_file_worker(self) -> None:  # pragma: no cover -- thin thread launcher; patched out in tests
