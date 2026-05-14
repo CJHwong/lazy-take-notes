@@ -78,6 +78,50 @@ class TestTranscribeAudioUseCase:
         # Transcriber should NOT have been called
         assert len(fake.transcribe_calls) == 0
 
+    def test_feed_audio_grows_storage_beyond_initial_capacity(self):
+        """Internal storage starts at 10s and must grow on demand without losing
+        samples. Regression guard for the pre-allocated buffer that replaced
+        np.concatenate-per-feed (which was O(n) per call and caused live level
+        meter lag under whisper backpressure on long meetings)."""
+        fake = FakeTranscriber()
+        uc = TranscribeAudioUseCase(transcriber=fake, language='en', chunk_duration=1000.0)
+
+        # Feed 25 seconds in 32-ms chunks — exceeds the 10s pre-allocation,
+        # triggering at least one storage grow.
+        chunk = np.full(512, 0.05, dtype=np.float32)
+        n_chunks = 25 * SAMPLE_RATE // 512
+        for _ in range(n_chunks):
+            uc.feed_audio(chunk)
+
+        assert len(uc._buffer) == n_chunks * 512  # noqa: SLF001
+        # All samples preserved at the expected value.
+        np.testing.assert_allclose(uc._buffer, 0.05, atol=1e-6)  # noqa: SLF001
+
+    def test_feed_audio_after_reset_to_tail_continues_correctly(self):
+        """After prepare_buffer resets the buffer to the overlap tail, the next
+        feed_audio must extend that tail correctly — exercises the _replace_buffer
+        path that takes a copy when the new contents alias internal storage."""
+        fake = FakeTranscriber(segments=[TranscriptSegment(text='x', wall_start=0, wall_end=1)])
+        uc = TranscribeAudioUseCase(transcriber=fake, language='en', chunk_duration=2.0, overlap=0.5)
+
+        # Feed 2 seconds at amplitude 0.5 so the buffer triggers and prepare_buffer
+        # returns a non-silent snapshot.
+        loud = np.full(SAMPLE_RATE * 2, 0.5, dtype=np.float32)
+        uc.feed_audio(loud)
+        prepared = uc.prepare_buffer()
+        assert prepared is not None
+
+        # Buffer is now reset to the last 0.5s = 8000 samples of value 0.5.
+        assert len(uc._buffer) == int(SAMPLE_RATE * 0.5)  # noqa: SLF001
+        np.testing.assert_allclose(uc._buffer, 0.5, atol=1e-6)  # noqa: SLF001
+
+        # Feed a fresh chunk; the tail must remain intact and the new samples appended.
+        fresh = np.full(SAMPLE_RATE, 0.7, dtype=np.float32)
+        uc.feed_audio(fresh)
+        assert len(uc._buffer) == int(SAMPLE_RATE * 0.5) + SAMPLE_RATE  # noqa: SLF001
+        np.testing.assert_allclose(uc._buffer[: int(SAMPLE_RATE * 0.5)], 0.5, atol=1e-6)  # noqa: SLF001
+        np.testing.assert_allclose(uc._buffer[int(SAMPLE_RATE * 0.5) :], 0.7, atol=1e-6)  # noqa: SLF001
+
     def test_reset_buffer(self):
         fake = FakeTranscriber()
         uc = TranscribeAudioUseCase(transcriber=fake, language='zh', chunk_duration=1.0)
