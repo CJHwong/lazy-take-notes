@@ -12,7 +12,10 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import de
 APP_CONFIG_DEFAULTS: dict = {
     'transcription': {
         'model': 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin',
-        'models': {'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'},
+        'models': {
+            'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin',
+            'zh-min-nan': 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin',
+        },
         'chunk_duration': 25.0,
         'overlap': 1.0,
         'silence_threshold': 0.01,
