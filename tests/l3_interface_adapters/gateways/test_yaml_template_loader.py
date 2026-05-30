@@ -29,6 +29,12 @@ class TestLoadBuiltinTemplate:
             assert qa.label
             assert qa.prompt_template
 
+    def test_load_default_zh_min_nan(self):
+        tmpl = YamlTemplateLoader().load('default_zh_min_nan')
+        assert tmpl.metadata.locale == 'zh-min-nan'
+        assert len(tmpl.quick_actions) >= 1
+        assert '{line_count}' in tmpl.digest_user_template
+
     def test_digest_templates_have_placeholders(self, default_template: SessionTemplate):
         assert '{line_count}' in default_template.digest_user_template
         assert '{new_lines}' in default_template.digest_user_template

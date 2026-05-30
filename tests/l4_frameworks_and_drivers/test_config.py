@@ -17,7 +17,10 @@ class TestBuildAppConfig:
     def test_defaults_produce_valid_config(self):
         cfg = build_app_config({})
         assert cfg.transcription.model == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
-        assert cfg.transcription.models == {'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'}
+        assert cfg.transcription.models == {
+            'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin',
+            'zh-min-nan': 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin',
+        }
         assert cfg.transcription.chunk_duration == 25.0
         assert cfg.transcription.overlap == 1.0
         assert cfg.transcription.silence_threshold == 0.01
@@ -43,6 +46,7 @@ class TestBuildAppConfig:
         assert cfg.transcription.model == 'custom-model'
         assert cfg.transcription.models == {
             'zh': 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin',
+            'zh-min-nan': 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin',
             'ja': 'ja-model',
         }
         assert cfg.transcription.chunk_duration == 25.0  # default preserved
@@ -54,6 +58,21 @@ class TestBuildAppConfig:
         cfg = build_app_config({'transcription': {'model': 'large-v3-turbo-q8_0', 'models': {'zh': 'breeze-q8'}}})
         assert cfg.transcription.model == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
         assert cfg.transcription.models['zh'] == 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+
+    def test_breeze26_alias_expanded_to_hf_uri(self):
+        """breeze26 alias for a zh-min-nan locale gets converted to its hf:// URI."""
+        cfg = build_app_config({'transcription': {'models': {'zh-min-nan': 'breeze26'}}})
+        assert cfg.transcription.models['zh-min-nan'] == 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin'
+
+    def test_min_nan_locale_routes_to_breeze26_not_breeze25(self):
+        """zh-min-nan matches its full key before falling back to the zh prefix (Breeze-ASR-25)."""
+        cfg = build_app_config({})
+        assert cfg.transcription.model_for_locale('zh-min-nan') == (
+            'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin'
+        )
+        assert cfg.transcription.model_for_locale('zh-TW') == (
+            'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+        )
 
     def test_unknown_model_name_passes_through(self):
         """Non-alias model names (custom paths, unknown names) are left unchanged."""

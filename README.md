@@ -100,7 +100,8 @@ recognition_hints:                  # global hints for the speech recogniser
 transcription:
   model: "large-v3-turbo-q8_0"    # default whisper model
   models:                         # per-locale overrides
-    zh: "breeze-q8"               # Breeze ASR, optimized for Traditional Chinese
+    zh: "breeze25-q8"             # Breeze-ASR-25, Mandarin / Traditional Chinese
+    zh-min-nan: "breeze26"        # Breeze-ASR-26, Taiwanese Hokkien (台語)
   chunk_duration: 25.0
   overlap: 1.0
   silence_threshold: 0.01
@@ -152,6 +153,16 @@ uv run lint-imports      # check layer contracts
 ```
 
 Architecture details are in [AGENTS.md](AGENTS.md). To build your own source plugin, see the [Plugin Development Guide](docs/PLUGINS.md).
+
+## Credits
+
+Speech recognition is powered by these open models. Thanks to their authors:
+
+- **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** by Georgi Gerganov: the inference runtime, plus OpenAI's [Whisper](https://github.com/openai/whisper) `large-v3-turbo` (MIT) used by default.
+- **[Breeze-ASR-25](https://huggingface.co/MediaTek-Research/Breeze-ASR-25)** by MediaTek Research (Apache-2.0): fine-tuned from `whisper-large-v2` for Mandarin / Traditional Chinese. whisper.cpp build by [alan314159](https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp).
+- **[Breeze-ASR-26](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)** by MediaTek Research (Apache-2.0): Taiwanese Hokkien (台語), GGML build by [phate334](https://huggingface.co/phate334/Breeze-ASR-26-GGML).
+
+Digests and quick actions run on a local LLM via [Ollama](https://ollama.com) (default `gpt-oss:20b`) or any OpenAI-compatible API.
 
 ## License
 
