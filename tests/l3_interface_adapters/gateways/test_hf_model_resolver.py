@@ -9,7 +9,7 @@ import pytest
 
 from lazy_take_notes.l1_entities.errors import ModelResolutionError
 from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (
-    BREEZE_VARIANTS,
+    BREEZE25_VARIANTS,
     WHISPER_CPP_MODELS,
     HfModelResolver,
     _make_progress_class,  # noqa: PLC2701 -- testing private helper
@@ -35,10 +35,10 @@ class TestHfModelResolver:
         assert result == 'some-custom-model'
 
     def test_breeze_variants_are_recognized(self):
-        for name in BREEZE_VARIANTS:
+        for name in BREEZE25_VARIANTS:
             # Should not raise — will either return cached path or attempt HF download
             # We just verify it doesn't fall through to passthrough
-            assert name in BREEZE_VARIANTS
+            assert name in BREEZE25_VARIANTS
 
     def test_whisper_cpp_models_are_recognized(self):
         for name in WHISPER_CPP_MODELS:
@@ -141,8 +141,18 @@ class TestProgressClass:
 
 
 class TestExpandModelAlias:
-    def test_breeze_alias_expands(self):
+    def test_breeze25_alias_expands(self):
+        assert expand_model_alias('breeze25-q8') == 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+
+    def test_breeze_legacy_alias_still_expands(self):
+        """Pre-rename 'breeze-q8' must keep resolving for existing user configs."""
         assert expand_model_alias('breeze-q8') == 'hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin'
+
+    def test_breeze26_alias_expands(self):
+        assert expand_model_alias('breeze26') == 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin'
+
+    def test_breeze26_q5_alias_expands(self):
+        assert expand_model_alias('breeze26-q5') == 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q5_0.bin'
 
     def test_whisper_cpp_alias_expands(self):
         assert expand_model_alias('large-v3-turbo-q8_0') == 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'
@@ -241,6 +251,23 @@ class TestCacheHit:
             result = resolver.resolve('breeze-q8')
 
         mock_download.assert_called_once()
+        assert 'ggml-model-q8_0.bin' in result
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')
+    def test_breeze26_downloads_from_phate334_repo(self, mock_download, tmp_path):
+        mock_download.return_value = str(tmp_path / 'models' / 'breeze26' / 'ggml-model-q8_0.bin')
+
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.MODELS_DIR',
+            str(tmp_path / 'models'),
+        ):
+            resolver = HfModelResolver()
+            result = resolver.resolve('breeze26')
+
+        mock_download.assert_called_once()
+        assert mock_download.call_args.kwargs['repo_id'] == 'phate334/Breeze-ASR-26-GGML'
+        assert mock_download.call_args.kwargs['filename'] == 'ggml-model-q8_0.bin'
+        assert 'breeze26' in str(mock_download.call_args.kwargs['local_dir'])
         assert 'ggml-model-q8_0.bin' in result
 
     @patch('lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver.hf_hub_download')

@@ -10,12 +10,26 @@ from pywhispercpp.constants import MODELS_DIR
 
 from lazy_take_notes.l1_entities.errors import ModelResolutionError
 
-BREEZE_REPO = 'alan314159/Breeze-ASR-25-whispercpp'
-BREEZE_VARIANTS = {
+BREEZE25_REPO = 'alan314159/Breeze-ASR-25-whispercpp'
+BREEZE25_VARIANTS = {
+    'breeze25': 'ggml-model.bin',
+    'breeze25-q8': 'ggml-model-q8_0.bin',
+    'breeze25-q5': 'ggml-model-q5_k.bin',
+    'breeze25-q4': 'ggml-model-q4_k.bin',
+    # Back-compat: pre-26 aliases, before breeze26 forced the version suffix.
     'breeze': 'ggml-model.bin',
     'breeze-q8': 'ggml-model-q8_0.bin',
     'breeze-q5': 'ggml-model-q5_k.bin',
     'breeze-q4': 'ggml-model-q4_k.bin',
+}
+
+# Breeze-ASR-26: Taiwanese Hokkien (zh-min-nan) fine-tune.
+BREEZE26_REPO = 'phate334/Breeze-ASR-26-GGML'
+BREEZE26_VARIANTS = {
+    'breeze26': 'ggml-model-q8_0.bin',
+    'breeze26-q8': 'ggml-model-q8_0.bin',
+    'breeze26-q5': 'ggml-model-q5_0.bin',
+    'breeze26-q4': 'ggml-model-q4_0.bin',
 }
 
 WHISPER_CPP_REPO = 'ggerganov/whisper.cpp'
@@ -36,8 +50,10 @@ WHISPER_CPP_MODELS = {
 
 def expand_model_alias(name: str) -> str:
     """Convert a short alias to its ``hf://`` URI. Unknown names pass through."""
-    if name in BREEZE_VARIANTS:
-        return f'hf://{BREEZE_REPO}/{BREEZE_VARIANTS[name]}'
+    if name in BREEZE25_VARIANTS:
+        return f'hf://{BREEZE25_REPO}/{BREEZE25_VARIANTS[name]}'
+    if name in BREEZE26_VARIANTS:
+        return f'hf://{BREEZE26_REPO}/{BREEZE26_VARIANTS[name]}'
     if name in WHISPER_CPP_MODELS:
         return f'hf://{WHISPER_CPP_REPO}/{WHISPER_CPP_MODELS[name]}'
     return name
@@ -96,8 +112,11 @@ class HfModelResolver:
         if model_name.startswith('hf://'):
             return _download_hf_uri(model_name, tqdm_class=tqdm_class)
 
-        if model_name in BREEZE_VARIANTS:
-            return _download_breeze(model_name, tqdm_class=tqdm_class)
+        if model_name in BREEZE25_VARIANTS:
+            return _download_breeze25(model_name, tqdm_class=tqdm_class)
+
+        if model_name in BREEZE26_VARIANTS:
+            return _download_breeze26(model_name, tqdm_class=tqdm_class)
 
         if model_name in WHISPER_CPP_MODELS:
             return _download_whisper_cpp(model_name, tqdm_class=tqdm_class)
@@ -132,11 +151,21 @@ def _download_hf_uri(uri: str, *, tqdm_class: type | None = None) -> str:
     return _download_from_hf(repo_id, filename, cache_dir, tqdm_class=tqdm_class)
 
 
-def _download_breeze(name: str, *, tqdm_class: type | None = None) -> str:
+def _download_breeze25(name: str, *, tqdm_class: type | None = None) -> str:
     return _download_from_hf(
-        BREEZE_REPO,
-        BREEZE_VARIANTS[name],
+        BREEZE25_REPO,
+        BREEZE25_VARIANTS[name],
+        # Cache subdir stays 'breeze' so pre-rename downloads aren't orphaned.
         Path(MODELS_DIR) / 'breeze',
+        tqdm_class=tqdm_class,
+    )
+
+
+def _download_breeze26(name: str, *, tqdm_class: type | None = None) -> str:
+    return _download_from_hf(
+        BREEZE26_REPO,
+        BREEZE26_VARIANTS[name],
+        Path(MODELS_DIR) / 'breeze26',
         tqdm_class=tqdm_class,
     )
 
