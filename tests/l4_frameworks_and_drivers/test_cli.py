@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -40,6 +42,15 @@ _WELCOME_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_pic
 
 _CLI = 'lazy_take_notes.l4_frameworks_and_drivers.cli'
 _CLI_HELPERS = 'lazy_take_notes.l4_frameworks_and_drivers.cli_helpers'
+
+
+@pytest.fixture(autouse=True)
+def _no_caffeinate(monkeypatch):
+    """Never spawn the real `caffeinate` inhibitor during CLI tests."""
+    monkeypatch.setattr(
+        'lazy_take_notes.l4_frameworks_and_drivers.keep_awake.inhibit_sleep',
+        lambda: None,
+    )
 
 
 class TestMakeSessionDir:
@@ -592,6 +603,411 @@ class TestViewSubcommand:
             runner.invoke(cli, ['view'])
 
         mock_app_cls.return_value.run.assert_called_once()
+
+
+def _make_session(base_dir: Path, name: str, *, notes: str | None = None, transcript: str = 'hello\n') -> Path:
+    session_dir = base_dir / name
+    session_dir.mkdir(parents=True)
+    (session_dir / 'transcript.txt').write_text(transcript, encoding='utf-8')
+    if notes is not None:
+        (session_dir / 'notes.md').write_text(notes, encoding='utf-8')
+    return session_dir
+
+
+def _invoke_read(args: list[str], base_dir: Path):
+    runner = CliRunner()
+    with (
+        patch(_YAML_CFG) as mock_config_cls,
+        patch(_YAML_TPL),
+        patch(_BUILD) as mock_build,
+        patch(_INFRA),
+    ):
+        mock_config_cls.return_value.load.return_value = {}
+        mock_build.return_value = MagicMock(output=MagicMock(directory=str(base_dir)))
+        return runner.invoke(cli, args)
+
+
+class TestReadCommands:
+    def test_ls_empty(self, tmp_path: Path):
+        result = _invoke_read(['ls'], tmp_path)
+        assert result.exit_code == 0
+        assert 'No sessions found.' in result.output
+
+    def test_ls_lists_newest_first(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000')
+        _make_session(tmp_path, '2026-02-21_120000', notes='# Notes')
+
+        result = _invoke_read(['ls'], tmp_path)
+
+        assert result.exit_code == 0
+        lines = result.output.strip().splitlines()
+        assert '2026-02-21_120000' in lines[0]
+        assert 'notes' in lines[0]
+        assert '2026-02-20_120000' in lines[1]
+
+    def test_ls_json(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-21_120000', notes='# Notes')
+
+        result = _invoke_read(['ls', '--json'], tmp_path)
+
+        assert result.exit_code == 0
+        payload = json.loads(result.output)
+        assert payload[0]['name'] == '2026-02-21_120000'
+        assert payload[0]['has_notes'] is True
+
+    def test_ls_caps_at_twenty_by_default(self, tmp_path: Path):
+        for day in range(1, 23):  # 22 sessions
+            _make_session(tmp_path, f'2026-06-{day:02d}_120000')
+
+        result = _invoke_read(['ls'], tmp_path)
+
+        assert result.exit_code == 0
+        # Newest 20 shown (days 22..03); the two oldest hidden.
+        assert '2026-06-22_120000' in result.output
+        assert '2026-06-01_120000' not in result.output
+        assert '2026-06-02_120000' not in result.output
+        assert '... 2 more' in result.stderr
+
+    def test_ls_all_shows_everything(self, tmp_path: Path):
+        for day in range(1, 23):
+            _make_session(tmp_path, f'2026-06-{day:02d}_120000')
+
+        result = _invoke_read(['ls', '--all'], tmp_path)
+
+        assert result.exit_code == 0
+        assert '2026-06-01_120000' in result.output
+        assert 'more' not in result.stderr
+
+    def test_ls_json_is_unlimited(self, tmp_path: Path):
+        for day in range(1, 23):
+            _make_session(tmp_path, f'2026-06-{day:02d}_120000')
+
+        result = _invoke_read(['ls', '--json'], tmp_path)
+
+        assert result.exit_code == 0
+        assert len(json.loads(result.output)) == 22
+
+    def test_transcript_defaults_to_newest(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000', transcript='old\n')
+        _make_session(tmp_path, '2026-02-21_120000', transcript='newest transcript\n')
+
+        result = _invoke_read(['transcript'], tmp_path)
+
+        assert result.exit_code == 0
+        assert result.output == 'newest transcript\n'
+
+    def test_transcript_by_exact_name(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000_a', transcript='AAA\n')
+        _make_session(tmp_path, '2026-02-21_120000_b', transcript='BBB\n')
+
+        result = _invoke_read(['transcript', '2026-02-20_120000_a'], tmp_path)
+
+        assert result.exit_code == 0
+        assert result.output == 'AAA\n'
+
+    def test_transcript_by_substring(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000_standup', transcript='standup notes\n')
+        _make_session(tmp_path, '2026-02-21_120000_retro', transcript='retro notes\n')
+
+        result = _invoke_read(['transcript', 'standup'], tmp_path)
+
+        assert result.exit_code == 0
+        assert result.output == 'standup notes\n'
+
+    def test_transcript_no_sessions_errors(self, tmp_path: Path):
+        result = _invoke_read(['transcript'], tmp_path)
+        assert result.exit_code != 0
+        assert 'No sessions found.' in result.output
+
+    def test_transcript_ambiguous_errors(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000_sync')
+        _make_session(tmp_path, '2026-02-21_120000_sync')
+
+        result = _invoke_read(['transcript', 'sync'], tmp_path)
+
+        assert result.exit_code != 0
+        assert 'multiple sessions' in result.output
+
+    def test_transcript_no_match_errors(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-20_120000')
+
+        result = _invoke_read(['transcript', 'nope'], tmp_path)
+
+        assert result.exit_code != 0
+        assert 'No session matching' in result.output
+
+    def test_notes_defaults_to_newest(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-21_120000', notes='# Summary\nDone.')
+
+        result = _invoke_read(['notes'], tmp_path)
+
+        assert result.exit_code == 0
+        assert result.output == '# Summary\nDone.'
+
+    def test_notes_missing_errors(self, tmp_path: Path):
+        _make_session(tmp_path, '2026-02-21_120000')
+
+        result = _invoke_read(['notes'], tmp_path)
+
+        assert result.exit_code != 0
+        assert 'has no notes' in result.output
+
+
+_HEADLESS = 'lazy_take_notes.l4_frameworks_and_drivers.headless'
+
+
+class TestHeadlessFlag:
+    def test_record_headless_requires_language(self, tmp_path: Path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ['record', '--headless'])
+        assert result.exit_code != 0
+        assert 'requires --language' in result.output
+
+    def test_record_headless_custom_template(self, tmp_path: Path):
+        runner = CliRunner()
+        with patch(f'{_HEADLESS}.run_record_headless') as mock_run:
+            result = runner.invoke(cli, ['record', '--headless', '--template', 'sprint_retro_en'])
+        assert result.exit_code == 0
+        assert mock_run.call_args.kwargs['template_name'] == 'sprint_retro_en'
+
+    def test_record_headless_language(self, tmp_path: Path):
+        runner = CliRunner()
+        with patch(f'{_HEADLESS}.run_record_headless') as mock_run:
+            result = runner.invoke(cli, ['record', '--headless', '--language', 'zh-TW'])
+        assert result.exit_code == 0
+        assert mock_run.call_args.kwargs['language'] == 'zh-TW'
+
+    def test_record_headless_mute_mic(self, tmp_path: Path):
+        runner = CliRunner()
+        with patch(f'{_HEADLESS}.run_record_headless') as mock_run:
+            result = runner.invoke(cli, ['record', '--headless', '--language', 'en', '--mute-mic'])
+        assert result.exit_code == 0
+        assert mock_run.call_args.kwargs['mute_mic'] is True
+
+    def test_template_and_language_are_mutually_exclusive(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ['record', '--template', 'default_en', '--language', 'en'])
+        assert result.exit_code != 0
+        assert 'not both' in result.output
+
+    def test_record_mute_mic_tui(self, tmp_path: Path):
+        runner = CliRunner()
+        mock_picker = MagicMock()
+        mock_picker.run.return_value = ('default_en', MagicMock())
+        mock_template_loader = MagicMock()
+        mock_template_loader.load.return_value = MagicMock(
+            metadata=MagicMock(locale='en-US'), quick_actions=[], recognition_hints=[]
+        )
+        with (
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL, return_value=mock_template_loader),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_PICKER, return_value=mock_picker),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
+            patch(f'{_CLI_HELPERS}.preflight_microphone'),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp'),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer') as mock_container_cls,
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, ['record', '--mute-mic'])
+
+        assert result.exit_code == 0
+        assert mock_container_cls.return_value.audio_source.mic_muted is True
+
+    def test_transcribe_headless_routes_to_runner(self, tmp_path: Path):
+        runner = CliRunner()
+        audio = tmp_path / 'a.wav'
+        audio.touch()
+        with patch(f'{_HEADLESS}.run_transcribe_headless') as mock_run:
+            result = runner.invoke(cli, ['transcribe', '--headless', str(audio), '--language', 'en'])
+        assert result.exit_code == 0
+        assert mock_run.call_args.kwargs['audio_path'] == audio
+        assert mock_run.call_args.kwargs['language'] == 'en'
+
+    def test_transcribe_headless_without_file_errors(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ['transcribe', '--headless'])
+        assert result.exit_code != 0
+        assert 'requires an audio file' in result.output
+
+    def test_transcribe_headless_requires_language(self, tmp_path: Path):
+        runner = CliRunner()
+        audio = tmp_path / 'a.wav'
+        audio.touch()
+        result = runner.invoke(cli, ['transcribe', '--headless', str(audio)])
+        assert result.exit_code != 0
+        assert 'requires --language' in result.output
+
+
+def _write_status(
+    base_dir: Path,
+    name: str,
+    *,
+    state: str = 'recording',
+    pid: int | None = None,
+    segment_count: int = 3,
+    digest_count: int = 1,
+    error: str = '',
+) -> Path:
+    from lazy_take_notes.l1_entities.session_status import SessionStatus
+    from lazy_take_notes.l3_interface_adapters.gateways.session_status import write_status
+
+    session_dir = base_dir / name
+    session_dir.mkdir(parents=True)
+    write_status(
+        session_dir,
+        SessionStatus(
+            state=state,
+            pid=os.getpid() if pid is None else pid,
+            started_at='2026-06-06T09:00:00',
+            updated_at='2026-06-06T09:01:00',
+            segment_count=segment_count,
+            digest_count=digest_count,
+            error=error,
+        ),
+    )
+    return session_dir
+
+
+class TestStatusCommand:
+    def test_shows_newest_session(self, tmp_path: Path):
+        _write_status(tmp_path, '2026-06-01_090000', segment_count=1)
+        _write_status(tmp_path, '2026-06-05_140000', segment_count=9)
+
+        result = _invoke_read(['status'], tmp_path)
+
+        assert result.exit_code == 0
+        assert '2026-06-05_140000' in result.output
+        assert 'segments: 9' in result.output
+        assert f'pid:      {os.getpid()}' in result.output
+
+    def test_crashed_session_flagged(self, tmp_path: Path):
+        _write_status(tmp_path, '2026-06-05_140000', state='recording', pid=2_000_000_000)
+
+        result = _invoke_read(['status'], tmp_path)
+
+        assert result.exit_code == 0
+        assert 'crashed' in result.output
+
+    def test_no_session_errors(self, tmp_path: Path):
+        result = _invoke_read(['status'], tmp_path)
+        assert result.exit_code != 0
+        assert 'No headless session found.' in result.output
+
+    def test_status_by_name(self, tmp_path: Path):
+        _write_status(tmp_path, '2026-06-01_090000', segment_count=1)
+        _write_status(tmp_path, '2026-06-05_140000', segment_count=9)
+
+        result = _invoke_read(['status', '2026-06-01_090000'], tmp_path)
+
+        assert result.exit_code == 0
+        assert 'segments: 1' in result.output
+
+    def test_status_corrupt_file_errors(self, tmp_path: Path):
+        from lazy_take_notes.l3_interface_adapters.gateways.session_status import STATUS_FILE
+
+        session_dir = tmp_path / '2026-06-05_140000'
+        session_dir.mkdir()
+        (session_dir / STATUS_FILE).write_text('{not json', encoding='utf-8')
+
+        result = _invoke_read(['status'], tmp_path)
+
+        assert result.exit_code != 0
+        assert 'missing or unreadable' in result.output
+
+    def test_error_state_shown(self, tmp_path: Path):
+        _write_status(tmp_path, '2026-06-05_140000', state='error', error='boom')
+
+        result = _invoke_read(['status'], tmp_path)
+
+        assert result.exit_code == 0
+        assert 'error:    boom' in result.output
+
+
+class TestTemplateSelection:
+    def _loader(self):
+        from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import YamlTemplateLoader
+
+        return YamlTemplateLoader()
+
+    def test_resolve_language_match(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import resolve_language
+
+        template = resolve_language(self._loader(), 'zh-TW')
+        assert template.metadata.key == 'default_zh_tw'
+        assert template.metadata.locale == 'zh-TW'
+
+    def test_resolve_language_is_case_insensitive(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import resolve_language
+
+        assert resolve_language(self._loader(), 'EN').metadata.key == 'default_en'
+
+    def test_resolve_language_unsupported_stops(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import resolve_language
+
+        with pytest.raises(click.ClickException, match='Unsupported language'):
+            resolve_language(self._loader(), 'xx')
+
+    def test_resolve_language_primary_subtag_fallback(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import resolve_language
+
+        # en-US has no exact template; falls back to the unambiguous primary subtag 'en'.
+        assert resolve_language(self._loader(), 'en-US').metadata.key == 'default_en'
+
+    def test_resolve_language_ambiguous_subtag_stops(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import resolve_language
+
+        # 'zh' matches both zh-TW and zh-min-nan -> ambiguous -> fail loud.
+        with pytest.raises(click.ClickException, match='Unsupported language'):
+            resolve_language(self._loader(), 'zh')
+
+    def test_load_template_key_valid(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import load_template_key
+
+        assert load_template_key(self._loader(), 'sprint_retro_en').metadata.key == 'sprint_retro_en'
+
+    def test_load_template_key_unknown_stops(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import load_template_key
+
+        with pytest.raises(click.ClickException, match='Unknown template'):
+            load_template_key(self._loader(), 'no_such_template')
+
+    def test_select_template_prefers_language(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import select_template
+
+        template = select_template(self._loader(), template_name=None, language='en', show_builtins=True)
+        assert template.metadata.key == 'default_en'
+
+    def test_select_template_by_key(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import select_template
+
+        template = select_template(self._loader(), template_name='lecture_notes_en', language=None, show_builtins=True)
+        assert template.metadata.key == 'lecture_notes_en'
+
+    def test_select_template_falls_back_to_picker(self, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers import cli_helpers as ch
+
+        sentinel = object()
+        monkeypatch.setattr(ch, 'pick_template', lambda loader, show_builtins: sentinel)
+        result = ch.select_template(self._loader(), template_name=None, language=None, show_builtins=True)
+        assert result is sentinel
+
+    def test_set_mic_muted_on_supporting_source(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import set_mic_muted
+
+        class _Src:
+            mic_muted = False
+
+        src = _Src()
+        set_mic_muted(src, True)
+        assert src.mic_muted is True
+
+    def test_set_mic_muted_noop_without_attr(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import set_mic_muted
+
+        set_mic_muted(object(), True)  # must not raise
 
 
 class TestLoadPlugins:
