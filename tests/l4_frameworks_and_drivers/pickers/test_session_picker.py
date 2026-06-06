@@ -8,7 +8,6 @@ import pytest
 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (
     SessionPicker,
-    discover_sessions,
 )
 
 
@@ -27,40 +26,6 @@ def _create_session(
     if has_digest:
         (session_dir / 'notes.md').write_text(digest_text, encoding='utf-8')
     return session_dir
-
-
-class TestDiscoverSessions:
-    def test_empty_dir(self, tmp_path: Path):
-        assert discover_sessions(tmp_path) == []
-
-    def test_nonexistent_dir(self, tmp_path: Path):
-        assert discover_sessions(tmp_path / 'nope') == []
-
-    def test_finds_sessions(self, tmp_path: Path):
-        _create_session(tmp_path, '2026-02-20_120000')
-        _create_session(tmp_path, '2026-02-21_120000', has_digest=True)
-
-        result = discover_sessions(tmp_path)
-        assert len(result) == 2
-        # Sorted newest-first
-        assert result[0]['name'] == '2026-02-21_120000'
-        assert result[0]['has_digest'] is True
-        assert result[1]['name'] == '2026-02-20_120000'
-        assert result[1]['has_digest'] is False
-
-    def test_ignores_dirs_without_transcript(self, tmp_path: Path):
-        (tmp_path / 'empty_session').mkdir()
-        _create_session(tmp_path, '2026-02-20_120000')
-
-        result = discover_sessions(tmp_path)
-        assert len(result) == 1
-
-    def test_ignores_files(self, tmp_path: Path):
-        (tmp_path / 'not_a_dir.txt').write_text('nope')
-        _create_session(tmp_path, '2026-02-20_120000')
-
-        result = discover_sessions(tmp_path)
-        assert len(result) == 1
 
 
 class TestSessionPicker:

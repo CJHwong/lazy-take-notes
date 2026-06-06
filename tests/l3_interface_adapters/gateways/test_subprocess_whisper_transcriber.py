@@ -220,6 +220,8 @@ class TestSubprocessEntry:
         second_send = conn.send.call_args_list[1][0][0]
         assert second_send['status'] == 'ok'
         conn.close.assert_called_once()
+        # Detaches from the terminal's process group so Ctrl-C can't kill it mid-transcribe.
+        mock_os.setsid.assert_called_once()
 
     def test_init_failure_sends_error_and_closes(self):
         import lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber as sp_mod

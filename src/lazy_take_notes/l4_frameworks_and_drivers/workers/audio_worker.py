@@ -286,7 +286,7 @@ def run_audio_worker(
                         _zero_warned = True
                         log.warning('Audio signal is all-zero for 5s — source may be dead')
                         post_message(
-                            AudioWorkerStatus(status='warning', error='Audio signal lost — no sound from source')
+                            AudioWorkerStatus(status='warning', error='Audio signal lost: no sound from source')
                         )
                 else:
                     if _zero_warned and _consecutive_zero_chunks > 0:
