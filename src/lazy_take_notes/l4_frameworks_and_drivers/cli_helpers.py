@@ -137,6 +137,51 @@ def preflight_llm(infra, config) -> tuple[list[str], list[str]]:
     return missing_digest, missing_interactive
 
 
+def load_template_key(template_loader, key: str):
+    """Load a template by its exact key, or stop with the available keys listed."""
+    try:
+        return template_loader.load(key)
+    except FileNotFoundError:
+        available = ', '.join(t.key for t in template_loader.list_templates())
+        raise click.ClickException(f'Unknown template {key!r}. Available: {available}') from None
+
+
+def resolve_language(template_loader, language: str):
+    """Return the default template for a locale, or stop if the language is unsupported.
+
+    Matches the full locale first (e.g. ``zh-TW``), then falls back to the
+    primary subtag when unambiguous (so ``en-US`` -> ``en``). Stays fail-loud:
+    an unknown or ambiguous language (e.g. ``zh`` with both zh-TW and zh-min-nan)
+    raises with the available list.
+    """
+    defaults = {t.locale.lower(): t for t in template_loader.list_templates() if t.key.startswith('default_')}
+    key = language.lower()
+    meta = defaults.get(key)
+    if meta is None:
+        primary = key.split('-')[0]
+        subtag_matches = [m for locale, m in defaults.items() if locale.split('-')[0] == primary]
+        meta = subtag_matches[0] if len(subtag_matches) == 1 else None
+    if meta is None:
+        available = ', '.join(sorted(t.locale for t in defaults.values()))
+        raise click.ClickException(f'Unsupported language {language!r}. Available: {available}')
+    return template_loader.load(meta.key)
+
+
+def select_template(template_loader, *, template_name, language, show_builtins):
+    """Resolve a template from --language / --template, or fall back to the picker."""
+    if language:
+        return resolve_language(template_loader, language)
+    if template_name:
+        return load_template_key(template_loader, template_name)
+    return pick_template(template_loader, show_builtins=show_builtins)
+
+
+def set_mic_muted(audio_source, muted: bool) -> None:
+    """Set mic-mute state on a source that supports it; no-op otherwise."""
+    if hasattr(audio_source, 'mic_muted'):
+        audio_source.mic_muted = muted
+
+
 def run_transcribe(
     ctx: click.Context,
     *,
@@ -145,6 +190,8 @@ def run_transcribe(
     label: str | None = None,
     llm_client: LLMClient | None = None,
     transcriber: Transcriber | None = None,
+    template_name: str | None = None,
+    language: str | None = None,
 ) -> None:
     """Run a complete transcription session — the high-level plugin entry point.
 
@@ -168,7 +215,9 @@ def run_transcribe(
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = load_config(config_path, output_dir)
 
-    template = pick_template(template_loader, show_builtins=infra.show_builtin_templates)
+    template = select_template(
+        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+    )
     if template is None:
         return
 
@@ -224,6 +273,9 @@ def run_record(
     llm_client: LLMClient | None = None,
     transcriber: Transcriber | None = None,
     audio_source: AudioSource | None = None,
+    template_name: str | None = None,
+    language: str | None = None,
+    mute_mic: bool = False,
 ) -> None:
     """Run a live recording session -- the high-level plugin entry point.
 
@@ -245,7 +297,9 @@ def run_record(
     output_dir = ctx.obj['output_dir']
     config, infra, template_loader = load_config(config_path, output_dir)
 
-    template = pick_template(template_loader, show_builtins=infra.show_builtin_templates)
+    template = select_template(
+        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+    )
     if template is None:
         return
 
@@ -265,6 +319,8 @@ def run_record(
         transcriber=transcriber,
         audio_source=audio_source,
     )
+    if mute_mic:
+        set_mic_muted(container.audio_source, True)
     app = RecordApp(
         config=config,
         template=template,
@@ -277,4 +333,10 @@ def run_record(
         missing_interactive_models=missing_interactive,
         label=label or '',
     )
-    app.run()
+
+    from lazy_take_notes.l4_frameworks_and_drivers.keep_awake import (  # noqa: PLC0415 -- deferred: not loaded on --help
+        keep_awake,
+    )
+
+    with keep_awake():
+        app.run()
