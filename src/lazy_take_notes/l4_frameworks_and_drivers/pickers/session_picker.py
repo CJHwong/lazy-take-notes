@@ -8,47 +8,24 @@ from textual.app import ComposeResult
 from textual.widgets import ListItem, Markdown, Static
 
 from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
+from lazy_take_notes.l3_interface_adapters.gateways.session_reader import (
+    SessionInfo,
+    list_sessions,
+)
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
     PickerListView,
     SearchablePicker,
 )
 
 
-def discover_sessions(sessions_dir: Path) -> list[dict]:
-    """Scan *sessions_dir* for session subdirs containing a transcript file.
-
-    Recognises both current and legacy filenames.
-
-    Returns a list of dicts sorted newest-first:
-      {'dir': Path, 'name': str, 'has_digest': bool}
-    """
-    if not sessions_dir.exists():
-        return []
-
-    results = []
-    for child in sorted(sessions_dir.iterdir(), reverse=True):
-        if not child.is_dir():
-            continue
-        if not TRANSCRIPT.resolve(child):
-            continue
-        results.append(
-            {
-                'dir': child,
-                'name': child.name,
-                'has_digest': NOTES.resolve(child) is not None,
-            }
-        )
-    return results
-
-
 class SessionItem(ListItem):
     """Selectable row representing a saved session."""
 
-    def __init__(self, session: dict) -> None:
+    def __init__(self, session: SessionInfo) -> None:
         super().__init__()
-        self.session_dir: Path = session['dir']
-        digest_badge = '  [green]\u2713 digest[/green]' if session['has_digest'] else '  [dim]no digest[/dim]'
-        self._label_text = f'{session["name"]}{digest_badge}'
+        self.session_dir: Path = session.dir
+        digest_badge = '  [green]\u2713 digest[/green]' if session.has_notes else '  [dim]no digest[/dim]'
+        self._label_text = f'{session.name}{digest_badge}'
 
     def compose(self) -> ComposeResult:
         yield Static(self._label_text, markup=True)
@@ -70,7 +47,7 @@ class SessionPicker(SearchablePicker[Path]):
     def __init__(self, sessions_dir: Path, **kwargs):
         super().__init__(**kwargs)
         self._sessions_dir = sessions_dir
-        self._sessions = discover_sessions(sessions_dir)
+        self._sessions = list_sessions(sessions_dir)
         self._current_session: Path | None = None
 
     def _make_list_view(self) -> _SessionListView:
@@ -94,7 +71,7 @@ class SessionPicker(SearchablePicker[Path]):
 
         first_item: SessionItem | None = None
         for session in self._sessions:
-            if query and query not in session['name'].lower():
+            if query and query not in session.name.lower():
                 continue
             item = SessionItem(session)
             list_view.append(item)
