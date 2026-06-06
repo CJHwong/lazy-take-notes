@@ -51,6 +51,10 @@ class CoreAudioTapSource:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
+            # Own session so a terminal Ctrl-C (SIGINT to the foreground group)
+            # doesn't kill the tap mid-read in headless mode. We stop it via
+            # close(); the TUI is unaffected (raw mode never sends SIGINT).
+            start_new_session=True,
         )
         log.info('coreaudio-tap started (pid=%d, binary=%s)', self._proc.pid, _BINARY)
         self._thread = threading.Thread(target=self._reader, daemon=True)

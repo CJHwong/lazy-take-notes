@@ -18,6 +18,14 @@ def _subprocess_entry(model_path: str, conn: Any) -> None:
     Permanently redirects C-level stdout/stderr to /dev/null so whisper.cpp's
     fprintf() calls do not escape to the parent TUI.
     """
+    # Detach into our own session so a terminal Ctrl-C (SIGINT to the foreground
+    # process group) can't kill this worker mid-transcribe in headless mode. The
+    # parent owns our shutdown via the None sentinel / terminate().
+    try:
+        os.setsid()
+    except OSError:  # pragma: no cover -- already a session leader (rare for spawn children)
+        pass
+
     devnull = os.open(os.devnull, os.O_WRONLY)
     os.dup2(devnull, 1)
     os.dup2(devnull, 2)
