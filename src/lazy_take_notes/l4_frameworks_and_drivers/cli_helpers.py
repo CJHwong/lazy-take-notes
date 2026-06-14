@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
+
 if TYPE_CHECKING:
     from lazy_take_notes.l1_entities.transcript import TranscriptSegment
     from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
@@ -192,7 +194,7 @@ def run_transcribe(
     transcriber: Transcriber | None = None,
     template_name: str | None = None,
     language: str | None = None,
-) -> None:
+) -> SessionArtifacts | None:
     """Run a complete transcription session — the high-level plugin entry point.
 
     Handles the entire flow: config loading → template picker → session
@@ -202,7 +204,9 @@ def run_transcribe(
     subtitle replay, or both (subtitle_segments takes priority, audio_path
     as fallback when segments are empty).
 
-    Returns normally if the user cancels the template picker.
+    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
+    can locate and post-process the output. Returns None if the user cancels
+    the template picker before a session is created.
     """
     from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         TranscribeApp,
@@ -219,7 +223,7 @@ def run_transcribe(
         template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
     )
     if template is None:
-        return
+        return None
 
     base_dir = resolve_base_dir(output_dir, config)
     out_dir = make_session_dir(base_dir, label)
@@ -251,6 +255,7 @@ def run_transcribe(
         label=label or '',
     )
     app.run()
+    return SessionArtifacts(session_dir=out_dir, notes_path=NOTES.resolve(out_dir))
 
 
 def preflight_microphone() -> None:
@@ -276,7 +281,7 @@ def run_record(
     template_name: str | None = None,
     language: str | None = None,
     mute_mic: bool = False,
-) -> None:
+) -> SessionArtifacts | None:
     """Run a live recording session -- the high-level plugin entry point.
 
     Handles the entire flow: config loading -> template picker -> session
@@ -285,6 +290,10 @@ def run_record(
 
     Plugin-supplied *llm_client*, *transcriber*, or *audio_source* override
     the defaults built by DependencyContainer.
+
+    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
+    can locate and post-process the output. Returns None if the user cancels
+    the template picker before a session is created.
     """
     from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         RecordApp,
@@ -301,7 +310,7 @@ def run_record(
         template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
     )
     if template is None:
-        return
+        return None
 
     base_dir = resolve_base_dir(output_dir, config)
     out_dir = make_session_dir(base_dir, label)
@@ -340,3 +349,4 @@ def run_record(
 
     with keep_awake():
         app.run()
+    return SessionArtifacts(session_dir=out_dir, notes_path=NOTES.resolve(out_dir))

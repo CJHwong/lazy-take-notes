@@ -25,6 +25,7 @@ Example::
 from __future__ import annotations
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
+from lazy_take_notes.l1_entities.session_files import SessionArtifacts
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse, LLMClient
@@ -41,6 +42,7 @@ __all__ = [
     'InfraConfig',
     'LLMClient',
     'ModelResolver',
+    'SessionArtifacts',
     'Transcriber',
     'TranscriptionBackend',
     'TranscriptSegment',

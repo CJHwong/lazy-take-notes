@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1132,3 +1133,102 @@ class TestPluginCommands:
         assert result.exit_code == 0
         assert 'plugin-a' in result.output
         assert 'plugin-b' in result.output
+
+
+class TestSessionEntryPointsReturnArtifacts:
+    """run_transcribe / run_record hand SessionArtifacts back to callers."""
+
+    def _ctx(self, output_dir: Path) -> click.Context:
+        ctx = click.Context(click.Command('x'))
+        ctx.obj = {'config_path': None, 'output_dir': str(output_dir)}
+        return ctx
+
+    def _enter_common(self, stack: ExitStack, out_dir: Path) -> None:
+        infra = MagicMock(show_builtin_templates=True)
+        for cm in (
+            patch(f'{_CLI_HELPERS}.load_config', return_value=(MagicMock(), infra, MagicMock())),
+            patch(f'{_CLI_HELPERS}.select_template', return_value=MagicMock()),
+            patch(f'{_CLI_HELPERS}.make_session_dir', return_value=out_dir),
+            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
+        ):
+            stack.enter_context(cm)
+
+    def test_run_transcribe_returns_artifacts_with_notes_path(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
+
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        notes = out_dir / NOTES.name
+        mock_app = MagicMock()
+        mock_app.run.side_effect = lambda: notes.write_text('# notes', encoding='utf-8')
+
+        with ExitStack() as stack:
+            self._enter_common(stack, out_dir)
+            stack.enter_context(
+                patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp', return_value=mock_app)
+            )
+            result = run_transcribe(self._ctx(tmp_path))
+
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path == notes
+
+    def test_run_transcribe_artifacts_notes_path_none_when_not_written(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import SessionArtifacts
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
+
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+
+        with ExitStack() as stack:
+            self._enter_common(stack, out_dir)
+            stack.enter_context(
+                patch(
+                    'lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp',
+                    return_value=MagicMock(),
+                )
+            )
+            result = run_transcribe(self._ctx(tmp_path))
+
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path is None
+
+    def test_run_transcribe_returns_none_on_template_cancel(self, tmp_path: Path):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
+
+        with (
+            patch(
+                f'{_CLI_HELPERS}.load_config',
+                return_value=(MagicMock(), MagicMock(show_builtin_templates=True), MagicMock()),
+            ),
+            patch(f'{_CLI_HELPERS}.select_template', return_value=None),
+        ):
+            result = run_transcribe(self._ctx(tmp_path))
+
+        assert result is None
+
+    def test_run_record_returns_artifacts_with_notes_path(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_record
+
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        notes = out_dir / NOTES.name
+        mock_app = MagicMock()
+        mock_app.run.side_effect = lambda: notes.write_text('# notes', encoding='utf-8')
+
+        with ExitStack() as stack:
+            self._enter_common(stack, out_dir)
+            stack.enter_context(patch(f'{_CLI_HELPERS}.preflight_microphone'))
+            stack.enter_context(patch('lazy_take_notes.l4_frameworks_and_drivers.keep_awake.keep_awake'))
+            stack.enter_context(
+                patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp', return_value=mock_app)
+            )
+            result = run_record(self._ctx(tmp_path))
+
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path == notes

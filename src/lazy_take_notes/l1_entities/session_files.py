@@ -26,3 +26,15 @@ TRANSCRIPT = SessionFile('transcript.txt', 'transcript_raw.txt')
 NOTES = SessionFile('notes.md', 'digest.md')
 CONTEXT = SessionFile('context.txt', 'session_context.txt')
 DEBUG_LOG = SessionFile('debug.log', 'ltn_debug.log')
+
+
+@dataclass(frozen=True)
+class SessionArtifacts:
+    """What a completed session produced, handed back to plugin callers.
+
+    Extend with new fields (transcript_path, context_path, digest_count, ...)
+    as use cases need them — callers keep working without a signature change.
+    """
+
+    session_dir: Path
+    notes_path: Path | None
