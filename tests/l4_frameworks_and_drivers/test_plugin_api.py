@@ -53,6 +53,11 @@ class TestPluginApiExports:
 
         assert InfraConfig is not None
 
+    def test_session_artifacts_importable(self):
+        from lazy_take_notes.plugin_api import SessionArtifacts
+
+        assert SessionArtifacts is not None
+
 
 class TestPluginApiSignatures:
     """Override kwargs are accepted by run_transcribe and run_record."""

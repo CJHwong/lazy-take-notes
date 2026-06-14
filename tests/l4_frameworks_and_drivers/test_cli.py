@@ -1135,8 +1135,8 @@ class TestPluginCommands:
         assert 'plugin-b' in result.output
 
 
-class TestSessionEntryPointsReturnNotesPath:
-    """run_transcribe / run_record hand the produced notes file back to callers."""
+class TestSessionEntryPointsReturnArtifacts:
+    """run_transcribe / run_record hand SessionArtifacts back to callers."""
 
     def _ctx(self, output_dir: Path) -> click.Context:
         ctx = click.Context(click.Command('x'))
@@ -1154,8 +1154,8 @@ class TestSessionEntryPointsReturnNotesPath:
         ):
             stack.enter_context(cm)
 
-    def test_run_transcribe_returns_notes_path_when_produced(self, tmp_path: Path):
-        from lazy_take_notes.l1_entities.session_files import NOTES
+    def test_run_transcribe_returns_artifacts_with_notes_path(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
 
         out_dir = tmp_path / 'session'
@@ -1171,9 +1171,12 @@ class TestSessionEntryPointsReturnNotesPath:
             )
             result = run_transcribe(self._ctx(tmp_path))
 
-        assert result == notes
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path == notes
 
-    def test_run_transcribe_returns_none_when_no_notes_written(self, tmp_path: Path):
+    def test_run_transcribe_artifacts_notes_path_none_when_not_written(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import SessionArtifacts
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
 
         out_dir = tmp_path / 'session'
@@ -1189,7 +1192,9 @@ class TestSessionEntryPointsReturnNotesPath:
             )
             result = run_transcribe(self._ctx(tmp_path))
 
-        assert result is None
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path is None
 
     def test_run_transcribe_returns_none_on_template_cancel(self, tmp_path: Path):
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_transcribe
@@ -1205,8 +1210,8 @@ class TestSessionEntryPointsReturnNotesPath:
 
         assert result is None
 
-    def test_run_record_returns_notes_path_when_produced(self, tmp_path: Path):
-        from lazy_take_notes.l1_entities.session_files import NOTES
+    def test_run_record_returns_artifacts_with_notes_path(self, tmp_path: Path):
+        from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_record
 
         out_dir = tmp_path / 'session'
@@ -1224,4 +1229,6 @@ class TestSessionEntryPointsReturnNotesPath:
             )
             result = run_record(self._ctx(tmp_path))
 
-        assert result == notes
+        assert isinstance(result, SessionArtifacts)
+        assert result.session_dir == out_dir
+        assert result.notes_path == notes
