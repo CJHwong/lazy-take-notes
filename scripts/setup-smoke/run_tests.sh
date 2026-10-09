@@ -29,7 +29,7 @@ echo ""
 echo -e "${BOLD}═══ Test 1: OpenAI provider ═══${RESET}"
 cleanup
 
-LTN_PROVIDER=openai LTN_OPENAI_KEY=sk-test-key-12345 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh
+LTN_PROVIDER=openai LTN_OPENAI_KEY=sk-test-key-12345 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh -y
 
 # Verify config.yaml was created with openai settings
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -60,7 +60,7 @@ echo ""
 echo -e "${BOLD}═══ Test 2: Ollama provider ═══${RESET}"
 cleanup
 
-LTN_PROVIDER=ollama LTN_SKIP_SIGNIN=1 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh
+LTN_PROVIDER=ollama LTN_SKIP_SIGNIN=1 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh -y
 
 # Verify config.yaml was created with ollama settings
 if [[ ! -f "$CONFIG_FILE" ]]; then
@@ -87,7 +87,7 @@ pass "take-note command exists and is executable"
 echo ""
 echo -e "${BOLD}═══ Test 3: Idempotency ═══${RESET}"
 
-LTN_PROVIDER=ollama LTN_SKIP_SIGNIN=1 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh
+LTN_PROVIDER=ollama LTN_SKIP_SIGNIN=1 LTN_ACCEPT_BREW=1 bash /home/testuser/setup.sh -y
 
 # config.yaml should still exist and be unchanged
 if ! grep -q 'llm_provider: "ollama"' "$CONFIG_FILE"; then

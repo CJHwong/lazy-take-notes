@@ -23,6 +23,8 @@ Run this in Terminal — it installs everything and sets up a `take-note` shortc
 curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash
 ```
 
+The script first warns that a piped script runs as you and asks `[Y/n]`. An agent or CI job has no terminal, so it passes `-y`: `curl ... | bash -s -- -y`.
+
 Then run `take-note record`.
 
 ### Manual install

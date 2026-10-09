@@ -32,6 +32,8 @@ This installs all dependencies, picks your AI provider, and creates a `take-note
 curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash
 ```
 
+The script first warns that it runs downloaded code as you, and asks you to confirm. Press Enter to continue, or type `n` to stop.
+
 After it finishes, skip to [Step 4](#4-first-run) — the script handles everything in between.
 
 ### Manual install

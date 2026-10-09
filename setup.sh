@@ -23,8 +23,41 @@ echo "  ║    lazy-take-notes setup   ║"
 echo "  ╚════════════════════════════╝"
 echo -e "${RESET}"
 
+# ── Risk prompt ──────────────────────────────────────────────────────────────
+# A piped install runs whatever the server sends, with your permissions, so ask
+# first. The answer comes from /dev/tty because stdin is the script itself.
+# Pass -y to skip it (for agents and CI).
+
+ASSUME_YES=0
+for arg in "$@"; do
+  case "$arg" in
+    -y|--yes) ASSUME_YES=1 ;;
+  esac
+done
+
+confirm_install() {
+  cat >&2 <<'EOF'
+WARNING: this installer downloads code from the internet and runs it as you.
+It can read, change, or delete anything your user account can.
+The server can send different code each time, so read the script first:
+  https://github.com/CJHwong/lazy-take-notes/blob/main/setup.sh
+Pass -y to skip this question (for agents and CI).
+EOF
+  if ! (: </dev/tty) 2>/dev/null; then
+    echo "setup.sh: no terminal to ask on; re-run with -y to accept the risk" >&2
+    exit 1
+  fi
+  printf 'Proceed? [Y/n] ' >&2
+  local answer=""
+  read -r answer </dev/tty || answer=""
+  case "$answer" in
+    n|N|no|No|NO) echo "setup.sh: aborted" >&2; exit 1 ;;
+  esac
+}
+[[ "$ASSUME_YES" == 1 ]] || confirm_install
+
 # ── Non-interactive mode (for CI / Docker) ───────────────────────────────────
-# Set LTN_PROVIDER=ollama or LTN_PROVIDER=openai to skip prompts.
+# Pass -y (above), then set LTN_PROVIDER=ollama or LTN_PROVIDER=openai to skip prompts.
 # For openai, also set LTN_OPENAI_KEY=sk-...
 # Set LTN_SKIP_SIGNIN=1 to skip the ollama signin step.
 
