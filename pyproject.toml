@@ -21,6 +21,7 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 dependencies = [
+    "certifi>=2026.10.23",
     # Pinned to 8.0.x: 8.2.7's Kitty keyboard-protocol support (PR #6544) breaks
     # CJK/IME composition in TextArea on some terminals. See git blame / PR.
     "textual>=8.0,<8.1",
