@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 import pytest
+from textual.widgets import ListView
 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker import (
     ModeItem,
     WelcomePicker,
 )
+
+
+def highlighted_mode(picker: WelcomePicker) -> str:
+    """Mode of the row the list is currently on."""
+    item = picker.query_one('#welcome-list', ListView).highlighted_child
+    assert isinstance(item, ModeItem)
+    return item.mode
 
 
 class TestWelcomePicker:
@@ -68,6 +76,36 @@ class TestWelcomePicker:
             await pilot.press('enter')
             await pilot.pause()
         assert picker.return_value == 'view'
+
+    @pytest.mark.asyncio
+    async def test_first_mode_highlighted_by_default(self):
+        picker = WelcomePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert highlighted_mode(picker) == 'record'
+
+    @pytest.mark.asyncio
+    async def test_initial_mode_moves_the_highlight(self):
+        picker = WelcomePicker(initial_mode='config')
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert highlighted_mode(picker) == 'config'
+
+    @pytest.mark.asyncio
+    async def test_initial_mode_is_what_enter_selects(self):
+        picker = WelcomePicker(initial_mode='create-template')
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+        assert picker.return_value == 'create-template'
+
+    @pytest.mark.asyncio
+    async def test_unknown_initial_mode_falls_back_to_first(self):
+        picker = WelcomePicker(initial_mode='not-a-mode')
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert highlighted_mode(picker) == 'record'
 
     @pytest.mark.asyncio
     async def test_theme_applied_on_mount(self):

@@ -16,6 +16,8 @@ _MODES = [
     ('config', 'Settings', 'Edit app configuration'),
 ]
 
+_MODE_INDEX = {mode: index for index, (mode, _, _) in enumerate(_MODES)}
+
 # Color palette
 _P = '#E8A820'  # pig body (golden yellow)
 _T = '#4A9E9E'  # teal headphones
@@ -119,6 +121,11 @@ class WelcomePicker(App[str | None]):
         Binding('enter', 'select_mode', 'Select', priority=True),
     ]
 
+    def __init__(self, initial_mode: str | None = None) -> None:
+        """Open with the highlight on *initial_mode*, so returning from a mode keeps its place."""
+        super().__init__()
+        self._initial_mode = initial_mode
+
     def compose(self) -> ComposeResult:
         yield Static(_BANNER_TEXT, id='welcome-banner', markup=True)
         yield ListView(
@@ -133,7 +140,9 @@ class WelcomePicker(App[str | None]):
 
     def on_mount(self) -> None:
         self.theme = load_theme()
-        self.query_one('#welcome-list', ListView).focus()
+        list_view = self.query_one('#welcome-list', ListView)
+        list_view.index = _MODE_INDEX.get(self._initial_mode or '', 0)
+        list_view.focus()
 
     def action_select_mode(self) -> None:
         lv = self.query_one('#welcome-list', ListView)
