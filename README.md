@@ -146,6 +146,34 @@ output/
     └── notes_003_final.md    # final digest on quit/stop
 ```
 
+## Desktop app (macOS)
+
+Build a `.app` that runs the TUI in its own window using [Trolley](https://github.com/weedonandscott/trolley) and [libghostty](https://github.com/ghostty-org/ghostty):
+
+```bash
+brew install weedonandscott/tap/trolley
+trolley run                        # build and launch
+trolley package --formats mac-app  # build .app only
+```
+
+The bundle ships a launcher script, not a frozen Python binary. On first launch it installs the app into a uv tool environment, then reuses that environment on every later launch. The target machine needs `uv`, plus the CLI prerequisites: `ffmpeg`, and either Ollama or an OpenAI-compatible endpoint. If `uv` is missing, the launcher prints the install command and exits.
+
+The bundle sets three environment variables in `trolley.toml`:
+
+| Variable | Value | Why |
+| --- | --- | --- |
+| `LTN_OUTPUT_DIR` | `~/Documents/LazyTakeNotes` | The default `./output` would land inside the bundle. |
+| `LTN_KIOSK` | `1` | Returns to the mode picker after a session instead of exiting. |
+| `TEXTUAL_DRIVER` | `...drivers.ghostty_driver:GhosttyDriver` | Turns off the Kitty keyboard protocol under Trolley. Leaving it on breaks arrow keys. |
+
+The launcher installs from `main` by default. A bundle built from an unmerged branch must point at that checkout, or the installed code will not match the driver the bundle expects:
+
+```bash
+LTN_DESKTOP_SOURCE=/path/to/lazy-take-notes trolley run
+```
+
+The produced `.app` is ad-hoc signed. Distributing it to another machine needs a Developer ID signature and notarization.
+
 ## Development
 
 ```bash

@@ -1,0 +1,76 @@
+#!/bin/sh
+# Launcher for the macOS desktop bundle.
+#
+# Trolley runs this from <App>.app/Contents/MacOS. It installs the app into a
+# uv tool environment on first run, then hands the terminal to it. Trolley owns
+# the window, the renderer, and the environment; this script owns the Python.
+#
+# Overrides:
+#   LTN_UV              path to the uv binary (wins over discovery)
+#   LTN_DESKTOP_SOURCE  source for `uv tool install`
+#                       (default: the published git repository)
+
+set -eu
+
+SOURCE="${LTN_DESKTOP_SOURCE:-git+https://github.com/CJHwong/lazy-take-notes.git}"
+
+# A Finder launch does not inherit the login shell PATH. Restore it before
+# looking for anything, so uv, ffmpeg, and ollama resolve like they do in a
+# terminal.
+if [ -x /usr/libexec/path_helper ]; then
+    eval "$(/usr/libexec/path_helper -s)" || true
+fi
+
+find_uv() {
+    if [ -n "${LTN_UV:-}" ]; then
+        if [ -x "$LTN_UV" ]; then
+            printf '%s\n' "$LTN_UV"
+            return 0
+        fi
+        printf 'LTN_UV is set to %s, which is not executable.\n' "$LTN_UV" >&2
+        return 1
+    fi
+
+    if uv_path=$(command -v uv 2>/dev/null); then
+        printf '%s\n' "$uv_path"
+        return 0
+    fi
+
+    # path_helper only covers /etc/paths. uv's installer and Homebrew live
+    # outside it.
+    for candidate in "$HOME/.local/bin/uv" /opt/homebrew/bin/uv /usr/local/bin/uv; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+if ! UV=$(find_uv); then
+    printf '%s\n' \
+        'uv is not installed, so Lazy Take Notes cannot start.' \
+        '' \
+        'Install it, then open the app again:' \
+        '' \
+        '    curl -LsSf https://astral.sh/uv/install.sh | sh' \
+        >&2
+    exit 1
+fi
+
+TOOLS_DIR=$("$UV" tool dir)
+APP_BIN="$TOOLS_DIR/lazy-take-notes/bin/lazy-take-notes"
+
+if [ ! -x "$APP_BIN" ]; then
+    printf 'Installing lazy-take-notes from %s (first run)...\n' "$SOURCE" >&2
+    "$UV" tool install --force --from "$SOURCE" lazy-take-notes
+fi
+
+if [ ! -x "$APP_BIN" ]; then
+    printf 'Install finished but %s is missing. Run `%s tool install --from %s lazy-take-notes` in a terminal to see why.\n' \
+        "$APP_BIN" "$UV" "$SOURCE" >&2
+    exit 1
+fi
+
+exec "$APP_BIN"

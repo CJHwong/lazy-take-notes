@@ -63,3 +63,6 @@ Thumbs.db
 
 # Procject-specific
 output/
+
+# Trolley build output (root only; scripts/trolley/ is source)
+/trolley/
