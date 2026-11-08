@@ -6,6 +6,16 @@ from textual.containers import Horizontal
 from textual.widgets import Static
 
 
+def format_spoken_time(seconds: float) -> str:
+    """Readable speech total: 42s, 4m58s, 1h12m."""
+    total = int(seconds)
+    if total >= 3600:
+        return f'{total // 3600}h{(total % 3600) // 60}m'
+    if total >= 60:
+        return f'{total // 60}m{total % 60}s'
+    return f'{total}s'
+
+
 class SpeakerBar(Horizontal):
     """Shows the session's speakers. A click opens a rename dialog."""
 
@@ -38,7 +48,7 @@ class SpeakerBar(Horizontal):
                 child.remove()
         for speaker, name, seconds in speakers:
             widget_id = f'speaker-{speaker}'
-            text = f'{name or f"S{speaker}"} {seconds:.0f}s'
+            text = f'{name or f"S{speaker}"} {format_spoken_time(seconds)}'
             existing = next((child for child in self.children if child.id == widget_id), None)
             if isinstance(existing, Static):
                 existing.update(text)

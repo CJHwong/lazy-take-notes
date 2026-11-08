@@ -15,7 +15,7 @@ from lazy_take_notes.l2_use_cases.generate_label_use_case import GenerateLabelUs
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.persistence import PersistenceGateway
 from lazy_take_notes.l2_use_cases.quick_action_use_case import RunQuickActionUseCase
-from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at
+from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_for_span
 
 log = logging.getLogger('ltn.controller')
 
@@ -62,7 +62,7 @@ class SessionController:
 
     def speaker_label(self, segment: TranscriptSegment) -> str | None:
         """Label for one segment: the mapped name, else S<n>, else None."""
-        speaker = speaker_at(self.speaker_turns, segment.wall_start)
+        speaker = speaker_for_span(self.speaker_turns, segment.wall_start, segment.wall_end)
         if speaker is None:
             return None
         return self.speaker_names.get(speaker) or f'S{speaker}'
