@@ -87,6 +87,7 @@ class RecordApp(BaseApp):
         bar.mode_label = 'Record'
         bar.silence_threshold = self._config.transcription.silence_threshold
         self._start_audio_worker()
+        self._start_diarization_worker()
         if not CONSENT_NOTICED_PATH.exists():
             self.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
 
@@ -103,6 +104,33 @@ class RecordApp(BaseApp):
             self._audio_worker_thread,
             thread=True,
             group='audio',
+        )
+
+    def _start_diarization_worker(self) -> None:  # pragma: no cover -- thin thread launcher; tested via the worker
+        cfg = self._config.diarization
+        if not cfg.enabled:
+            return
+        if not self._config.output.save_audio:
+            self.notify('Diarization needs save_audio: true in config.yaml', severity='warning', timeout=8)
+            return
+        self.run_worker(self._diarization_worker_thread, thread=True, group='diarization')
+
+    def _diarization_worker_thread(self):  # pragma: no cover -- thread body; tested independently
+        from lazy_take_notes.l3_interface_adapters.gateways.nemo_speech_diarizer import (  # noqa: PLC0415 -- deferred: loaded only when enabled
+            NemoSpeechDiarizer,
+        )
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.diarization_worker import (  # noqa: PLC0415 -- deferred
+            run_diarization_worker,
+        )
+
+        cfg = self._config.diarization
+        diarizer = NemoSpeechDiarizer(binary=cfg.binary or None, model=cfg.model or None, device=cfg.device)
+        run_diarization_worker(
+            post_message=self.post_message,
+            is_cancelled=lambda: self._audio_shutdown.is_set(),
+            audio_path=self._output_dir / 'recording.wav',
+            diarizer=diarizer,
+            interval_s=cfg.interval_s,
         )
 
     def _report_download_progress(self, percent: int) -> None:

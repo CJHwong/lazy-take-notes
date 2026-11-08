@@ -160,6 +160,25 @@ The session must contain `recording.wav` (set `save_audio: true`). The command w
 
 Labels are local to one session. `S1` in one meeting is not the same person as `S1` in another. Diarization runs offline: 20 minutes of audio took 3.7 s on Metal, and 61 minutes took 44 s on CPU.
 
+### Live speaker labels
+
+Set the same paths in `config.yaml` to label the transcript while it records:
+
+```yaml
+diarization:
+  enabled: true
+  binary: /path/to/nemo-speech
+  model: /path/to/Nemotron-3-Diarization.q8_0.gguf
+  device: auto        # auto, cpu, or metal
+  interval_s: 60      # one full pass over the audio so far
+output:
+  save_audio: true    # diarization reads the recording
+```
+
+A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript and is saved to `speakers.json`.
+
+Speaker numbers follow arrival order, so a label already on screen stays valid when a new voice joins. Each pass reads the whole recording, which is cheap: about 11 s per hour on Metal.
+
 ## Desktop app (macOS)
 
 Build a `.app` that runs the TUI in its own window using [Trolley](https://github.com/weedonandscott/trolley) and [libghostty](https://github.com/ghostty-org/ghostty):

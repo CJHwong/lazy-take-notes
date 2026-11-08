@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pyperclip
 from textual.binding import Binding
 from textual.widgets import RichLog, TextArea
@@ -35,6 +37,33 @@ class TranscriptPanel(RichLog):
             timestamp = format_wall_time(seg.wall_start)
             self._all_text.append(f'[{timestamp}] {seg.text}')
             self.write(f'[dim]\\[{timestamp}][/dim] {seg.text}')
+
+    def render_segments(
+        self,
+        segments: list[TranscriptSegment],
+        label_for: Callable[[TranscriptSegment], str | None] | None = None,
+    ) -> None:
+        """Rewrite the whole log, prefixing each line with a speaker label.
+
+        RichLog is append-only, so a diarization update redraws every line. Keep
+        auto-scroll only when the reader was already at the bottom.
+        """
+
+        def line_for(seg: TranscriptSegment) -> tuple[str, str]:
+            timestamp = format_wall_time(seg.wall_start)
+            label = label_for(seg) if label_for is not None else None
+            prefix = f'{label}: ' if label else ''
+            return f'[{timestamp}] {prefix}{seg.text}', f'[dim]\\[{timestamp}][/dim] {prefix}{seg.text}'
+
+        at_bottom = self.scroll_offset.y >= max(0, self.max_scroll_y - 1)
+        self.clear()
+        self._all_text = []
+        for seg in segments:
+            plain, markup = line_for(seg)
+            self._all_text.append(plain)
+            self.write(markup)
+        if at_bottom:
+            self.scroll_end(animate=False)
 
     def _session_context_suffix(self) -> str:
         """Return session context text to append when copying, or empty string."""
