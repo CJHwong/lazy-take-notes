@@ -100,9 +100,13 @@ def cli(ctx, config_path, output_dir):
     # FIXME: replace with a single ShellApp that uses Textual Screens for
     # pickers and main apps, eliminating inter-app terminal flicker entirely.
     kiosk = os.environ.get('LTN_KIOSK') == '1'
+    last_mode: str | None = None
     _clear_normal_screen()
     while True:
-        mode = WelcomePicker().run()
+        mode = WelcomePicker(initial_mode=last_mode).run()
+        if mode is None:
+            return
+        last_mode = mode
         if mode == 'record':
             ctx.invoke(record)
             if not kiosk:
@@ -117,8 +121,6 @@ def cli(ctx, config_path, output_dir):
             ctx.invoke(create_template)
         elif mode == 'config':
             ctx.invoke(config)
-        else:
-            return
 
 
 def _check_template_language(template_name, language) -> None:

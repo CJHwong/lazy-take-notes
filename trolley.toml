@@ -1,0 +1,36 @@
+# Trolley config for the macOS desktop bundle (libghostty window + this TUI).
+#
+# Build and launch: trolley run
+# Build the .app only: trolley package --formats mac-app
+#
+# The "TUI binary" is a shell script, not a frozen executable. Trolley execs
+# whatever file you name, so the app keeps a normal Python environment and
+# PyInstaller is not needed.
+
+[app]
+identifier = "com.cjhwong.lazy-take-notes"
+display_name = "Lazy Take Notes"
+slug = "lazy-take-notes"
+version = "0.1.0"
+icons = ["assets/icon.png"]
+
+[macos.binaries]
+x86_64 = "scripts/trolley/ltn-launch"
+aarch64 = "scripts/trolley/ltn-launch"
+
+[gui]
+initial_width = 1200
+initial_height = 800
+resizable = true
+
+[environment]
+# The app defaults its output directory to ./output, and Trolley starts the
+# process inside the bundle, so that default would write into the .app.
+# LTN_KIOSK returns to the mode picker after a session instead of exiting.
+# TEXTUAL_DRIVER loads the driver that works around libghostty's Kitty
+# keyboard protocol handling.
+variables = { LTN_KIOSK = "1", LTN_OUTPUT_DIR = "~/Documents/LazyTakeNotes", TEXTUAL_DRIVER = "lazy_take_notes.l4_frameworks_and_drivers.drivers.ghostty_driver:GhosttyDriver" }
+
+[ghostty]
+font-size = 14
+title = "Lazy Take Notes"

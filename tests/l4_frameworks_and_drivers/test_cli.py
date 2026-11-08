@@ -316,6 +316,36 @@ class TestCliGroup:
         assert result.exit_code == 0
         mock_app_cls.return_value.run.assert_called_once()
 
+    def test_welcome_picker_reopens_on_the_last_mode(self, tmp_path: Path):
+        """Leaving a mode and coming back keeps the highlight on that mode."""
+        runner = CliRunner()
+        session_dir = tmp_path / '2026-02-22_120000'
+        session_dir.mkdir()
+
+        first_open = MagicMock()
+        first_open.run.return_value = 'view'
+        second_open = MagicMock()
+        second_open.run.return_value = None
+
+        mock_session_picker = MagicMock()
+        mock_session_picker.run.side_effect = [session_dir, None]
+
+        with (
+            patch(_WELCOME_PICKER, side_effect=[first_open, second_open]) as picker_ctor,
+            patch(_YAML_CFG) as mock_config_cls,
+            patch(_YAML_TPL),
+            patch(_BUILD) as mock_build,
+            patch(_INFRA),
+            patch(_SESSION_PICKER, return_value=mock_session_picker),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.ViewApp'),
+        ):
+            mock_config_cls.return_value.load.return_value = {}
+            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
+            result = runner.invoke(cli, [])
+
+        assert result.exit_code == 0
+        assert [call.kwargs['initial_mode'] for call in picker_ctor.call_args_list] == [None, 'view']
+
     def test_config_file_not_found_exits_1(self):
         runner = CliRunner()
 
