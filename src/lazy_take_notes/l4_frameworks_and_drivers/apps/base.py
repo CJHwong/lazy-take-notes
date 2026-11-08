@@ -98,6 +98,7 @@ class BaseApp(TextualApp):
         self._query_running = False
         self._label_running = False
         self._final_digest_done = False
+        self._final_digest_started = False
 
         # Register dynamic quick action bindings (positional: 1-5)
         for i, qa in enumerate(template.quick_actions):
@@ -278,6 +279,7 @@ class BaseApp(TextualApp):
             self._run_label_worker()
 
     def on_digest_error(self, message: DigestError) -> None:
+        self._final_digest_started = False  # allow a retry after a failed final
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.notify(
@@ -294,6 +296,10 @@ class BaseApp(TextualApp):
     # --- Workers ---
 
     def _run_digest_worker(self, is_final: bool = False) -> None:
+        if is_final:
+            if self._final_digest_started:
+                return
+            self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...' if is_final else 'Digesting...'
         self._digest_running = True
@@ -348,6 +354,9 @@ class BaseApp(TextualApp):
         self.run_worker(_query_task, exclusive=True, group='query')
 
     def _run_final_digest(self) -> None:
+        if self._final_digest_started:
+            return
+        self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...'
         self._digest_running = True

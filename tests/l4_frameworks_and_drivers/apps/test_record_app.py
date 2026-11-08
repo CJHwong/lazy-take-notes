@@ -1874,3 +1874,23 @@ class TestSpeakerTurns:
                     await pilot.press('c')
                     await pilot.pause()
                 assert 'Alice: Hello world' in mock_clip.copy.call_args[0][0]
+
+
+class TestFinalDigestGuard:
+    @pytest.mark.asyncio
+    async def test_second_final_trigger_is_ignored(self, tmp_path):
+        from unittest.mock import AsyncMock
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
+
+                with patch.object(app._controller, 'run_digest', new_callable=AsyncMock) as run:
+                    run.return_value = DigestResult(error='stub')
+                    app._run_final_digest()
+                    app._run_final_digest()
+                    await pilot.pause()
+                    await pilot.pause()
+
+                assert run.await_count == 1
