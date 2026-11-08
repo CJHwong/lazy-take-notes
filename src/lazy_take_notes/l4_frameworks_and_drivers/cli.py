@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import sys
 from importlib.metadata import entry_points
 from pathlib import Path
@@ -32,6 +34,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
 from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
     run_transcribe as _run_transcribe,
 )
+
+_TRANSCRIPT_LINE = re.compile(r'^\[(\d{2}):(\d{2}):(\d{2})\]\s*(.*)$')
 
 
 def _clear_normal_screen() -> None:  # pragma: no cover -- terminal escape; no-op in test
@@ -228,6 +232,68 @@ def transcribe(ctx, audio_file, label, headless, template_name, language):
         return
 
     _run_transcribe(ctx, audio_path=Path(audio_file), label=label, template_name=template_name, language=language)
+
+
+@cli.command()
+@click.argument('session_dir', type=click.Path(file_okay=False, exists=True, path_type=Path))
+@click.option('--device', default='auto', show_default=True, help='Diarization backend: auto, cpu, or metal.')
+@click.option(
+    '--timeout', 'timeout_s', default=300.0, type=float, show_default=True, help='Seconds before diarization is killed.'
+)
+@click.pass_context
+def diarize(ctx, session_dir, device, timeout_s):
+    """Label a saved session's transcript with anonymous speakers.
+
+    Needs LTN_NEMO_BINARY and LTN_NEMO_MODEL. Writes speakers.json and
+    transcript_speakers.txt into the session directory.
+    """
+    from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at  # noqa: PLC0415 -- deferred
+    from lazy_take_notes.l3_interface_adapters.gateways.nemo_speech_diarizer import (  # noqa: PLC0415 -- deferred
+        NemoSpeechDiarizer,
+    )
+
+    recording = session_dir / 'recording.wav'
+    transcript = session_dir / 'transcript.txt'
+    if not recording.is_file():
+        raise click.ClickException(f'No recording.wav in {session_dir}')
+    if not transcript.is_file():
+        raise click.ClickException(f'No transcript.txt in {session_dir}')
+
+    try:
+        turns = NemoSpeechDiarizer(device=device).diarize(recording, timeout=timeout_s)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    (session_dir / 'speakers.json').write_text(
+        json.dumps(
+            [{'start': turn.start, 'end': turn.end, 'speaker': turn.speaker} for turn in turns],
+            indent=2,
+        ),
+        encoding='utf-8',
+    )
+
+    labeled: list[str] = []
+    for line in transcript.read_text(encoding='utf-8').splitlines():
+        match = _TRANSCRIPT_LINE.match(line)
+        if match is None:
+            labeled.append(line)
+            continue
+        at = int(match.group(1)) * 3600 + int(match.group(2)) * 60 + int(match.group(3))
+        speaker = speaker_at(turns, at)
+        if speaker is None:
+            labeled.append(line)
+        else:
+            labeled.append(f'[{match.group(1)}:{match.group(2)}:{match.group(3)}] S{speaker}: {match.group(4)}')
+    labeled_path = session_dir / 'transcript_speakers.txt'
+    labeled_path.write_text('\n'.join(labeled) + '\n', encoding='utf-8')
+
+    speech: dict[int, float] = {}
+    for turn in turns:
+        speech[turn.speaker] = speech.get(turn.speaker, 0.0) + (turn.end - turn.start)
+    click.echo(f'{len(turns)} turns, {len(speech)} speakers')
+    for speaker, seconds in sorted(speech.items()):
+        click.echo(f'  S{speaker}: {seconds:.1f}s')
+    click.echo(f'  labeled: {labeled_path}')
 
 
 @cli.command()

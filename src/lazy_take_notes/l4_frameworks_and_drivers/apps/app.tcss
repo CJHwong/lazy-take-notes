@@ -15,7 +15,16 @@
     height: 1fr;
 }
 
+#transcript-col {
+    width: 1fr;
+}
+
 #transcript-panel {
+    width: 1fr;
+    height: 1fr;
+}
+
+#speaker-bar {
     width: 1fr;
 }
 

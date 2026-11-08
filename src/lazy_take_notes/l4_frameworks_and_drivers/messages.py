@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from textual.message import Message
 
+from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
+
+
+class SpeakerTurns(Message):
+    """Posted by the diarization worker when a new set of speaker turns is ready."""
+
+    def __init__(self, turns: list[SpeakerTurn]) -> None:
+        super().__init__()
+        self.turns = turns
 
 
 class TranscriptChunk(Message):

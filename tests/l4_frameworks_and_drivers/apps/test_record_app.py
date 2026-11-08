@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from textual.widgets import TextArea
+from textual.widgets import Input, TextArea
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
@@ -1117,7 +1117,7 @@ class TestDigestWorkerAsync:
                 await pilot.pause()
 
                 # Make LLM return empty → triggers error path
-                app._controller._digest_uc._llm.set_response('')  # type: ignore[union-attr]
+                app._controller._digest_uc._llm.set_response('')  # ty: ignore[unresolved-attribute]
                 app._run_digest_worker()
                 await pilot.pause()
                 await pilot.pause()
@@ -1206,7 +1206,7 @@ class TestFinalDigestWorkerAsync:
                 app.post_message(TranscriptChunk(segments=segments))
                 await pilot.pause()
 
-                app._controller._digest_uc._llm.set_response('')  # type: ignore[union-attr]
+                app._controller._digest_uc._llm.set_response('')  # ty: ignore[unresolved-attribute]
                 app._run_final_digest()
                 await pilot.pause()
                 await pilot.pause()
@@ -1814,3 +1814,91 @@ class TestBaseAppTheme:
                 async with app.run_test() as pilot:
                     await pilot.pause()
                     assert app.theme == 'nord'
+
+
+class TestSpeakerTurns:
+    @pytest.fixture(autouse=True)
+    def _no_consent_modal(self, tmp_path):
+        # A clean machine shows the consent modal, which covers the transcript.
+        consent = tmp_path / 'consent_noticed'
+        consent.touch()
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH', consent):
+            yield
+
+    @pytest.mark.asyncio
+    async def test_labels_the_transcript_and_fills_the_bar(self, tmp_path):
+        from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
+        from lazy_take_notes.l4_frameworks_and_drivers.widgets.speaker_bar import SpeakerBar
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(
+                    TranscriptChunk(segments=[TranscriptSegment(text='Hello world', wall_start=1.0, wall_end=2.0)])
+                )
+                await pilot.pause()
+                app.post_message(SpeakerTurns(turns=[SpeakerTurn(start=0.0, end=5.0, speaker=1)]))
+                await pilot.pause()
+
+                bar = app.query_one('#speaker-bar', SpeakerBar)
+                assert len(bar.children) == 1
+                chip = bar.children[0]
+                assert chip.render_line(0).text.strip() == 'S1 5s'
+
+                panel = app.query_one('#transcript-panel', TranscriptPanel)
+                panel.focus()
+                await pilot.pause()
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                copied = mock_clip.copy.call_args[0][0]
+                assert 'S1: Hello world' in copied
+
+    @pytest.mark.asyncio
+    async def test_a_renamed_speaker_replaces_the_label(self, tmp_path):
+        from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(
+                    TranscriptChunk(segments=[TranscriptSegment(text='Hello world', wall_start=1.0, wall_end=2.0)])
+                )
+                app.post_message(SpeakerTurns(turns=[SpeakerTurn(start=0.0, end=5.0, speaker=1)]))
+                await pilot.pause()
+
+                await pilot.click('#speaker-1')
+                await pilot.pause()
+                app.screen.query_one('#label-input', Input).value = 'Alice'
+                await pilot.press('enter')
+                await pilot.pause()
+
+                panel = app.query_one('#transcript-panel', TranscriptPanel)
+                panel.focus()
+                await pilot.pause()
+                with patch('lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel.pyperclip') as mock_clip:
+                    await pilot.press('c')
+                    await pilot.pause()
+                assert 'Alice: Hello world' in mock_clip.copy.call_args[0][0]
+
+
+class TestFinalDigestGuard:
+    @pytest.mark.asyncio
+    async def test_second_final_trigger_is_ignored(self, tmp_path):
+        from unittest.mock import AsyncMock
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
+
+                with patch.object(app._controller, 'run_digest', new_callable=AsyncMock) as run:
+                    run.return_value = DigestResult(error='stub')
+                    app._run_final_digest()
+                    app._run_final_digest()
+                    await pilot.pause()
+                    await pilot.pause()
+
+                assert run.await_count == 1

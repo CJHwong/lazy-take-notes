@@ -815,3 +815,30 @@ class TestNoSystemSignalWarning:
 
         warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
         assert warnings == []
+
+
+class TestStreamingWavWriter:
+    def test_header_stays_valid_while_writing(self, tmp_path):
+        import struct
+        import wave as wave_module
+
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
+            _StreamingWavWriter,  # noqa: PLC2701 -- testing private helper
+        )
+
+        path = tmp_path / 'recording.wav'
+        writer = _StreamingWavWriter(path, 16000)
+        writer.write(b'\x01\x00' * 160)
+
+        # A reader must see a valid header mid-session, not zeroed sizes.
+        with wave_module.open(str(path)) as reader:
+            assert reader.getnframes() == 160
+            assert reader.getframerate() == 16000
+
+        writer.write(b'\x02\x00' * 160)
+        with wave_module.open(str(path)) as reader:
+            assert reader.getnframes() == 320
+
+        raw = path.read_bytes()
+        assert struct.unpack('<I', raw[40:44])[0] == 640
+        writer.close()

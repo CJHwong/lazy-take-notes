@@ -45,9 +45,18 @@ class OutputConfig(BaseModel):
     auto_label: bool
 
 
+class DiarizationConfig(BaseModel):
+    enabled: bool = False
+    binary: str = ''
+    model: str = ''
+    device: str = 'auto'
+    interval_s: float = 60.0
+
+
 class AppConfig(BaseModel):
     transcription: TranscriptionConfig
     digest: DigestConfig
     interactive: InteractiveConfig
     output: OutputConfig
+    diarization: DiarizationConfig = Field(default_factory=DiarizationConfig)
     recognition_hints: list[str] = Field(default_factory=list)

@@ -5,10 +5,11 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import math
+import os
 import queue
+import struct
 import threading
 import time
-import wave
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,41 @@ def _no_signal_message() -> str:
     )
 
 
+class _StreamingWavWriter:
+    """WAV writer that keeps the RIFF sizes current after every chunk.
+
+    The diarizer reads the file while the session records. Python's wave module
+    leaves both sizes at zero until close, and a reader that trusts the header
+    fails with "malformed WAV: truncated RIFF payload". Rewriting 8 header bytes
+    per chunk makes the file valid at any instant.
+    """
+
+    def __init__(self, path: Path, sample_rate: int) -> None:
+        self._file = open(path, 'wb')  # noqa: SIM115 -- kept open for the whole session
+        self._bytes = 0
+        self._file.write(
+            b'RIFF'
+            + struct.pack('<I', 36)
+            + b'WAVEfmt '
+            + struct.pack('<IHHIIHH', 16, 1, 1, sample_rate, sample_rate * 2, 2, 16)
+            + b'data'
+            + struct.pack('<I', 0)
+        )
+
+    def write(self, pcm: bytes) -> None:
+        self._file.write(pcm)
+        self._bytes += len(pcm)
+        self._file.seek(4)
+        self._file.write(struct.pack('<I', 36 + self._bytes))
+        self._file.seek(40)
+        self._file.write(struct.pack('<I', self._bytes))
+        self._file.seek(0, os.SEEK_END)
+        self._file.flush()
+
+    def close(self) -> None:
+        self._file.close()
+
+
 def _start_processed_recorder(
     output_dir: Path,
     sample_rate: int,
@@ -52,10 +88,7 @@ def _start_processed_recorder(
     rec_q: queue.Queue[np.ndarray | None] = queue.Queue()
 
     def _writer() -> None:
-        wf = wave.open(str(wav_path), 'wb')
-        wf.setnchannels(1)
-        wf.setsampwidth(2)  # int16
-        wf.setframerate(sample_rate)
+        wav = _StreamingWavWriter(wav_path, sample_rate)
         try:
             while True:
                 try:
@@ -63,11 +96,11 @@ def _start_processed_recorder(
                     if data is None:
                         break
                     pcm = np.clip(data, -1.0, 1.0)
-                    wf.writeframes((pcm * 32767).astype(np.int16).tobytes())
+                    wav.write((pcm * 32767).astype(np.int16).tobytes())
                 except queue.Empty:  # pragma: no cover -- timing-dependent; queue.get timeout retry
                     pass
         finally:
-            wf.close()
+            wav.close()
 
     writer = threading.Thread(target=_writer, daemon=True)
     writer.start()

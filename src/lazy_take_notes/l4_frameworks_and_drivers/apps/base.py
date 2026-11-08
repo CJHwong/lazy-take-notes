@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager launch
@@ -10,6 +11,7 @@ import time
 from pathlib import Path
 from typing import ClassVar
 
+from textual import events
 from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -27,6 +29,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     DigestReady,
     ModelDownloadProgress,
     QueryResult,
+    SpeakerTurns,
     TranscriptChunk,
     TranscriptionStatus,
 )
@@ -35,6 +38,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import Dow
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.label_modal import LabelModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.query_modal import QueryModal
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.speaker_bar import SpeakerBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
 
@@ -94,6 +98,7 @@ class BaseApp(TextualApp):
         self._query_running = False
         self._label_running = False
         self._final_digest_done = False
+        self._final_digest_started = False
 
         # Register dynamic quick action bindings (positional: 1-5)
         for i, qa in enumerate(template.quick_actions):
@@ -119,7 +124,9 @@ class BaseApp(TextualApp):
     def compose(self) -> ComposeResult:
         yield Static(self._build_header_text(), id='header')
         with Horizontal(id='main-panels'):
-            yield TranscriptPanel(id='transcript-panel')
+            with Vertical(id='transcript-col'):
+                yield TranscriptPanel(id='transcript-panel')
+                yield SpeakerBar(id='speaker-bar')
             with Vertical(id='digest-col'):
                 yield DigestPanel(id='digest-panel')
                 yield TextArea(id='context-input')
@@ -178,16 +185,69 @@ class BaseApp(TextualApp):
             len(message.segments),
             len(self._controller.all_segments) + len(message.segments),
         )
-        panel = self.query_one('#transcript-panel', TranscriptPanel)
-        panel.append_segments(message.segments)
-
         should_digest = self._controller.on_transcript_segments(message.segments)
+
+        panel = self.query_one('#transcript-panel', TranscriptPanel)
+        if self._controller.speaker_turns:
+            panel.render_segments(self._controller.all_segments, self._speaker_label)
+        else:
+            panel.append_segments(message.segments)
 
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_count = len(self._controller.digest_state.buffer)
 
         if self.auto_digest and should_digest and not self._digest_running:
             self._run_digest_worker()
+
+    def _speaker_label(self, segment) -> str | None:
+        return self._controller.speaker_label(segment)
+
+    def on_speaker_turns(self, message: SpeakerTurns) -> None:
+        self._controller.set_speaker_turns(message.turns)
+        self._update_speaker_bar()
+        self._persist_speakers()
+        panel = self.query_one('#transcript-panel', TranscriptPanel)
+        panel.render_segments(self._controller.all_segments, self._speaker_label)
+
+    def _update_speaker_bar(self) -> None:
+        speech: dict[int, float] = {}
+        for turn in self._controller.speaker_turns:
+            speech[turn.speaker] = speech.get(turn.speaker, 0.0) + (turn.end - turn.start)
+        bar = self.query_one('#speaker-bar', SpeakerBar)
+        bar.show(
+            [
+                (speaker, self._controller.speaker_names.get(speaker, ''), seconds)
+                for speaker, seconds in sorted(speech.items())
+            ]
+        )
+
+    def _persist_speakers(self) -> None:
+        payload = {
+            'names': {str(speaker): name for speaker, name in self._controller.speaker_names.items()},
+            'turns': [
+                {'start': turn.start, 'end': turn.end, 'speaker': turn.speaker}
+                for turn in self._controller.speaker_turns
+            ],
+        }
+        (self._output_dir / 'speakers.json').write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+    def on_click(self, event: events.Click) -> None:
+        widget_id = getattr(event.widget, 'id', '') or ''
+        if not widget_id.startswith('speaker-'):
+            return
+        speaker = int(widget_id.removeprefix('speaker-'))
+        current = self._controller.speaker_names.get(speaker, '')
+
+        def apply(name: str | None) -> None:
+            if name is None:
+                return
+            self._controller.set_speaker_name(speaker, name)
+            self._update_speaker_bar()
+            self._persist_speakers()
+            panel = self.query_one('#transcript-panel', TranscriptPanel)
+            panel.render_segments(self._controller.all_segments, self._speaker_label)
+
+        self.push_screen(LabelModal(current_label=current, title=f'Name for S{speaker}'), apply)
 
     def _dismiss_download_modal(self) -> None:
         if self._download_modal is not None:
@@ -219,6 +279,7 @@ class BaseApp(TextualApp):
             self._run_label_worker()
 
     def on_digest_error(self, message: DigestError) -> None:
+        self._final_digest_started = False  # allow a retry after a failed final
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.notify(
@@ -235,6 +296,10 @@ class BaseApp(TextualApp):
     # --- Workers ---
 
     def _run_digest_worker(self, is_final: bool = False) -> None:
+        if is_final:
+            if self._final_digest_started:
+                return
+            self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...' if is_final else 'Digesting...'
         self._digest_running = True
@@ -289,6 +354,9 @@ class BaseApp(TextualApp):
         self.run_worker(_query_task, exclusive=True, group='query')
 
     def _run_final_digest(self) -> None:
+        if self._final_digest_started:
+            return
+        self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...'
         self._digest_running = True
