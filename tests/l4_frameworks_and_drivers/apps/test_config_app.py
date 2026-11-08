@@ -583,3 +583,90 @@ class _NullContext:  # noqa: N801 -- intentionally lowercase-ish for readability
 
     def __exit__(self, *args):
         pass
+
+
+class TestDiarizationSettings:
+    @pytest.mark.asyncio
+    async def test_every_diarization_field_is_on_the_page(self, tmp_path, monkeypatch):
+        from textual.widgets import Input, Select, Switch
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-diarization-enabled', Switch)
+            assert app.query_one('#cfg-diarization-binary', Input)
+            assert app.query_one('#cfg-diarization-model', Input)
+            assert app.query_one('#cfg-diarization-device', Select)
+            assert app.query_one('#cfg-diarization-interval', Input)
+            # digest.max_lines was the one setting missing from the page.
+            assert app.query_one('#cfg-digest-max-lines', Input)
+
+    @pytest.mark.asyncio
+    async def test_save_writes_the_diarization_block(self, tmp_path, monkeypatch):
+        from textual.widgets import Input, Select, Switch
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-diarization-enabled', Switch).value = True
+            app.query_one('#cfg-diarization-binary', Input).value = '/opt/nemo-speech'
+            app.query_one('#cfg-diarization-model', Input).value = '/models/diar.gguf'
+            app.query_one('#cfg-diarization-device', Select).value = 'cpu'
+            app.query_one('#cfg-diarization-interval', Input).value = '30'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['diarization'] == {
+            'enabled': True,
+            'binary': '/opt/nemo-speech',
+            'model': '/models/diar.gguf',
+            'device': 'cpu',
+            'interval_s': 30.0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_existing_values_are_loaded_into_the_form(self, tmp_path, monkeypatch):
+        from textual.widgets import Input, Switch
+
+        app, _ = _make_app(
+            tmp_path,
+            monkeypatch,
+            config_data={
+                'diarization': {
+                    'enabled': True,
+                    'binary': '/opt/nemo-speech',
+                    'model': '/models/diar.gguf',
+                    'device': 'metal',
+                    'interval_s': 45,
+                },
+                'digest': {
+                    'model': 'm',
+                    'min_lines': 10,
+                    'min_interval': 60,
+                    'compact_token_threshold': 1000,
+                    'max_lines': 40,
+                },
+            },
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-diarization-enabled', Switch).value is True
+            assert app.query_one('#cfg-diarization-binary', Input).value == '/opt/nemo-speech'
+            assert app.query_one('#cfg-diarization-interval', Input).value == '45'
+            assert app.query_one('#cfg-digest-max-lines', Input).value == '40'
+
+    @pytest.mark.asyncio
+    async def test_save_blocked_when_enabled_without_audio_saving(self, tmp_path, monkeypatch):
+        from textual.widgets import Switch
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-diarization-enabled', Switch).value = True
+            app.query_one('#cfg-output-save-audio', Switch).value = False
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        assert app._saved is False
+        assert not config_path.exists()

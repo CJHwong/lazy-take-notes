@@ -589,6 +589,13 @@ class ConfigApp(TextualApp):
                             ),
                             placeholder='100000',
                         )
+                        yield _FieldRow(
+                            'Force Summary After N Lines',
+                            'cfg-digest-max-lines',
+                            '' if digest.get('max_lines') is None else str(digest.get('max_lines')),
+                            help_text='Summarize regardless of the wait time. Blank means twice the minimum.',
+                            placeholder='30',
+                        )
 
                     with Vertical(classes='field-group'):
                         yield Static('Templates', classes='field-group-title')
@@ -660,7 +667,60 @@ class ConfigApp(TextualApp):
                             id='cfg-recognition-hints',
                         )
 
-            # ── Tab 5: Appearance ─────────────────────────────────
+            # ── Tab 5: Speakers ──────────────────────────────────
+            with TabPane('Speakers', id='tab-speakers'):
+                with VerticalScroll(classes='form-scroll'):
+                    diarization = self._raw.get('diarization', {})
+
+                    yield Static(
+                        'Labels each transcript line with an anonymous speaker. '
+                        'Needs the native nemo-speech runtime and the Nemotron model, '
+                        'and Save Audio Recording must be on.',
+                        classes='section-desc',
+                    )
+
+                    yield _SwitchRow(
+                        'Enable Speaker Labels',
+                        'cfg-diarization-enabled',
+                        bool(diarization.get('enabled', False)),
+                        help_text='Runs one diarization pass over the recording every interval.',
+                    )
+
+                    with Vertical(classes='field-group'):
+                        yield Static('Runtime and model', classes='field-group-title')
+                        yield _FieldRow(
+                            'Runtime Path',
+                            'cfg-diarization-binary',
+                            str(diarization.get('binary', '')),
+                            help_text='The nemo-speech executable.',
+                            placeholder='/path/to/nemo-speech',
+                        )
+                        yield _FieldRow(
+                            'Model Path',
+                            'cfg-diarization-model',
+                            str(diarization.get('model', '')),
+                            help_text='The Nemotron-3-Diarization Q8_0 GGUF file.',
+                            placeholder='/path/to/Nemotron-3-Diarization.q8_0.gguf',
+                        )
+
+                    with Vertical(classes='field-group'):
+                        yield Static('Processing', classes='field-group-title')
+                        yield _SelectRow(
+                            'Device',
+                            'cfg-diarization-device',
+                            ['auto', 'cpu', 'metal', 'cuda', 'vulkan'],
+                            str(diarization.get('device', 'auto')),
+                            help_text='"auto" picks the fastest backend on this machine.',
+                        )
+                        yield _FieldRow(
+                            'Interval (seconds)',
+                            'cfg-diarization-interval',
+                            str(diarization.get('interval_s', 60)),
+                            help_text='One full pass over the audio recorded so far. Longer files take longer.',
+                            placeholder='60',
+                        )
+
+            # ── Tab 6: Appearance ─────────────────────────────────
             with TabPane('Appearance', id='tab-appearance'):
                 with VerticalScroll(classes='form-scroll'):
                     yield Static(
@@ -719,6 +779,13 @@ class ConfigApp(TextualApp):
                 'min_interval': _to_float(self.query_one('#cfg-digest-min-interval', Input).value),
                 'compact_token_threshold': _to_int(self.query_one('#cfg-digest-compact', Input).value),
             },
+            'diarization': {
+                'enabled': self.query_one('#cfg-diarization-enabled', Switch).value,
+                'binary': self.query_one('#cfg-diarization-binary', Input).value.strip(),
+                'model': self.query_one('#cfg-diarization-model', Input).value.strip(),
+                'device': str(self.query_one('#cfg-diarization-device', Select).value),
+                'interval_s': _to_float(self.query_one('#cfg-diarization-interval', Input).value),
+            },
             'interactive': {
                 'model': self.query_one('#cfg-interactive-model', Input).value.strip(),
             },
@@ -731,6 +798,10 @@ class ConfigApp(TextualApp):
                 'auto_label': self.query_one('#cfg-output-auto-label', Switch).value,
             },
         }
+        max_lines_text = self.query_one('#cfg-digest-max-lines', Input).value.strip()
+        if max_lines_text:
+            data['digest']['max_lines'] = _to_int(max_lines_text)
+
         api_key = self.query_one('#cfg-openai-api-key', Input).value.strip()
         if api_key:
             data['openai']['api_key'] = api_key
@@ -791,6 +862,13 @@ class ConfigApp(TextualApp):
     def action_save_config(self) -> None:
         """Validate form data, then write to config.yaml."""
         data = self._collect_form_data()
+        if data['diarization']['enabled'] and not data['output']['save_audio']:
+            self.notify(
+                'Speaker labels need Save Audio Recording turned on.',
+                severity='error',
+                timeout=8,
+            )
+            return
         try:
             build_app_config(data)
             InfraConfig.model_validate(data)
@@ -884,6 +962,16 @@ class ConfigApp(TextualApp):
         self.query_one('#cfg-digest-min-lines', Input).value = str(digest.get('min_lines', ''))
         self.query_one('#cfg-digest-min-interval', Input).value = str(digest.get('min_interval', ''))
         self.query_one('#cfg-digest-compact', Input).value = str(digest.get('compact_token_threshold', ''))
+
+        max_lines = digest.get('max_lines')
+        self.query_one('#cfg-digest-max-lines', Input).value = '' if max_lines is None else str(max_lines)
+
+        diarization = self._raw.get('diarization', {})
+        self.query_one('#cfg-diarization-enabled', Switch).value = bool(diarization.get('enabled', False))
+        self.query_one('#cfg-diarization-binary', Input).value = str(diarization.get('binary', ''))
+        self.query_one('#cfg-diarization-model', Input).value = str(diarization.get('model', ''))
+        self.query_one('#cfg-diarization-device', Select).value = str(diarization.get('device', 'auto'))
+        self.query_one('#cfg-diarization-interval', Input).value = str(diarization.get('interval_s', 60))
 
         interactive = self._raw.get('interactive', {})
         self.query_one('#cfg-interactive-model', Input).value = str(interactive.get('model', ''))
