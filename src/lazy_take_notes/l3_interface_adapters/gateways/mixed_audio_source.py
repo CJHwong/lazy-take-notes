@@ -76,6 +76,15 @@ class MixedAudioSource:
         self._mic_gain: float = 1.0
         self._gain_logged: bool = False
 
+    @property
+    def system_signal_seen(self) -> bool:
+        """Whether the system source delivered a non-zero sample.
+
+        Sources that cannot report this count as seen, so the check never
+        fires for a backend that has no such signal to give.
+        """
+        return getattr(self._system, 'system_signal_seen', True)
+
     def open(self, sample_rate: int, channels: int) -> None:
         log.info(
             'opening mixed source: mic=%s, system=%s',

@@ -10,7 +10,9 @@
 /// when nothing moves on screen, and it can silently start delivering
 /// zero-filled buffers after a CoreAudio overload with no error reported.
 /// A process tap reads the output mixer directly. It is independent of the
-/// display and it fails with an OSStatus instead of going quietly dead.
+/// display. It still fails silently without the audio capture grant: macOS
+/// hands back zeros and reports no error, so the caller watches for the first
+/// non-zero sample instead of trusting the API status.
 ///
 /// Measured on macOS 26.6.2: an 8 s run delivered 8.4 s of frames, and two
 /// output-device switches mid-run cost 100-500 ms each with immediate recovery.

@@ -47,8 +47,12 @@ The tap needs the system audio capture grant. macOS 15 and newer list it under:
 
 > System Settings → Privacy & Security → Screen & System Audio Recording
 
-Grant it to the terminal that launches the binary, then restart the terminal. If the
-grant is missing, tap creation fails with an OSStatus on stderr.
+Turn on **System Audio Recording Only** for the app that launches the binary. The
+combined screen toggle also works, but it grants more than the tap needs.
+
+macOS does not prompt when a tap is created. With the grant missing, tap creation
+succeeds, `AudioDeviceStart` succeeds, and every frame is zeros. No OSStatus is
+returned. That is why the worker warns after 15 s with no non-zero sample.
 
 **Step 2 — Start and check the format line**
 

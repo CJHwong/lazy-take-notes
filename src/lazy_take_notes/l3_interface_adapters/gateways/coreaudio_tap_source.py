@@ -31,6 +31,7 @@ class CoreAudioTapSource:
         self._thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
+        self._signal_seen = False
         self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     @property
@@ -38,12 +39,23 @@ class CoreAudioTapSource:
         """True when the audio stream ended unexpectedly (EOF without explicit stop)."""
         return self._exhausted.is_set()
 
+    @property
+    def system_signal_seen(self) -> bool:
+        """True once the tap delivered a non-zero sample.
+
+        A missing audio capture grant makes macOS hand the tap a stream of
+        zeros with no error, so this is the only signal that separates
+        "nothing is playing" from "capture is dead".
+        """
+        return self._signal_seen
+
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform != 'darwin':
             raise RuntimeError('CoreAudioTapSource is macOS only')
         if not _BINARY.exists():
             raise RuntimeError(f'Native binary not found: {_BINARY}\nRun: bash scripts/build_native.sh')
         self._error = None
+        self._signal_seen = False
         self._stop.clear()
         self._exhausted.clear()
         self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
@@ -82,7 +94,10 @@ class CoreAudioTapSource:
             raw = proc.stdout.read(chunk_bytes)
             if not raw:
                 break
-            self._queue.put(np.frombuffer(raw, dtype=np.float32).copy())
+            samples = np.frombuffer(raw, dtype=np.float32).copy()
+            if not self._signal_seen and samples.any():
+                self._signal_seen = True
+            self._queue.put(samples)
         if not self._stop.is_set():
             log.warning('coreaudio-tap stdout EOF (binary stopped writing)')
             self._exhausted.set()

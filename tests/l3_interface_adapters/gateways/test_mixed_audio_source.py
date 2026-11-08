@@ -12,6 +12,19 @@ from tests.conftest import FakeAudioSource
 
 
 class TestMixedAudioSource:
+    def test_system_signal_seen_delegates_to_system_source(self):
+        class ReportingSource(FakeAudioSource):
+            system_signal_seen = False
+
+        src = MixedAudioSource(FakeAudioSource(chunks=[]), ReportingSource(chunks=[]))
+
+        assert src.system_signal_seen is False
+
+    def test_system_signal_seen_defaults_true_for_sources_without_the_flag(self):
+        src = MixedAudioSource(FakeAudioSource(chunks=[]), FakeAudioSource(chunks=[]))
+
+        assert src.system_signal_seen is True
+
     def test_both_sources_mixed_with_peak_limit(self):
         mic = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])

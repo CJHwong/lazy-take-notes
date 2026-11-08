@@ -197,9 +197,11 @@ The default model (`gpt-oss:20b`) needs ~14 GB of RAM/VRAM. If your machine stru
 - **Use cloud models instead:** Sign in with `ollama signin` and switch to `gpt-oss:120b-cloud` — see the cloud option in [Step 3](#3-set-up-an-llm-backend).
 - **Use an OpenAI-compatible API:** Switch to [Option B](#option-b-openai-compatible-api-cloud) for cloud-hosted models like `gpt-4o`.
 
-### "Permission denied" on system audio (macOS)
+### No system audio (macOS)
 
-System audio capture needs the system audio permission. macOS 15 and newer list it under **Privacy & Security → Screen & System Audio Recording**. macOS prompts on first use — click Allow, then restart the app.
+System audio capture needs the system audio permission. macOS 15 and newer list it under **Privacy & Security → Screen & System Audio Recording**. Turn on **System Audio Recording Only** for the app or terminal that runs lazy-take-notes.
+
+macOS does not ask when recording starts. If the permission is missing, capture returns silence and reports no error. The app warns after 15 seconds when no system audio has arrived.
 
 ### Nothing happens when I speak
 

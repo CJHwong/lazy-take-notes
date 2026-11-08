@@ -728,3 +728,73 @@ class TestAudioWorkerTranscription:
 
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)
+
+
+class _SourceWithoutSignal(FakeAudioSource):
+    system_signal_seen = False
+
+
+class _SourceWithSignal(FakeAudioSource):
+    system_signal_seen = True
+
+
+class TestNoSystemSignalWarning:
+    """A missing capture grant makes the tap deliver zeros with no error."""
+
+    @staticmethod
+    def _run_with_elapsed(fake_source, messages: list, iterations: int = 3) -> None:
+        loop_calls = 0
+
+        def is_cancelled():
+            nonlocal loop_calls
+            loop_calls += 1
+            return loop_calls > iterations
+
+        mono_calls = 0
+
+        def fake_monotonic():
+            nonlocal mono_calls
+            mono_calls += 1
+            return 100.0 if mono_calls == 1 else 120.0
+
+        with patch('time.monotonic', fake_monotonic):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=is_cancelled,
+                model_path='test-model',
+                language='zh',
+                transcriber=FakeTranscriber(),
+                audio_source=fake_source,
+            )
+
+    def test_warns_once_when_system_source_never_had_signal(self):
+        silent = np.zeros(1600, dtype=np.float32)
+        fake_source = _SourceWithoutSignal(chunks=[silent, silent, silent])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert len(warnings) == 1
+        assert 'System Audio Recording Only' in warnings[0].error
+
+    def test_no_warning_when_system_source_has_signal(self):
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = _SourceWithSignal(chunks=[chunk, chunk, chunk])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []
+
+    def test_no_warning_for_source_that_cannot_report_signal(self):
+        # Linux loopback and the test fake have no system_signal_seen attribute.
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = FakeAudioSource(chunks=[chunk, chunk, chunk])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []

@@ -59,6 +59,45 @@ class TestCoreAudioTapSource:
         assert result is not None
         np.testing.assert_allclose(result[: len(expected_values)], expected_values, atol=1e-6)
 
+    def test_system_signal_seen_after_nonzero_sample(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = _float32_bytes([0.0, 0.5, 0.0])
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            seen = src.system_signal_seen
+            src.close()
+
+        assert seen is True
+
+    def test_system_signal_seen_stays_false_for_all_zero_stream(self, monkeypatch, tmp_path):
+        # A missing capture grant makes macOS deliver zeros with no error.
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = _float32_bytes([0.0, 0.0, 0.0])
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            seen = src.system_signal_seen
+            src.close()
+
+        assert seen is False
+
     def test_spawns_in_own_session(self, monkeypatch, tmp_path):
         # Ctrl-C must not reach the tap subprocess in headless mode, so it runs
         # in its own session (process group).
