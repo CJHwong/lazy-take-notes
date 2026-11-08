@@ -199,7 +199,7 @@ The default model (`gpt-oss:20b`) needs ~14 GB of RAM/VRAM. If your machine stru
 
 ### "Permission denied" on system audio (macOS)
 
-System audio capture requires Screen Recording permission. macOS will prompt you on first use — click Allow, then restart the app.
+System audio capture needs the system audio permission. macOS 15 and newer list it under **Privacy & Security → Screen & System Audio Recording**. macOS prompts on first use — click Allow, then restart the app.
 
 ### Nothing happens when I speak
 
