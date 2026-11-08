@@ -172,7 +172,15 @@ The launcher installs from `main` by default. A bundle built from an unmerged br
 LTN_DESKTOP_SOURCE=/path/to/lazy-take-notes trolley run
 ```
 
-The produced `.app` is ad-hoc signed. Distributing it to another machine needs a Developer ID signature and notarization.
+The produced `.app` is ad-hoc signed. Distributing it to another machine needs a Developer ID signature and notarization. `scripts/release.sh` does both when they are available, and the last line of its output says whether it did:
+
+```bash
+scripts/release.sh                          # build, sign if possible, zip
+scripts/release.sh --dmg                    # also produce a DMG
+LTN_NOTARY_PROFILE=ltn scripts/release.sh   # also notarize
+```
+
+Artifacts land in `trolley/release/`. Signing runs when the keychain holds a `Developer ID Application` identity, or when `LTN_SIGN_IDENTITY` names one. Notarization runs when `LTN_NOTARY_PROFILE` names a `notarytool` keychain profile. Without them the script still builds and packages, and reports `UNSIGNED`.
 
 ## Development
 
