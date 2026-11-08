@@ -630,93 +630,6 @@ class TestAudioWorkerTranscription:
         assert any(s.status == 'stopped' for s in statuses)
         assert source.close_calls == 1
 
-    def test_dead_audio_posts_warning_after_50_zero_chunks(self):
-        """50 consecutive all-zero chunks should trigger a warning message."""
-        fake_transcriber = FakeTranscriber()
-        zero_chunks = [np.zeros(1600, dtype=np.float32) for _ in range(55)]
-        fake_source = FakeAudioSource(chunks=zero_chunks)
-
-        messages: list = []
-        call_count = 0
-
-        def is_cancelled():
-            nonlocal call_count
-            call_count += 1
-            return call_count > 58
-
-        run_audio_worker(
-            post_message=messages.append,
-            is_cancelled=is_cancelled,
-            model_path='test-model',
-            language='zh',
-            transcriber=fake_transcriber,
-            audio_source=fake_source,
-        )
-
-        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
-        warnings = [s for s in statuses if s.status == 'warning']
-        assert len(warnings) == 1
-        assert 'signal lost' in warnings[0].error.lower() or 'no sound' in warnings[0].error.lower()
-
-    def test_dead_audio_warning_fires_only_once(self):
-        """Warning should not repeat while signal remains zero."""
-        fake_transcriber = FakeTranscriber()
-        # 100 zero chunks — way past the threshold
-        zero_chunks = [np.zeros(1600, dtype=np.float32) for _ in range(100)]
-        fake_source = FakeAudioSource(chunks=zero_chunks)
-
-        messages: list = []
-        call_count = 0
-
-        def is_cancelled():
-            nonlocal call_count
-            call_count += 1
-            return call_count > 105
-
-        run_audio_worker(
-            post_message=messages.append,
-            is_cancelled=is_cancelled,
-            model_path='test-model',
-            language='zh',
-            transcriber=fake_transcriber,
-            audio_source=fake_source,
-        )
-
-        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
-        warnings = [s for s in statuses if s.status == 'warning']
-        assert len(warnings) == 1  # only one, not repeated
-
-    def test_dead_audio_recovery_allows_new_warning(self):
-        """After recovery from zero signal, a new zero run should trigger warning again."""
-        fake_transcriber = FakeTranscriber()
-        # 55 zeros, then 5 non-zeros, then 55 zeros
-        chunks: list[np.ndarray] = []
-        chunks.extend([np.zeros(1600, dtype=np.float32) for _ in range(55)])
-        chunks.extend([_make_nonsilent_chunk(1600) for _ in range(5)])
-        chunks.extend([np.zeros(1600, dtype=np.float32) for _ in range(55)])
-        fake_source = FakeAudioSource(chunks=chunks)
-
-        messages: list = []
-        call_count = 0
-
-        def is_cancelled():
-            nonlocal call_count
-            call_count += 1
-            return call_count > 120
-
-        run_audio_worker(
-            post_message=messages.append,
-            is_cancelled=is_cancelled,
-            model_path='test-model',
-            language='zh',
-            transcriber=fake_transcriber,
-            audio_source=fake_source,
-        )
-
-        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
-        warnings = [s for s in statuses if s.status == 'warning']
-        assert len(warnings) == 2  # fired twice: once per zero run
-
     def test_nan_audio_posts_zero_level(self):
         """NaN audio data should result in AudioLevel(rms=0.0), not crash or propagate NaN."""
         fake_transcriber = FakeTranscriber()
@@ -815,3 +728,90 @@ class TestAudioWorkerTranscription:
 
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)
+
+
+class _SourceWithoutSignal(FakeAudioSource):
+    system_signal_seen = False
+
+
+class _SourceWithSignal(FakeAudioSource):
+    system_signal_seen = True
+
+
+class _SourceAwaitingPermission(FakeAudioSource):
+    system_signal_seen = False
+    awaiting_permission = True
+
+
+class TestNoSystemSignalWarning:
+    """A missing capture grant makes the tap deliver zeros with no error."""
+
+    @staticmethod
+    def _run_with_elapsed(fake_source, messages: list, iterations: int = 3) -> None:
+        loop_calls = 0
+
+        def is_cancelled():
+            nonlocal loop_calls
+            loop_calls += 1
+            return loop_calls > iterations
+
+        mono_calls = 0
+
+        def fake_monotonic():
+            nonlocal mono_calls
+            mono_calls += 1
+            return 100.0 if mono_calls == 1 else 120.0
+
+        with patch('time.monotonic', fake_monotonic):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=is_cancelled,
+                model_path='test-model',
+                language='zh',
+                transcriber=FakeTranscriber(),
+                audio_source=fake_source,
+            )
+
+    def test_warns_once_when_system_source_never_had_signal(self):
+        silent = np.zeros(1600, dtype=np.float32)
+        fake_source = _SourceWithoutSignal(chunks=[silent, silent, silent])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert len(warnings) == 1
+        assert 'System Audio Recording Only' in warnings[0].error
+
+    def test_no_warning_when_system_source_has_signal(self):
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = _SourceWithSignal(chunks=[chunk, chunk, chunk])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []
+
+    def test_no_warning_while_the_permission_dialog_is_open(self):
+        # A first-time user spends more than 15 s in System Settings. Telling
+        # them to grant what the open dialog already asks is noise.
+        silent = np.zeros(1600, dtype=np.float32)
+        fake_source = _SourceAwaitingPermission(chunks=[silent, silent, silent])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []
+
+    def test_no_warning_for_source_that_cannot_report_signal(self):
+        # Linux loopback and the test fake have no system_signal_seen attribute.
+        chunk = _make_nonsilent_chunk(1600)
+        fake_source = FakeAudioSource(chunks=[chunk, chunk, chunk])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []

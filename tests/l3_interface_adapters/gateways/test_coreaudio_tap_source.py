@@ -59,6 +59,89 @@ class TestCoreAudioTapSource:
         assert result is not None
         np.testing.assert_allclose(result[: len(expected_values)], expected_values, atol=1e-6)
 
+    def test_awaiting_permission_while_the_tap_asks(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        mock_proc.poll.return_value = 0  # clean exit: the reader must not drain stderr
+        mock_proc.stderr = io.BytesIO(b'coreaudio-tap: waiting for permission: enable this app in System Settings\n')
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            awaiting = src.awaiting_permission
+            src.close()
+
+        assert awaiting is True
+
+    def test_awaiting_permission_clears_when_granted(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        mock_proc.poll.return_value = 0  # clean exit: the reader must not drain stderr
+        mock_proc.stderr = io.BytesIO(
+            b'coreaudio-tap: waiting for permission: enable this app\n'
+            b'coreaudio-tap: permission granted\n'
+            b'coreaudio-tap: capturing\n'
+        )
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            awaiting = src.awaiting_permission
+            src.close()
+
+        assert awaiting is False
+
+    def test_system_signal_seen_after_nonzero_sample(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = _float32_bytes([0.0, 0.5, 0.0])
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            seen = src.system_signal_seen
+            src.close()
+
+        assert seen is True
+
+    def test_system_signal_seen_stays_false_for_all_zero_stream(self, monkeypatch, tmp_path):
+        # A missing capture grant makes macOS deliver zeros with no error.
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = _float32_bytes([0.0, 0.0, 0.0])
+        mock_proc.stdin = MagicMock()
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            seen = src.system_signal_seen
+            src.close()
+
+        assert seen is False
+
     def test_spawns_in_own_session(self, monkeypatch, tmp_path):
         # Ctrl-C must not reach the tap subprocess in headless mode, so it runs
         # in its own session (process group).
@@ -75,6 +158,40 @@ class TestCoreAudioTapSource:
             src.close()
 
         assert mock_popen.call_args.kwargs['start_new_session'] is True
+
+    def test_asks_for_permission_in_desktop_bundle(self, monkeypatch, tmp_path):
+        # The bundle has no terminal to grant the permission, so the tap must
+        # raise the dialog itself on first run.
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+        monkeypatch.setenv('LTN_KIOSK', '1')
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        with patch('subprocess.Popen', return_value=mock_proc) as mock_popen:
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            src.close()
+
+        assert mock_popen.call_args.args[0] == [str(fake_binary), '--ensure-permission']
+
+    def test_does_not_ask_for_permission_outside_desktop_bundle(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+        monkeypatch.delenv('LTN_KIOSK', raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        with patch('subprocess.Popen', return_value=mock_proc) as mock_popen:
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            src.close()
+
+        assert mock_popen.call_args.args[0] == [str(fake_binary)]
 
     def test_read_returns_none_on_timeout(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')

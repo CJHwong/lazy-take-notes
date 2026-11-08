@@ -7,9 +7,12 @@ Python gateways in `l3_interface_adapters/gateways/` invoke them as subprocesses
 
 ### What it does
 
-Captures system audio output (all apps on the main display) via ScreenCaptureKit and
-writes raw **float32 mono PCM at 16 kHz** to stdout. The Python side
+Captures system audio output via a Core Audio process tap (`AudioHardwareCreateProcessTap`,
+macOS 14.2+) and writes raw **float32 mono PCM at 16 kHz** to stdout. The Python side
 (`CoreAudioTapSource`) reads it in a background thread and feeds it to the transcriber.
+
+The tap reads the output mixer directly, so it captures every process, not only apps with
+a window on screen. `afplay`, `say`, and `ffplay` are captured.
 
 ### Build
 
@@ -19,8 +22,13 @@ Requires Xcode Command Line Tools and Swift toolchain (macOS only).
 bash scripts/build_native.sh
 ```
 
-This compiles for both arm64 and x86_64 and links them into a universal binary at
+This compiles arm64 and x86_64 and links them into a universal binary at
 `src/lazy_take_notes/_native/bin/coreaudio-tap`.
+
+The script asks SwiftPM for the product path with `--show-bin-path` and copies each arch
+before the next build. Do not hardcode `.build/<arch>-apple-macosx/release`: newer
+toolchains share one product directory across `--arch` builds, and lipo then links the
+same stale file twice while exiting 0.
 
 After building for the first time, ensure the executable bit is tracked by git:
 
@@ -30,154 +38,116 @@ git update-index --chmod=+x src/lazy_take_notes/_native/bin/coreaudio-tap
 
 ### Manual smoke test
 
-These tests must be run on a real macOS machine — a sandboxed shell or CI environment
-will not have Screen Recording permission and the binary will exit immediately.
+These tests must run on a real macOS 14.2+ machine. A sandboxed shell or CI environment
+has no audio and no TCC grant.
 
-**Step 1 — Check TCC permission is granted**
+**Step 1 — Permission**
 
-The binary requires Screen Recording permission for the *terminal app* that launches it
-(e.g. Terminal.app or iTerm2). Grant it in:
+The tap needs the system audio capture grant. macOS 15 and newer list it under:
 
-> System Settings → Privacy & Security → Screen Recording
+> System Settings → Privacy & Security → Screen & System Audio Recording
 
-Add the terminal app to the list, then restart the terminal. You only need to do this once.
+Turn on **System Audio Recording Only** for the app that launches the binary. The
+combined screen toggle also works, but it grants more than the tap needs.
 
-**Step 2 — Verify the binary starts and prints the format line**
+macOS does not prompt when a tap is created. With the grant missing, tap creation
+succeeds, `AudioDeviceStart` succeeds, and every frame is zeros. No OSStatus is
+returned. That is why the worker warns after 15 s with no non-zero sample.
+
+The desktop bundle passes `--ensure-permission`, which raises the dialog through
+ScreenCaptureKit before capture starts, because that is the only API that asks.
+The grant takes effect without a restart, so the binary retries for 45 s while the
+user is in System Settings. A terminal run does not pass the flag and keeps the
+silent behaviour.
+
+**Step 2 — Start and check the format line**
 
 ```bash
-timeout 3 src/lazy_take_notes/_native/bin/coreaudio-tap 2>&1 >/dev/null | head -2
+timeout 3 src/lazy_take_notes/_native/bin/coreaudio-tap 2>&1 >/dev/null | head -3
 ```
 
-Expected stderr output (format line printed on first audio callback):
+Expected:
 
 ```
-coreaudio-tap: 48000 Hz 2ch → 16000 Hz 1ch
+coreaudio-tap: 48000 Hz 1ch -> 16000 Hz 1ch
+coreaudio-tap: capturing
 ```
-
-If you see this, the stream is up and SCKit is delivering audio callbacks.
-
-If the binary exits immediately with no output, Screen Recording permission is missing —
-see Step 1.
 
 **Step 3 — Verify bytes are flowing**
 
-Play audio from a GUI application (Zoom, Safari, Music, QuickTime — anything with a
-window on the main display). CLI tools like `say` or `afplay` have no windows and are
-**not** captured by ScreenCaptureKit.
-
 ```bash
-# Play something audible in a GUI app, then:
-src/lazy_take_notes/_native/bin/coreaudio-tap > /tmp/ltn_pcm.bin &
+afplay /System/Library/Sounds/Glass.aiff &
+src/lazy_take_notes/_native/bin/coreaudio-tap > /tmp/ltn_pcm.bin 2>/dev/null &
 TAP_PID=$!
 sleep 3
 kill $TAP_PID
 
-# Check bytes written (should be > 0)
-wc -c /tmp/ltn_pcm.bin
-
-# Decode and inspect (requires Python + numpy):
 python3 -c "
-import numpy as np, sys
-arr = np.fromfile('/tmp/ltn_pcm.bin', dtype=np.float32)
-print(f'samples: {len(arr)}, duration: {len(arr)/16000:.1f}s, peak: {arr.max():.4f}')
+import numpy as np
+a = np.fromfile('/tmp/ltn_pcm.bin', dtype=np.float32)
+print(f'samples: {len(a)}, duration: {len(a)/16000:.1f}s, peak: {a.max():.4f}')
 "
 ```
 
-Expected: `duration: ~3.0s`, `peak > 0.001` when audio is playing.
-
-**Step 4 — Verify error detection (no permission)**
-
-If you want to test the permission-denied path, temporarily remove Screen Recording
-permission from your terminal in System Settings, then run:
-
-```bash
-src/lazy_take_notes/_native/bin/coreaudio-tap 2>&1 | head -5
-```
-
-Expected: error message about Screen Recording + `exit(1)`.
+Expected: around 3 s of audio at 16 kHz, peak above 0.001 while the sound plays.
 
 ### Key architectural lessons
 
-**ScreenCaptureKit, not Core Audio Taps**
+**A process tap, not ScreenCaptureKit**
 
-The original plan used `CATapDescription` + `AudioHardwareCreateProcessTap`. This was
-abandoned because:
-- `kTCCServiceScreenCapture` TCC permission is required for the tap to deliver audio.
-- From an unsigned CLI binary (no app bundle, no entitlements), TCC blocks audio delivery
-  *silently* — no error, no callback, zero bytes. There is no API to query why.
-- SCKit has a proper permission flow (`SCShareableContent.getExcludingDesktopWindows`)
-  that either succeeds or returns a clear error. It also works from unsigned CLI binaries
-  as long as the *host terminal* has been granted Screen Recording in System Settings.
+ScreenCaptureKit paces audio callbacks off the captured display's video frame clock.
+That causes two problems, both measured on macOS 26.6.2:
 
-**Do NOT set `sampleRate` or `channelCount` on `SCStreamConfiguration`**
+- Delivery rate follows the frame rate. A 30 fps video window gave 50 callbacks per
+  second; a static screen gave 4. Audio arrives late when nothing moves on screen.
+- After a CoreAudio overload, SCKit keeps the stream alive and callbacks firing while
+  filling every buffer with zeros. It reports no error, so the only evidence is silence.
 
-Setting a non-standard `sampleRate` (e.g. 16000) on `SCStreamConfiguration` silently
-disables audio delivery. Always capture at the system native format (48 kHz stereo) and
-resample in the audio callback via `AVAudioConverter`.
+A process tap reads the output mixer directly. Measured on the same machine:
 
-**A `.screen` output handler must be registered for audio callbacks to fire**
+| Check | Result |
+| --- | --- |
+| 8 s run with audio | 8.4 s of frames captured |
+| 20 s run with two output-device switches | 21.0 s of frames, 100-500 ms gap per switch, immediate recovery |
+| 12 s run through the Python gateway | 11.5 s of audio at 16 kHz mono after startup |
 
-SCKit's audio delivery is internally tied to video frame ticks. If only a `.audio`
-handler is registered, audio callbacks never fire. Always register both:
+A device switch permanently kills the SCKit path. The tap recovers within half a second.
 
-```swift
-captureStream.addStreamOutput(handler, type: .audio, sampleHandlerQueue: audioQueue)
-captureStream.addStreamOutput(handler, type: .screen, sampleHandlerQueue: audioQueue)
-```
+**The tap needs an aggregate device**
 
-The `.screen` callback can be a no-op (ignore video frames via `guard type == .audio`).
+`AudioHardwareCreateProcessTap` returns a tap object, not a readable device. Wrap it in a
+private aggregate device (`kAudioAggregateDeviceTapListKey` with `kAudioSubTapUIDKey`) and
+read that with `AudioDeviceCreateIOProcIDWithBlock`.
 
-**`minimumFrameInterval = CMTime.positiveInfinity` kills audio**
+**Use the mono global tap**
 
-Using `positiveInfinity` to suppress video entirely also suppresses audio callbacks.
-Use a real low frame rate instead: `CMTime(value: 1, timescale: 10)` = 10 fps.
+`CATapDescription(monoGlobalTapButExcludeProcesses: [])` gives 48 kHz mono, so the
+converter only resamples and never has to downmix. The stereo variant arrives interleaved
+and doubles the buffer arithmetic for no benefit.
 
-**SCKit only captures audio from GUI apps with windows**
+**Do not set the tap's sample rate**
 
-`capturesAudio = true` on SCKit delivers audio from apps that have visible windows on the
-captured display. CLI programs (`say`, `afplay`, `ffplay`) with no windows are **not**
-captured. For the target use case (Zoom calls), Zoom has windows so it is captured.
+The tap runs at the output device's rate. Resample to 16 kHz with `AVAudioConverter`.
+Asking the system for 16 kHz directly is not supported.
 
-**Use `CMSampleBufferCopyPCMDataIntoAudioBufferList` for PCM extraction**
+**Cleanup must destroy all three objects**
 
-Do NOT manually index into `CMBlockBuffer` or try to copy `AudioBufferList` by value.
-The system delivers non-interleaved stereo (2 separate channel buffers). The correct API
-to extract PCM into an `AVAudioPCMBuffer` for the converter is:
+`AudioDeviceDestroyIOProcID`, `AudioHardwareDestroyAggregateDevice`, and
+`AudioHardwareDestroyProcessTap`. A leaked tap keeps the system audio indicator lit after
+the app exits.
 
-```swift
-CMSampleBufferCopyPCMDataIntoAudioBufferList(
-    sampleBuffer, at: 0, frameCount: Int32(numFrames),
-    into: srcBuf.mutableAudioBufferList)
-```
+**Allocation inside the audio callback**
+
+The callback allocates two `AVAudioPCMBuffer`s and runs the converter. That is not
+real-time safe, and a long stall could drop samples. It matches the previous SCKit
+implementation, and at 48 kHz mono the work is small. If glitches appear under load, move
+the conversion to a serial queue and accept one buffer of latency.
 
 **Stdin-close detection for clean subprocess teardown**
 
 The binary watches stdin for EOF via `DispatchSource.makeReadSource`. When the Python
 parent closes `proc.stdin` (or crashes), stdin becomes readable with 0 bytes, and the
 binary sets `shouldStop = true` and exits cleanly. This prevents zombie processes.
-
-**Dead-audio detection and auto-restart**
-
-CoreAudio I/O overloads (caused by misbehaving HAL clients) can silently kill SCKit's
-capture path — the `SCStream` stays alive, callbacks fire, but buffers are zero-filled.
-The system audio output remains functional (coreaudiod's own RMS stays healthy).
-
-Recovery: the audio callback tracks peak amplitude and counts consecutive zero-filled
-callbacks. After 150 consecutive zeros (~15 seconds at 10 fps) the main loop tears down
-the `SCStream` and creates a fresh one via `createCaptureStream()`, which reconnects to
-the still-alive system audio mixer. Up to 10 consecutive restarts are attempted; the
-counter resets when real audio resumes. The 15-second threshold avoids false positives
-on legitimate meeting silence (muted participants, pauses between speakers).
-
-A `hadAudio` guard prevents false restarts on startup silence — restarts only fire
-after the stream has previously delivered non-zero audio.
-
-**SIGUSR1 testing hook**
-
-Send `SIGUSR1` to inject zero audio (simulates dead SCKit stream). The restart logic
-detects the zeros and restarts the stream, clearing the injection flag so real audio
-resumes — verifying the full recovery path. Requires real audio to be flowing first
-(to set the `hadAudio` flag).
 
 ### Python integration
 

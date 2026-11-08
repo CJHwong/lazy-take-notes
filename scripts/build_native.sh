@@ -12,17 +12,30 @@ BINARY="$REPO_ROOT/src/lazy_take_notes/_native/bin/coreaudio-tap"
 
 cd "$SOURCE_DIR"
 
-echo "Building arm64..."
-swift build -c release --arch arm64 2>&1
+# SwiftPM resolves its product directory itself. Newer toolchains share one
+# output directory across --arch builds, so the old hardcoded
+# .build/<arch>-apple-macosx/release paths either do not exist or hand lipo a
+# stale binary twice (once per arch) and still exit 0.
+STAGE=$(mktemp -d)
+trap 'rm -r "$STAGE"' EXIT
 
-echo "Building x86_64..."
-swift build -c release --arch x86_64 2>&1
+for arch in arm64 x86_64; do
+    echo "Building $arch..."
+    swift build -c release --arch "$arch"
+    product_dir=$(swift build -c release --arch "$arch" --show-bin-path)
+    if [ ! -f "$product_dir/coreaudio-tap" ]; then
+        echo "ERROR: $product_dir/coreaudio-tap was not produced" >&2
+        exit 1
+    fi
+    # Copy now: the next arch build overwrites the shared product directory.
+    cp "$product_dir/coreaudio-tap" "$STAGE/$arch"
+done
 
 echo "Creating universal binary..."
-lipo -create \
-  -output "$BINARY" \
-  ".build/arm64-apple-macosx/release/coreaudio-tap" \
-  ".build/x86_64-apple-macosx/release/coreaudio-tap"
+lipo -create -output "$BINARY" "$STAGE/arm64" "$STAGE/x86_64"
+# This lipo takes one arch per call, unlike older versions.
+lipo -verify_arch arm64 "$BINARY"
+lipo -verify_arch x86_64 "$BINARY"
 
 chmod +x "$BINARY"
 echo "Built: $BINARY"

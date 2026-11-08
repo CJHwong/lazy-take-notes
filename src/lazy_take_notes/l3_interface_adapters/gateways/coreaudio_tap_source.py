@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import subprocess  # noqa: S404 -- intentional: fixed arg list, not shell=True
 import sys
@@ -31,6 +32,8 @@ class CoreAudioTapSource:
         self._thread: threading.Thread | None = None
         self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
+        self._signal_seen = False
+        self._awaiting_permission = False
         self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     @property
@@ -38,16 +41,42 @@ class CoreAudioTapSource:
         """True when the audio stream ended unexpectedly (EOF without explicit stop)."""
         return self._exhausted.is_set()
 
+    @property
+    def system_signal_seen(self) -> bool:
+        """True once the tap delivered a non-zero sample.
+
+        A missing audio capture grant makes macOS hand the tap a stream of
+        zeros with no error, so this is the only signal that separates
+        "nothing is playing" from "capture is dead".
+        """
+        return self._signal_seen
+
+    @property
+    def awaiting_permission(self) -> bool:
+        """True while the tap is still waiting for the user to grant access.
+
+        The worker holds its no-signal warning while this is set, so the first
+        run does not tell the user to grant what the open dialog already asks.
+        """
+        return self._awaiting_permission
+
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform != 'darwin':
             raise RuntimeError('CoreAudioTapSource is macOS only')
         if not _BINARY.exists():
             raise RuntimeError(f'Native binary not found: {_BINARY}\nRun: bash scripts/build_native.sh')
         self._error = None
+        self._signal_seen = False
+        self._awaiting_permission = False
         self._stop.clear()
         self._exhausted.clear()
+        # The desktop bundle has no terminal to grant the permission, and a tap
+        # never asks. Ask through ScreenCaptureKit on first run.
+        args = [str(_BINARY)]
+        if os.environ.get('LTN_KIOSK') == '1':
+            args.append('--ensure-permission')
         self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
-            [str(_BINARY)],
+            args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,
@@ -71,6 +100,10 @@ class CoreAudioTapSource:
             line = raw_line.decode('utf-8', errors='replace').rstrip()
             if line:
                 log.info('coreaudio-tap: %s', line)
+            if 'waiting for permission' in line:
+                self._awaiting_permission = True
+            elif 'permission granted' in line or line.endswith('capturing'):
+                self._awaiting_permission = False
 
     def _reader(self) -> None:
         log.debug('stdout reader thread started')
@@ -82,7 +115,10 @@ class CoreAudioTapSource:
             raw = proc.stdout.read(chunk_bytes)
             if not raw:
                 break
-            self._queue.put(np.frombuffer(raw, dtype=np.float32).copy())
+            samples = np.frombuffer(raw, dtype=np.float32).copy()
+            if not self._signal_seen and samples.any():
+                self._signal_seen = True
+            self._queue.put(samples)
         if not self._stop.is_set():
             log.warning('coreaudio-tap stdout EOF (binary stopped writing)')
             self._exhausted.set()

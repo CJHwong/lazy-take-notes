@@ -26,6 +26,18 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 
 log = logging.getLogger('ltn.audio')
 
+# A missing audio capture grant makes macOS hand the tap a stream of zeros with
+# no error. If no system sample arrives in this window, say so once.
+_NO_SIGNAL_WARN_SECONDS = 15.0
+
+
+def _no_signal_message() -> str:
+    return (
+        f'No system audio received in the first {int(_NO_SIGNAL_WARN_SECONDS)}s. '
+        'If you expect it, grant "System Audio Recording Only" to this app in '
+        'System Settings > Privacy & Security > Screen & System Audio Recording.'
+    )
+
 
 def _start_processed_recorder(
     output_dir: Path,
@@ -175,9 +187,8 @@ def run_audio_worker(
         _stats_last_time = _worker_start
         _last_data_time = _worker_start
         _silence_logged_at: float = 0.0
-        _consecutive_zero_chunks: int = 0
-        _zero_warned: bool = False
         _was_paused = False
+        _no_signal_warned = False
         try:
             while not is_cancelled():
                 if pause_event is not None and pause_event.is_set():
@@ -278,21 +289,10 @@ def run_audio_worker(
                 _stats_zero_samples += int(np.count_nonzero(data == 0.0))
                 _stats_total_samples += len(data)
 
-                # Detect dead audio: all-zero signal for 5+ seconds
-                if chunk_rms == 0.0:
-                    _consecutive_zero_chunks += 1
-                    # 1600 samples per chunk at 16 kHz = 100ms → 50 chunks = 5s
-                    if _consecutive_zero_chunks == 50 and not _zero_warned:
-                        _zero_warned = True
-                        log.warning('Audio signal is all-zero for 5s — source may be dead')
-                        post_message(
-                            AudioWorkerStatus(status='warning', error='Audio signal lost: no sound from source')
-                        )
-                else:
-                    if _zero_warned and _consecutive_zero_chunks > 0:
-                        log.info('Audio signal recovered after %d zero chunks', _consecutive_zero_chunks)
-                        _zero_warned = False
-                    _consecutive_zero_chunks = 0
+                # An all-zero chunk is silence, not a fault. The Core Audio tap
+                # delivers silence at the full rate, so zeros no longer mean the
+                # capture died. Capture failures surface as the source reporting
+                # `exhausted` after the subprocess exits.
 
                 _level_accum.append(data)
                 now_abs = time.monotonic()
@@ -304,6 +304,16 @@ def run_audio_worker(
                     _level_accum.clear()
                     post_message(AudioLevel(rms=rms))
                     _last_level_post = now_abs
+
+                if not _no_signal_warned and now_abs - _worker_start >= _NO_SIGNAL_WARN_SECONDS:
+                    # Hold the warning while the permission dialog is open: the
+                    # user is already being asked to grant it.
+                    if not getattr(audio_source, 'awaiting_permission', False):
+                        _no_signal_warned = True
+                        if not getattr(audio_source, 'system_signal_seen', True):
+                            message = _no_signal_message()
+                            log.warning(message)
+                            post_message(AudioWorkerStatus(status='warning', error=message))
 
                 # Periodic stats every 30s
                 if now_abs - _stats_last_time >= _stats_interval:
