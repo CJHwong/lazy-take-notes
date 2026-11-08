@@ -146,6 +146,20 @@ output/
     └── notes_003_final.md    # final digest on quit/stop
 ```
 
+## Speaker labels (experimental)
+
+`take-note diarize <session-dir>` adds anonymous speaker labels to a saved transcript. It needs the native NeMo-Speech.cpp runtime and the Nemotron-3-Diarization GGUF:
+
+```bash
+export LTN_NEMO_BINARY=/path/to/nemo-speech
+export LTN_NEMO_MODEL=/path/to/Nemotron-3-Diarization.q8_0.gguf
+take-note diarize output/2026-11-08_100000_standup
+```
+
+The session must contain `recording.wav` (set `save_audio: true`). The command writes `speakers.json` and `transcript_speakers.txt` in the session directory.
+
+Labels are local to one session. `S1` in one meeting is not the same person as `S1` in another. Diarization runs offline: 20 minutes of audio took 3.7 s on Metal, and 61 minutes took 44 s on CPU.
+
 ## Desktop app (macOS)
 
 Build a `.app` that runs the TUI in its own window using [Trolley](https://github.com/weedonandscott/trolley) and [libghostty](https://github.com/ghostty-org/ghostty):
