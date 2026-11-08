@@ -199,9 +199,11 @@ The default model (`gpt-oss:20b`) needs ~14 GB of RAM/VRAM. If your machine stru
 
 ### No system audio (macOS)
 
-System audio capture needs the system audio permission. macOS 15 and newer list it under **Privacy & Security → Screen & System Audio Recording**. Turn on **System Audio Recording Only** for the app or terminal that runs lazy-take-notes.
+System audio capture needs the system audio permission. macOS 15 and newer list it under **Privacy & Security → Screen & System Audio Recording**.
 
-macOS does not ask when recording starts. If the permission is missing, capture returns silence and reports no error. The app warns after 15 seconds when no system audio has arrived.
+The desktop app asks on the first recording. macOS opens a dialog, and you turn the app on in System Settings. A terminal never asks, so turn on **System Audio Recording Only** for that terminal by hand.
+
+If the permission is missing, capture returns silence and reports no error. The app warns after 15 seconds when no system audio has arrived.
 
 ### Nothing happens when I speak
 

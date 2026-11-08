@@ -54,6 +54,12 @@ macOS does not prompt when a tap is created. With the grant missing, tap creatio
 succeeds, `AudioDeviceStart` succeeds, and every frame is zeros. No OSStatus is
 returned. That is why the worker warns after 15 s with no non-zero sample.
 
+The desktop bundle passes `--ensure-permission`, which raises the dialog through
+ScreenCaptureKit before capture starts, because that is the only API that asks.
+The grant takes effect without a restart, so the binary retries for 45 s while the
+user is in System Settings. A terminal run does not pass the flag and keeps the
+silent behaviour.
+
 **Step 2 — Start and check the format line**
 
 ```bash

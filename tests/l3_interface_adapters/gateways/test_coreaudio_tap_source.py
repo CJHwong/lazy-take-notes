@@ -115,6 +115,40 @@ class TestCoreAudioTapSource:
 
         assert mock_popen.call_args.kwargs['start_new_session'] is True
 
+    def test_asks_for_permission_in_desktop_bundle(self, monkeypatch, tmp_path):
+        # The bundle has no terminal to grant the permission, so the tap must
+        # raise the dialog itself on first run.
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+        monkeypatch.setenv('LTN_KIOSK', '1')
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        with patch('subprocess.Popen', return_value=mock_proc) as mock_popen:
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            src.close()
+
+        assert mock_popen.call_args.args[0] == [str(fake_binary), '--ensure-permission']
+
+    def test_does_not_ask_for_permission_outside_desktop_bundle(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+        monkeypatch.delenv('LTN_KIOSK', raising=False)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        with patch('subprocess.Popen', return_value=mock_proc) as mock_popen:
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            src.close()
+
+        assert mock_popen.call_args.args[0] == [str(fake_binary)]
+
     def test_read_returns_none_on_timeout(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')
 

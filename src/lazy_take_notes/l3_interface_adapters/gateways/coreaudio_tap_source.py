@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import subprocess  # noqa: S404 -- intentional: fixed arg list, not shell=True
 import sys
@@ -58,8 +59,13 @@ class CoreAudioTapSource:
         self._signal_seen = False
         self._stop.clear()
         self._exhausted.clear()
+        # The desktop bundle has no terminal to grant the permission, and a tap
+        # never asks. Ask through ScreenCaptureKit on first run.
+        args = [str(_BINARY)]
+        if os.environ.get('LTN_KIOSK') == '1':
+            args.append('--ensure-permission')
         self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
-            [str(_BINARY)],
+            args,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             stdin=subprocess.PIPE,

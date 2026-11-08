@@ -21,6 +21,7 @@ import AudioToolbox
 import AVFoundation
 import CoreAudio
 import Foundation
+import ScreenCaptureKit
 
 let sampleRate = 16_000.0
 
@@ -51,6 +52,50 @@ stdinWatcher.setEventHandler {
     if read(STDIN_FILENO, &buffer, 1) <= 0 { shouldStop = true }
 }
 stdinWatcher.resume()
+
+/// Raise the system audio permission dialog, which a process tap never does.
+///
+/// The tap checks the grant silently: missing grant, no error, all zeros.
+/// ScreenCaptureKit is the only API that asks the user, so the desktop bundle
+/// calls it once before capturing. The loop keeps asking while the user is in
+/// System Settings, because a grant takes effect without restarting the process.
+@available(macOS 14.2, *)
+func ensurePermission() {
+    final class Flag {
+        private let lock = NSLock()
+        private var value = false
+        func set() {
+            lock.lock()
+            value = true
+            lock.unlock()
+        }
+        func get() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    let deadline = Date().addingTimeInterval(45)
+    while Date() < deadline {
+        let granted = Flag()
+        let semaphore = DispatchSemaphore(value: 0)
+        SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, _ in
+            if content != nil { granted.set() }
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + 10)
+        if granted.get() {
+            note("permission granted")
+            return
+        }
+        note(
+            "waiting for permission: enable this app in System Settings > "
+                + "Privacy & Security > Screen & System Audio Recording")
+        Thread.sleep(forTimeInterval: 3)
+    }
+    note("permission not granted; system audio will be silent")
+}
 
 @available(macOS 14.2, *)
 func capture() {
@@ -164,6 +209,9 @@ func capture() {
 }
 
 if #available(macOS 14.2, *) {
+    if CommandLine.arguments.contains("--ensure-permission") {
+        ensurePermission()
+    }
     capture()
 } else {
     fail("Core Audio process taps require macOS 14.2 or newer")
