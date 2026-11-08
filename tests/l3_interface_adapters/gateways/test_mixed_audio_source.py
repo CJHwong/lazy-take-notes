@@ -25,6 +25,19 @@ class TestMixedAudioSource:
 
         assert src.system_signal_seen is True
 
+    def test_awaiting_permission_delegates_to_system_source(self):
+        class ReportingSource(FakeAudioSource):
+            awaiting_permission = True
+
+        src = MixedAudioSource(FakeAudioSource(chunks=[]), ReportingSource(chunks=[]))
+
+        assert src.awaiting_permission is True
+
+    def test_awaiting_permission_defaults_false_for_sources_without_the_flag(self):
+        src = MixedAudioSource(FakeAudioSource(chunks=[]), FakeAudioSource(chunks=[]))
+
+        assert src.awaiting_permission is False
+
     def test_both_sources_mixed_with_peak_limit(self):
         mic = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])
         sys_audio = FakeAudioSource(chunks=[np.array([0.6, 0.7], dtype=np.float32)])

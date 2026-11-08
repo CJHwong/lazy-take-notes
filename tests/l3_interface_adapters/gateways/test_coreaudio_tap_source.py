@@ -59,6 +59,50 @@ class TestCoreAudioTapSource:
         assert result is not None
         np.testing.assert_allclose(result[: len(expected_values)], expected_values, atol=1e-6)
 
+    def test_awaiting_permission_while_the_tap_asks(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        mock_proc.poll.return_value = 0  # clean exit: the reader must not drain stderr
+        mock_proc.stderr = io.BytesIO(b'coreaudio-tap: waiting for permission: enable this app in System Settings\n')
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            awaiting = src.awaiting_permission
+            src.close()
+
+        assert awaiting is True
+
+    def test_awaiting_permission_clears_when_granted(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sys, 'platform', 'darwin')
+        fake_binary = tmp_path / 'coreaudio-tap'
+        fake_binary.write_bytes(b'')
+        monkeypatch.setattr(coreaudio_mod, '_BINARY', fake_binary)
+
+        mock_proc = MagicMock()
+        mock_proc.stdout.read.return_value = b''
+        mock_proc.poll.return_value = 0  # clean exit: the reader must not drain stderr
+        mock_proc.stderr = io.BytesIO(
+            b'coreaudio-tap: waiting for permission: enable this app\n'
+            b'coreaudio-tap: permission granted\n'
+            b'coreaudio-tap: capturing\n'
+        )
+
+        with patch('subprocess.Popen', return_value=mock_proc):
+            src = CoreAudioTapSource()
+            src.open(16000, 1)
+            time.sleep(0.05)
+            awaiting = src.awaiting_permission
+            src.close()
+
+        assert awaiting is False
+
     def test_system_signal_seen_after_nonzero_sample(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')
         fake_binary = tmp_path / 'coreaudio-tap'

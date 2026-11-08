@@ -85,6 +85,11 @@ class MixedAudioSource:
         """
         return getattr(self._system, 'system_signal_seen', True)
 
+    @property
+    def awaiting_permission(self) -> bool:
+        """Whether the system source is still waiting for the user to grant access."""
+        return getattr(self._system, 'awaiting_permission', False)
+
     def open(self, sample_rate: int, channels: int) -> None:
         log.info(
             'opening mixed source: mic=%s, system=%s',

@@ -738,6 +738,11 @@ class _SourceWithSignal(FakeAudioSource):
     system_signal_seen = True
 
 
+class _SourceAwaitingPermission(FakeAudioSource):
+    system_signal_seen = False
+    awaiting_permission = True
+
+
 class TestNoSystemSignalWarning:
     """A missing capture grant makes the tap deliver zeros with no error."""
 
@@ -781,6 +786,18 @@ class TestNoSystemSignalWarning:
     def test_no_warning_when_system_source_has_signal(self):
         chunk = _make_nonsilent_chunk(1600)
         fake_source = _SourceWithSignal(chunks=[chunk, chunk, chunk])
+        messages: list = []
+
+        self._run_with_elapsed(fake_source, messages)
+
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []
+
+    def test_no_warning_while_the_permission_dialog_is_open(self):
+        # A first-time user spends more than 15 s in System Settings. Telling
+        # them to grant what the open dialog already asks is noise.
+        silent = np.zeros(1600, dtype=np.float32)
+        fake_source = _SourceAwaitingPermission(chunks=[silent, silent, silent])
         messages: list = []
 
         self._run_with_elapsed(fake_source, messages)

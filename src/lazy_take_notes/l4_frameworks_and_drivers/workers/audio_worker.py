@@ -306,11 +306,14 @@ def run_audio_worker(
                     _last_level_post = now_abs
 
                 if not _no_signal_warned and now_abs - _worker_start >= _NO_SIGNAL_WARN_SECONDS:
-                    _no_signal_warned = True
-                    if not getattr(audio_source, 'system_signal_seen', True):
-                        message = _no_signal_message()
-                        log.warning(message)
-                        post_message(AudioWorkerStatus(status='warning', error=message))
+                    # Hold the warning while the permission dialog is open: the
+                    # user is already being asked to grant it.
+                    if not getattr(audio_source, 'awaiting_permission', False):
+                        _no_signal_warned = True
+                        if not getattr(audio_source, 'system_signal_seen', True):
+                            message = _no_signal_message()
+                            log.warning(message)
+                            post_message(AudioWorkerStatus(status='warning', error=message))
 
                 # Periodic stats every 30s
                 if now_abs - _stats_last_time >= _stats_interval:

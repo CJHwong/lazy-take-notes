@@ -33,6 +33,7 @@ class CoreAudioTapSource:
         self._stderr_thread: threading.Thread | None = None
         self._error: RuntimeError | None = None
         self._signal_seen = False
+        self._awaiting_permission = False
         self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
     @property
@@ -50,6 +51,15 @@ class CoreAudioTapSource:
         """
         return self._signal_seen
 
+    @property
+    def awaiting_permission(self) -> bool:
+        """True while the tap is still waiting for the user to grant access.
+
+        The worker holds its no-signal warning while this is set, so the first
+        run does not tell the user to grant what the open dialog already asks.
+        """
+        return self._awaiting_permission
+
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform != 'darwin':
             raise RuntimeError('CoreAudioTapSource is macOS only')
@@ -57,6 +67,7 @@ class CoreAudioTapSource:
             raise RuntimeError(f'Native binary not found: {_BINARY}\nRun: bash scripts/build_native.sh')
         self._error = None
         self._signal_seen = False
+        self._awaiting_permission = False
         self._stop.clear()
         self._exhausted.clear()
         # The desktop bundle has no terminal to grant the permission, and a tap
@@ -89,6 +100,10 @@ class CoreAudioTapSource:
             line = raw_line.decode('utf-8', errors='replace').rstrip()
             if line:
                 log.info('coreaudio-tap: %s', line)
+            if 'waiting for permission' in line:
+                self._awaiting_permission = True
+            elif 'permission granted' in line or line.endswith('capturing'):
+                self._awaiting_permission = False
 
     def _reader(self) -> None:
         log.debug('stdout reader thread started')
