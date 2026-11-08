@@ -1817,6 +1817,14 @@ class TestBaseAppTheme:
 
 
 class TestSpeakerTurns:
+    @pytest.fixture(autouse=True)
+    def _no_consent_modal(self, tmp_path):
+        # A clean machine shows the consent modal, which covers the transcript.
+        consent = tmp_path / 'consent_noticed'
+        consent.touch()
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH', consent):
+            yield
+
     @pytest.mark.asyncio
     async def test_labels_the_transcript_and_fills_the_bar(self, tmp_path):
         from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
