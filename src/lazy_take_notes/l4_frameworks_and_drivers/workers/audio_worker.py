@@ -175,8 +175,6 @@ def run_audio_worker(
         _stats_last_time = _worker_start
         _last_data_time = _worker_start
         _silence_logged_at: float = 0.0
-        _consecutive_zero_chunks: int = 0
-        _zero_warned: bool = False
         _was_paused = False
         try:
             while not is_cancelled():
@@ -278,21 +276,10 @@ def run_audio_worker(
                 _stats_zero_samples += int(np.count_nonzero(data == 0.0))
                 _stats_total_samples += len(data)
 
-                # Detect dead audio: all-zero signal for 5+ seconds
-                if chunk_rms == 0.0:
-                    _consecutive_zero_chunks += 1
-                    # 1600 samples per chunk at 16 kHz = 100ms → 50 chunks = 5s
-                    if _consecutive_zero_chunks == 50 and not _zero_warned:
-                        _zero_warned = True
-                        log.warning('Audio signal is all-zero for 5s — source may be dead')
-                        post_message(
-                            AudioWorkerStatus(status='warning', error='Audio signal lost: no sound from source')
-                        )
-                else:
-                    if _zero_warned and _consecutive_zero_chunks > 0:
-                        log.info('Audio signal recovered after %d zero chunks', _consecutive_zero_chunks)
-                        _zero_warned = False
-                    _consecutive_zero_chunks = 0
+                # An all-zero chunk is silence, not a fault. The Core Audio tap
+                # delivers silence at the full rate, so zeros no longer mean the
+                # capture died. Capture failures surface as the source reporting
+                # `exhausted` after the subprocess exits.
 
                 _level_accum.append(data)
                 now_abs = time.monotonic()
