@@ -202,3 +202,56 @@ class TestRunQuickAction:
         ctrl, _, _ = controller
         result = await ctrl.run_quick_action('nonexistent')
         assert result is None
+
+
+class TestSpeakerLabels:
+    @pytest.fixture
+    def with_turns(self, controller):
+        from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+
+        ctrl, fake_llm, _ = controller
+        ctrl.on_transcript_segments(
+            [
+                TranscriptSegment(text='Hello there', wall_start=1.0, wall_end=2.0),
+                TranscriptSegment(text='Hi back', wall_start=6.0, wall_end=7.0),
+            ]
+        )
+        ctrl.set_speaker_turns([SpeakerTurn(0.0, 5.0, 1), SpeakerTurn(5.5, 8.0, 2)])
+        return ctrl, fake_llm
+
+    def test_label_uses_the_mapped_name(self, with_turns):
+        ctrl, _ = with_turns
+        ctrl.set_speaker_name(1, 'Alice')
+
+        assert ctrl.speaker_label(ctrl.all_segments[0]) == 'Alice'
+        assert ctrl.speaker_label(ctrl.all_segments[1]) == 'S2'
+
+    async def test_digest_prompt_carries_the_mapped_name(self, with_turns):
+        ctrl, fake_llm = with_turns
+        ctrl.set_speaker_name(1, 'Alice')
+
+        await ctrl.run_digest()
+
+        prompt = fake_llm.chat_calls[-1][1][-1].content
+        assert 'Alice: Hello there' in prompt
+        assert 'S2: Hi back' in prompt
+
+    async def test_prompt_is_plain_without_speaker_turns(self, controller):
+        ctrl, fake_llm, _ = controller
+        ctrl.on_transcript_segments([TranscriptSegment(text='Hello there', wall_start=1.0, wall_end=2.0)])
+
+        await ctrl.run_digest()
+
+        prompt = fake_llm.chat_calls[-1][1][-1].content
+        assert 'Hello there' in prompt
+        assert 'Alice' not in prompt
+
+    async def test_final_digest_labels_the_full_transcript(self, with_turns):
+        ctrl, fake_llm = with_turns
+        ctrl.set_speaker_name(2, 'Bob')
+
+        await ctrl.run_digest(is_final=True)
+
+        prompt = fake_llm.chat_calls[-1][1][-1].content
+        assert 'S1: Hello there' in prompt
+        assert 'Bob: Hi back' in prompt

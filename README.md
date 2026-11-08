@@ -175,7 +175,7 @@ output:
   save_audio: true    # diarization reads the recording
 ```
 
-A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript and is saved to `speakers.json`.
+A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript, is saved to `speakers.json`, and is used in the digest prompt, so the notes can attribute statements to a person.
 
 Speaker numbers follow arrival order, so a label already on screen stays valid when a new voice joins. Each pass reads the whole recording, which is cheap: about 11 s per hour on Metal.
 

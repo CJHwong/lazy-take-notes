@@ -20,9 +20,7 @@ from textual.widgets import Static, TextArea
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
-from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
 from lazy_take_notes.l1_entities.template import SessionTemplate
-from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
@@ -100,8 +98,6 @@ class BaseApp(TextualApp):
         self._query_running = False
         self._label_running = False
         self._final_digest_done = False
-        self._speaker_turns: list[SpeakerTurn] = []
-        self._speaker_names: dict[int, str] = {}
 
         # Register dynamic quick action bindings (positional: 1-5)
         for i, qa in enumerate(template.quick_actions):
@@ -191,7 +187,7 @@ class BaseApp(TextualApp):
         should_digest = self._controller.on_transcript_segments(message.segments)
 
         panel = self.query_one('#transcript-panel', TranscriptPanel)
-        if self._speaker_turns:
+        if self._controller.speaker_turns:
             panel.render_segments(self._controller.all_segments, self._speaker_label)
         else:
             panel.append_segments(message.segments)
@@ -203,13 +199,10 @@ class BaseApp(TextualApp):
             self._run_digest_worker()
 
     def _speaker_label(self, segment) -> str | None:
-        speaker = speaker_at(self._speaker_turns, segment.wall_start)
-        if speaker is None:
-            return None
-        return self._speaker_names.get(speaker) or f'S{speaker}'
+        return self._controller.speaker_label(segment)
 
     def on_speaker_turns(self, message: SpeakerTurns) -> None:
-        self._speaker_turns = message.turns
+        self._controller.set_speaker_turns(message.turns)
         self._update_speaker_bar()
         self._persist_speakers()
         panel = self.query_one('#transcript-panel', TranscriptPanel)
@@ -217,17 +210,23 @@ class BaseApp(TextualApp):
 
     def _update_speaker_bar(self) -> None:
         speech: dict[int, float] = {}
-        for turn in self._speaker_turns:
+        for turn in self._controller.speaker_turns:
             speech[turn.speaker] = speech.get(turn.speaker, 0.0) + (turn.end - turn.start)
         bar = self.query_one('#speaker-bar', SpeakerBar)
         bar.show(
-            [(speaker, self._speaker_names.get(speaker, ''), seconds) for speaker, seconds in sorted(speech.items())]
+            [
+                (speaker, self._controller.speaker_names.get(speaker, ''), seconds)
+                for speaker, seconds in sorted(speech.items())
+            ]
         )
 
     def _persist_speakers(self) -> None:
         payload = {
-            'names': {str(speaker): name for speaker, name in self._speaker_names.items()},
-            'turns': [{'start': turn.start, 'end': turn.end, 'speaker': turn.speaker} for turn in self._speaker_turns],
+            'names': {str(speaker): name for speaker, name in self._controller.speaker_names.items()},
+            'turns': [
+                {'start': turn.start, 'end': turn.end, 'speaker': turn.speaker}
+                for turn in self._controller.speaker_turns
+            ],
         }
         (self._output_dir / 'speakers.json').write_text(json.dumps(payload, indent=2), encoding='utf-8')
 
@@ -236,12 +235,12 @@ class BaseApp(TextualApp):
         if not widget_id.startswith('speaker-'):
             return
         speaker = int(widget_id.removeprefix('speaker-'))
-        current = self._speaker_names.get(speaker, '')
+        current = self._controller.speaker_names.get(speaker, '')
 
         def apply(name: str | None) -> None:
             if name is None:
                 return
-            self._speaker_names[speaker] = name
+            self._controller.set_speaker_name(speaker, name)
             self._update_speaker_bar()
             self._persist_speakers()
             panel = self.query_one('#transcript-panel', TranscriptPanel)

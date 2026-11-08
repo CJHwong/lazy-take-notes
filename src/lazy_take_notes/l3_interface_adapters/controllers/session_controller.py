@@ -6,6 +6,7 @@ import logging
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.digest_state import DigestState
+from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.compact_messages_use_case import CompactMessagesUseCase
@@ -14,6 +15,7 @@ from lazy_take_notes.l2_use_cases.generate_label_use_case import GenerateLabelUs
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.persistence import PersistenceGateway
 from lazy_take_notes.l2_use_cases.quick_action_use_case import RunQuickActionUseCase
+from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at
 
 log = logging.getLogger('ltn.controller')
 
@@ -47,6 +49,30 @@ class SessionController:
         self.all_segments: list[TranscriptSegment] = []
         self.latest_digest: str | None = None
         self.user_context: str = ''
+        self.speaker_turns: list[SpeakerTurn] = []
+        self.speaker_names: dict[int, str] = {}
+
+    def set_speaker_turns(self, turns: list[SpeakerTurn]) -> None:
+        """Replace the acoustic speaker turns used for labels and prompts."""
+        self.speaker_turns = turns
+
+    def set_speaker_name(self, speaker: int, name: str) -> None:
+        """Attach a human name to an acoustic speaker track."""
+        self.speaker_names[speaker] = name
+
+    def speaker_label(self, segment: TranscriptSegment) -> str | None:
+        """Label for one segment: the mapped name, else S<n>, else None."""
+        speaker = speaker_at(self.speaker_turns, segment.wall_start)
+        if speaker is None:
+            return None
+        return self.speaker_names.get(speaker) or f'S{speaker}'
+
+    def _labeled_lines(self, segments: list[TranscriptSegment]) -> list[str]:
+        lines: list[str] = []
+        for segment in segments:
+            label = self.speaker_label(segment)
+            lines.append(f'{label}: {segment.text}' if label else segment.text)
+        return lines
 
     def on_transcript_segments(self, segments: list[TranscriptSegment]) -> bool:
         """Process new transcript segments. Returns True if digest should trigger."""
@@ -62,9 +88,18 @@ class SessionController:
 
     async def run_digest(self, *, is_final: bool = False) -> DigestResult:
         """Run a digest cycle."""
+        # Speak-labeled text for the prompt: the same labels the TUI shows.
+        buffer_lines: list[str] | None = None
+        if self.speaker_turns:
+            recent = self.all_segments[-len(self.digest_state.buffer) :] if self.digest_state.buffer else []
+            buffer_lines = self._labeled_lines(recent)
+
         full_transcript = ''
         if is_final:
-            full_transcript = '\n'.join(self.digest_state.all_lines)
+            if self.speaker_turns:
+                full_transcript = '\n'.join(self._labeled_lines(self.all_segments))
+            else:
+                full_transcript = '\n'.join(self.digest_state.all_lines)
 
         result = await self._digest_uc.execute(
             state=self.digest_state,
@@ -73,6 +108,7 @@ class SessionController:
             is_final=is_final,
             full_transcript=full_transcript,
             user_context=self.user_context,
+            buffer_lines=buffer_lines,
         )
 
         if result.data is not None:

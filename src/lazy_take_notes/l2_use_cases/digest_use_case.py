@@ -42,6 +42,7 @@ class RunDigestUseCase:
         is_final: bool = False,
         full_transcript: str = '',
         user_context: str = '',
+        buffer_lines: list[str] | None = None,
     ) -> DigestResult:
         """Execute a digest cycle. Mutates state on success."""
         log.info(
@@ -54,7 +55,7 @@ class RunDigestUseCase:
 
         prompt = build_digest_prompt(
             template,
-            state.buffer,
+            buffer_lines if buffer_lines is not None else state.buffer,
             is_final=is_final,
             full_transcript=full_transcript,
             user_context=user_context,
