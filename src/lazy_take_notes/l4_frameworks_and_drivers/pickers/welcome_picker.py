@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.widgets import ListItem, ListView, Static
 
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 
 _MODES = [
     ('record', 'Record', 'Live transcription with AI digest'),
@@ -84,9 +85,9 @@ class ModeItem(ListItem):
         yield Static(self._label_text, markup=True)
 
 
-class WelcomePicker(App[str | None]):
+class WelcomePicker(ShellScreen[str | None]):
     CSS = """
-    Screen {
+    WelcomePicker {
         align: center middle;
     }
     #welcome-banner {
@@ -139,7 +140,7 @@ class WelcomePicker(App[str | None]):
         )
 
     def on_mount(self) -> None:
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         list_view = self.query_one('#welcome-list', ListView)
         list_view.index = _MODE_INDEX.get(self._initial_mode or '', 0)
         list_view.focus()
@@ -148,7 +149,7 @@ class WelcomePicker(App[str | None]):
         lv = self.query_one('#welcome-list', ListView)
         item = lv.highlighted_child
         if isinstance(item, ModeItem):
-            self.exit(item.mode)
+            self.dismiss(item.mode)
 
     def action_cancel(self) -> None:
-        self.exit(None)
+        self.dismiss(None)

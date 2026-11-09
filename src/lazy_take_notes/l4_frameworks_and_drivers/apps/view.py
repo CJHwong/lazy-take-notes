@@ -6,7 +6,6 @@ import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager laun
 import sys
 from pathlib import Path
 
-from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -14,6 +13,7 @@ from textual.widgets import Static
 
 from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -23,7 +23,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import T
 CSS_PATH = 'app.tcss'
 
 
-class ViewApp(TextualApp):
+class ViewApp(ShellScreen):
     """Read-only TUI for browsing a saved session's transcript and digest."""
 
     CSS_PATH = 'app.tcss'
@@ -48,7 +48,7 @@ class ViewApp(TextualApp):
         yield StatusBar(id='status-bar')
 
     def on_mount(self) -> None:
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'View'
         bar.keybinding_hints = r'\[c] copy  \[o] open  \[Tab] switch  \[q] back'
@@ -86,4 +86,4 @@ class ViewApp(TextualApp):
         subprocess.Popen([opener, str(self._session_dir)])  # noqa: S603 -- fixed arg list, not shell=True
 
     def action_quit_app(self) -> None:
-        self.exit()
+        self.dismiss()

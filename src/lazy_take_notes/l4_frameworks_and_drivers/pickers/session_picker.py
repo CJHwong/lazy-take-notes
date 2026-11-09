@@ -123,4 +123,4 @@ class SessionPicker(SearchablePicker[Path]):
     def action_select_item(self) -> None:
         if self._current_session is None:
             return
-        self.exit(self._current_session)
+        self.dismiss(self._current_session)

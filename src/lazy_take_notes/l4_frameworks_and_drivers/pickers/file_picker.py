@@ -113,7 +113,7 @@ class FilePicker(SearchablePicker[Path]):
         # Override base on_mount: FilePicker starts with the list focused,
         # not the search input. call_after_refresh defers focus until after the
         # first render so the widget is ready to receive it.
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         self._rebuild_list()
         self.call_after_refresh(self.query_one('#sp-list', _FileListView).focus)
 
@@ -187,7 +187,7 @@ class FilePicker(SearchablePicker[Path]):
             target = self._current_dir.parent if isinstance(item, ParentItem) else item.path
             self._navigate_to(target)
         elif isinstance(item, FileItem):
-            self.exit(item.path)
+            self.dismiss(item.path)
 
     def action_parent(self) -> None:
         self._navigate_to(self._current_dir.parent)

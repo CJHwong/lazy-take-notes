@@ -19,6 +19,23 @@ from lazy_take_notes.l3_interface_adapters.gateways.yaml_template_loader import 
 )
 from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
 
+
+@pytest.fixture(autouse=True)
+def _consent_already_noticed(tmp_path, monkeypatch):
+    """Keep the one-time recording notice out of tests that are not testing it.
+
+    The notice dismisses on any key, so without this marker it swallows the
+    first key press in every RecordApp test. The consent tests patch the same
+    constant themselves, which overrides this fixture.
+    """
+    marker = tmp_path / '.consent_noticed_fixture'
+    marker.touch()
+    monkeypatch.setattr(
+        'lazy_take_notes.l4_frameworks_and_drivers.apps.record.CONSENT_NOTICED_PATH',
+        marker,
+    )
+
+
 # --- Protocol-conforming Fakes ---
 
 

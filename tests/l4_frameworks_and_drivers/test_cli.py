@@ -181,170 +181,25 @@ class TestCliGroup:
         assert result.exit_code == 0
         assert __version__ in result.output
 
-    def test_no_subcommand_opens_welcome_picker_then_exits(self):
-        """Running `lazy-take-notes` with no subcommand opens the WelcomePicker."""
+    def test_no_subcommand_runs_shell(self):
+        """Running `lazy-take-notes` with no subcommand runs the screen shell."""
         runner = CliRunner()
-        mock_welcome = MagicMock()
-        mock_welcome.run.return_value = None  # user cancels
-
-        with patch(_WELCOME_PICKER, return_value=mock_welcome):
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.shell.ShellApp') as mock_shell:
             result = runner.invoke(cli, [])
 
         assert result.exit_code == 0
-        mock_welcome.run.assert_called_once()
+        mock_shell.assert_called_once_with(config_path=None, output_dir=None, kiosk=False)
+        mock_shell.return_value.run.assert_called_once()
 
-    def test_welcome_picker_transcribe_cancel_exits_cleanly(self):
-        """WelcomePicker selects transcribe; FilePicker cancelled → clean exit."""
+    def test_kiosk_env_passes_kiosk_flag(self, monkeypatch):
+        """LTN_KIOSK=1 tells the shell to return to the picker after each mode."""
+        monkeypatch.setenv('LTN_KIOSK', '1')
         runner = CliRunner()
-        mock_welcome = MagicMock()
-        mock_welcome.run.return_value = 'transcribe'
-        mock_file_picker = MagicMock()
-        mock_file_picker.run.return_value = None  # user cancels
-
-        with (
-            patch(_WELCOME_PICKER, return_value=mock_welcome),
-            patch(_FILE_PICKER, return_value=mock_file_picker),
-        ):
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.apps.shell.ShellApp') as mock_shell:
             result = runner.invoke(cli, [])
 
         assert result.exit_code == 0
-        mock_file_picker.run.assert_called_once()
-
-    def test_welcome_picker_transcribe_proceeds_to_app(self, tmp_path: Path):
-        """WelcomePicker selects transcribe; FilePicker picks file → TranscribeApp runs."""
-        runner = CliRunner()
-        audio_file = tmp_path / 'audio.wav'
-        audio_file.touch()
-
-        mock_welcome = MagicMock()
-        mock_welcome.run.return_value = 'transcribe'
-        mock_file_picker = MagicMock()
-        mock_file_picker.run.return_value = audio_file
-
-        mock_template_picker = MagicMock()
-        mock_template_picker.run.return_value = ('default_en', MagicMock())
-
-        mock_template_loader = MagicMock()
-        mock_template_loader.load.return_value = MagicMock(
-            metadata=MagicMock(locale='en-US'),
-            quick_actions=[],
-            recognition_hints=[],
-        )
-
-        with (
-            patch(_WELCOME_PICKER, return_value=mock_welcome),
-            patch(_FILE_PICKER, return_value=mock_file_picker),
-            patch(_YAML_CFG) as mock_config_cls,
-            patch(_YAML_TPL, return_value=mock_template_loader),
-            patch(_BUILD) as mock_build,
-            patch(_INFRA),
-            patch(_PICKER, return_value=mock_template_picker),
-            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe.TranscribeApp') as mock_app_cls,
-            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
-        ):
-            mock_config_cls.return_value.load.return_value = {}
-            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            result = runner.invoke(cli, [])
-
-        assert result.exit_code == 0
-        mock_app_cls.return_value.run.assert_called_once()
-
-    def test_welcome_picker_record_proceeds_to_app(self, tmp_path: Path):
-        """WelcomePicker selects record → RecordApp runs."""
-        runner = CliRunner()
-        mock_welcome = MagicMock()
-        mock_welcome.run.return_value = 'record'
-
-        mock_template_picker = MagicMock()
-        mock_template_picker.run.return_value = ('default_en', MagicMock())
-
-        mock_template_loader = MagicMock()
-        mock_template_loader.load.return_value = MagicMock(
-            metadata=MagicMock(locale='en-US'),
-            quick_actions=[],
-            recognition_hints=[],
-        )
-
-        with (
-            patch(_WELCOME_PICKER, return_value=mock_welcome),
-            patch(_YAML_CFG) as mock_config_cls,
-            patch(_YAML_TPL, return_value=mock_template_loader),
-            patch(_BUILD) as mock_build,
-            patch(_INFRA),
-            patch(_PICKER, return_value=mock_template_picker),
-            patch(f'{_CLI_HELPERS}.preflight_llm', return_value=([], [])),
-            patch(f'{_CLI_HELPERS}.preflight_microphone'),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.record.RecordApp') as mock_app_cls,
-            patch('lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer'),
-        ):
-            mock_config_cls.return_value.load.return_value = {}
-            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            result = runner.invoke(cli, [])
-
-        assert result.exit_code == 0
-        mock_app_cls.return_value.run.assert_called_once()
-
-    def test_welcome_picker_view_proceeds_to_app(self, tmp_path: Path):
-        """WelcomePicker selects view → ViewApp runs → loops back → Esc exits."""
-        runner = CliRunner()
-        session_dir = tmp_path / '2026-02-22_120000'
-        session_dir.mkdir()
-
-        # First call returns 'view', second returns None (Esc) to exit loop
-        mock_welcome_1 = MagicMock()
-        mock_welcome_1.run.return_value = 'view'
-        mock_welcome_2 = MagicMock()
-        mock_welcome_2.run.return_value = None
-
-        mock_session_picker = MagicMock()
-        mock_session_picker.run.side_effect = [session_dir, None]
-
-        with (
-            patch(_WELCOME_PICKER, side_effect=[mock_welcome_1, mock_welcome_2]),
-            patch(_YAML_CFG) as mock_config_cls,
-            patch(_YAML_TPL),
-            patch(_BUILD) as mock_build,
-            patch(_INFRA),
-            patch(_SESSION_PICKER, return_value=mock_session_picker),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.ViewApp') as mock_app_cls,
-        ):
-            mock_config_cls.return_value.load.return_value = {}
-            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            result = runner.invoke(cli, [])
-
-        assert result.exit_code == 0
-        mock_app_cls.return_value.run.assert_called_once()
-
-    def test_welcome_picker_reopens_on_the_last_mode(self, tmp_path: Path):
-        """Leaving a mode and coming back keeps the highlight on that mode."""
-        runner = CliRunner()
-        session_dir = tmp_path / '2026-02-22_120000'
-        session_dir.mkdir()
-
-        first_open = MagicMock()
-        first_open.run.return_value = 'view'
-        second_open = MagicMock()
-        second_open.run.return_value = None
-
-        mock_session_picker = MagicMock()
-        mock_session_picker.run.side_effect = [session_dir, None]
-
-        with (
-            patch(_WELCOME_PICKER, side_effect=[first_open, second_open]) as picker_ctor,
-            patch(_YAML_CFG) as mock_config_cls,
-            patch(_YAML_TPL),
-            patch(_BUILD) as mock_build,
-            patch(_INFRA),
-            patch(_SESSION_PICKER, return_value=mock_session_picker),
-            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.view.ViewApp'),
-        ):
-            mock_config_cls.return_value.load.return_value = {}
-            mock_build.return_value = MagicMock(output=MagicMock(directory=str(tmp_path)))
-            result = runner.invoke(cli, [])
-
-        assert result.exit_code == 0
-        assert [call.kwargs['initial_mode'] for call in picker_ctor.call_args_list] == [None, 'view']
+        assert mock_shell.call_args.kwargs['kiosk'] is True
 
     def test_config_file_not_found_exits_1(self):
         runner = CliRunner()

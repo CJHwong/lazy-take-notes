@@ -167,7 +167,7 @@ class TranscribeApp(BaseApp):
             if has_content and not self._final_digest_done:
                 self._run_final_digest()
             elif self._pending_quit:
-                self.exit()
+                self.dismiss()
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._worker_done = True
@@ -209,4 +209,4 @@ class TranscribeApp(BaseApp):
             self._pending_quit = True
             self._run_final_digest()
         else:
-            self.exit()
+            self.dismiss()

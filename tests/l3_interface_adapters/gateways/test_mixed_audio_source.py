@@ -11,6 +11,36 @@ from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import Mi
 from tests.conftest import FakeAudioSource
 
 
+class RestartableSource:
+    """Fake source that plays a scripted batch per open() call and counts restarts."""
+
+    def __init__(self, batches: list[list[np.ndarray]]) -> None:
+        self._batches = batches
+        self._current: list[np.ndarray] = []
+        self.open_calls: list[tuple[int, int]] = []
+        self.close_calls = 0
+        self.drain_calls = 0
+        self.mic_muted = False
+
+    def open(self, sample_rate: int, channels: int) -> None:
+        self.open_calls.append((sample_rate, channels))
+        index = min(len(self.open_calls) - 1, len(self._batches) - 1)
+        self._current = list(self._batches[index])
+
+    def read(self, timeout: float = 0.1) -> np.ndarray | None:
+        if not self._current:
+            time.sleep(0.005)  # keep the reader thread from spinning hot
+            return None
+        return self._current.pop(0)
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+    def drain(self) -> None:
+        self.drain_calls += 1
+        self._current = []
+
+
 class TestMixedAudioSource:
     def test_system_signal_seen_delegates_to_system_source(self):
         class ReportingSource(FakeAudioSource):
@@ -413,3 +443,82 @@ class TestMixedAudioSource:
         # drain() must delegate to both underlying sources.
         assert mic.drain_calls == 1
         assert sys_audio.drain_calls == 1
+
+    def test_dead_system_source_restarts_while_mic_is_active(self):
+        """A tap that streams exact zeros after delivering real audio is dead.
+        Core Audio left it alive with no error. Reopen it."""
+        mic = RestartableSource([[np.full(16, 0.001, dtype=np.float32)] * 500])
+        sys_audio = RestartableSource(
+            [
+                [np.full(16, 0.5, dtype=np.float32), *[np.zeros(16, dtype=np.float32)] * 4],
+                [np.full(16, 0.5, dtype=np.float32)],
+            ]
+        )
+        src = MixedAudioSource(mic, sys_audio, dead_audio_seconds=0.001)
+        src.open(16000, 1)
+        time.sleep(0.2)
+        src.close()
+
+        assert len(sys_audio.open_calls) == 2, 'system source must be reopened once'
+        assert sys_audio.close_calls >= 1
+        assert sys_audio.drain_calls >= 1
+
+    def test_dead_system_source_waits_for_mic_activity(self):
+        """Genuine system silence is all zeros. Without mic signal to prove the
+        room is active, the tap must not be restarted."""
+        mic = RestartableSource([[np.zeros(16, dtype=np.float32)] * 500])
+        sys_audio = RestartableSource([[np.full(16, 0.5, dtype=np.float32), *[np.zeros(16, dtype=np.float32)] * 50]])
+        src = MixedAudioSource(mic, sys_audio, dead_audio_seconds=0.001)
+        src.open(16000, 1)
+        time.sleep(0.2)
+        src.close()
+
+        assert len(sys_audio.open_calls) == 1
+
+    def test_dead_mic_source_restarts_after_signal(self):
+        """A live mic never emits exact zeros. After signal, a zero run means the
+        stream died and must be reopened."""
+        mic = RestartableSource(
+            [
+                [np.full(16, 0.001, dtype=np.float32), *[np.zeros(16, dtype=np.float32)] * 4],
+                [np.full(16, 0.001, dtype=np.float32)],
+            ]
+        )
+        sys_audio = RestartableSource([[np.full(16, 0.5, dtype=np.float32)] * 500])
+        src = MixedAudioSource(mic, sys_audio, dead_audio_seconds=0.001)
+        src.open(16000, 1)
+        time.sleep(0.2)
+        src.close()
+
+        assert len(mic.open_calls) == 2, 'mic source must be reopened once'
+        assert mic.drain_calls >= 1
+
+    def test_zero_only_source_never_restarts(self):
+        """A source that has never delivered signal is not dead; it is quiet.
+        Leave it alone."""
+        mic = RestartableSource([[np.zeros(16, dtype=np.float32)] * 500])
+        sys_audio = RestartableSource([[np.zeros(16, dtype=np.float32)] * 500])
+        src = MixedAudioSource(mic, sys_audio, dead_audio_seconds=0.001)
+        src.open(16000, 1)
+        time.sleep(0.1)
+        src.close()
+
+        assert len(mic.open_calls) == 1
+        assert len(sys_audio.open_calls) == 1
+
+    def test_dead_system_source_restarts_once_per_signal_episode(self):
+        """One restart per episode. If the fresh tap also carries silence, wait
+        for signal again instead of reopening every few seconds."""
+        mic = RestartableSource([[np.full(16, 0.001, dtype=np.float32)] * 1000])
+        sys_audio = RestartableSource(
+            [
+                [np.full(16, 0.5, dtype=np.float32), *[np.zeros(16, dtype=np.float32)] * 100],
+                [np.zeros(16, dtype=np.float32)] * 100,
+            ]
+        )
+        src = MixedAudioSource(mic, sys_audio, dead_audio_seconds=0.001)
+        src.open(16000, 1)
+        time.sleep(0.3)
+        src.close()
+
+        assert len(sys_audio.open_calls) == 2

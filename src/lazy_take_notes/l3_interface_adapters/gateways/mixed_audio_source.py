@@ -6,6 +6,7 @@ import logging
 import math
 import queue
 import threading
+import time
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -42,6 +43,13 @@ class MixedAudioSource:
     remote voice appears in the mix twice — once via the system tap, once via the
     amplified mic copy — producing a doubled / phased output that degrades both
     recording quality and transcription accuracy.
+
+    Dead-stream recovery: Core Audio keeps a client alive after an IO overload and
+    hands it zero-filled buffers with no error. A live source never delivers exact
+    digital zeros, so each reader restarts its source after a sustained zero run.
+    It acts only after the source has delivered real signal once, and the system
+    tap additionally waits for mic activity, so genuine silence does not cause
+    churn.
     """
 
     def __init__(
@@ -51,6 +59,7 @@ class MixedAudioSource:
         *,
         silence_threshold: float = 0.01,
         max_mic_gain: float = 10.0,
+        dead_audio_seconds: float = 20.0,
     ) -> None:
         self._mic = mic
         self._system = system_audio
@@ -61,6 +70,15 @@ class MixedAudioSource:
         self._sys_buf: np.ndarray = np.array([], dtype=np.float32)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._sample_rate: int = 16_000
+        self._channels: int = 1
+        # A live source never delivers exact digital zeros: the mic has a noise
+        # floor, and the system tap only reaches zero when the output mix is
+        # silent. A source that worked and then streams exact zeros has died.
+        # Core Audio leaves a dead client alive and streaming zero-filled
+        # buffers after an IO overload, with no error anywhere. Restart it.
+        self._dead_audio_seconds = dead_audio_seconds
+        self._mic_signal_time: float = 0.0
         # When True, mic audio is zeroed before mixing — system audio only.
         # Written by main thread, read by audio worker thread; bool assignment is
         # atomic under the GIL so no lock is needed.
@@ -96,21 +114,79 @@ class MixedAudioSource:
             type(self._mic).__name__,
             type(self._system).__name__,
         )
+        self._sample_rate = sample_rate
+        self._channels = channels
+        self._mic_signal_time = 0.0
         self._mic.open(sample_rate, channels)
         self._system.open(sample_rate, channels)
         self._stop.clear()
         self._threads = [
-            threading.Thread(target=self._reader, args=(self._mic, self._mic_q), daemon=True),
-            threading.Thread(target=self._reader, args=(self._system, self._sys_q), daemon=True),
+            threading.Thread(target=self._reader, args=(self._mic, self._mic_q, True), daemon=True),
+            threading.Thread(target=self._reader, args=(self._system, self._sys_q, False), daemon=True),
         ]
         for t in self._threads:
             t.start()
 
-    def _reader(self, src, dest: queue.Queue) -> None:
+    def _reader(self, src: AudioSource, dest: queue.Queue, is_mic: bool) -> None:
+        zero_seconds = 0.0
+        saw_signal = False
         while not self._stop.is_set():
             chunk = src.read(timeout=0.05)
-            if chunk is not None:
-                dest.put(chunk)
+            if chunk is None:
+                continue
+            if chunk.size and chunk.any():
+                saw_signal = True
+                zero_seconds = 0.0
+                if is_mic:
+                    self._mic_signal_time = time.monotonic()
+            else:
+                zero_seconds += chunk.size / self._sample_rate
+                if self._should_restart(is_mic, saw_signal, zero_seconds):
+                    self._restart(src, dest, is_mic)
+                    zero_seconds = 0.0
+                    saw_signal = False
+                    continue
+            dest.put(chunk)
+
+    def _should_restart(self, is_mic: bool, saw_signal: bool, zero_seconds: float) -> bool:
+        if self._stop.is_set() or not saw_signal or zero_seconds < self._dead_audio_seconds:
+            return False
+        if is_mic:
+            return True
+        # The system tap reaches exact zero whenever nothing plays. Restart it
+        # only while the mic shows the room is active, so a quiet stretch does
+        # not churn the tap open and closed every few seconds.
+        return time.monotonic() - self._mic_signal_time < 2.0
+
+    def _restart(self, src: AudioSource, dest: queue.Queue, is_mic: bool) -> None:
+        label = 'mic' if is_mic else 'system'
+        if self._stop.is_set():
+            return
+        log.warning(
+            'restarting %s audio source after %.0fs of exact silence (stream died, no error reported)',
+            label,
+            self._dead_audio_seconds,
+        )
+        try:
+            src.close()
+        except Exception:
+            log.exception('failed to close %s audio source before restart', label)
+        self._discard(dest)
+        try:
+            src.open(self._sample_rate, self._channels)
+            src.drain()
+        except Exception:
+            log.exception('failed to reopen %s audio source', label)
+        if is_mic:
+            self._mic_signal_time = 0.0
+
+    @staticmethod
+    def _discard(dest: queue.Queue) -> None:
+        while True:
+            try:
+                dest.get_nowait()
+            except queue.Empty:
+                break
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
         # Mic chunk timing drives output cadence (see class docstring).
@@ -226,11 +302,7 @@ class MixedAudioSource:
         their internal queues don't bleed pause-period audio through on resume.
         """
         for q in (self._mic_q, self._sys_q):
-            while True:
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    break
+            self._discard(q)
         self._sys_buf = np.array([], dtype=np.float32)
         self.last_mic_rms = 0.0
         self._mic_rms_ema = 0.0

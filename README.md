@@ -81,6 +81,8 @@ Config lives in your OS config directory:
 | Linux   | `~/.config/lazy-take-notes/`                     |
 | Windows | `C:\Users\<you>\AppData\Local\lazy-take-notes\`  |
 
+`take-note config` warns before it closes with unsaved changes.
+
 Example `config.yaml`:
 
 ```yaml
@@ -200,6 +202,8 @@ The bundle sets three environment variables in `trolley.toml`:
 | `LTN_OUTPUT_DIR` | `~/Documents/LazyTakeNotes` | The default `./output` would land inside the bundle. |
 | `LTN_KIOSK` | `1` | Returns to the mode picker after a session instead of exiting. |
 | `TEXTUAL_DRIVER` | `...drivers.ghostty_driver:GhosttyDriver` | Turns off the Kitty keyboard protocol under Trolley. Leaving it on breaks arrow keys. |
+
+Moving the window between displays with different scale factors can leave the terminal grid at the wrong size. Drag a window edge to re-sync it. The cause and the upstream patch are in [docs/TROLLEY_DISPLAY_SCALE.md](docs/TROLLEY_DISPLAY_SCALE.md).
 
 The launcher installs from `main` by default. A bundle built from an unmerged branch must point at that checkout, or the installed code will not match the driver the bundle expects:
 

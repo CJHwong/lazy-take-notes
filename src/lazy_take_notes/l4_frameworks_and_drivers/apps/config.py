@@ -6,11 +6,12 @@ import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell command
 import sys
 
 from pydantic import ValidationError
-from textual.app import App as TextualApp
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.screen import ModalScreen
 from textual.widgets import (
+    Button,
     Collapsible,
     Input,
     Label,
@@ -35,6 +36,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.container import (
     LLM_PROVIDERS_GROUP,
     TRANSCRIPTION_PROVIDERS_GROUP,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
@@ -309,7 +311,65 @@ class RecordingPreview(Vertical):
 # ── ConfigApp ────────────────────────────────────────────────────────────────
 
 
-class ConfigApp(TextualApp):
+class _DiscardChangesModal(ModalScreen[bool]):
+    """Ask before leaving Settings with unsaved edits. True means discard."""
+
+    DEFAULT_CSS = """
+    _DiscardChangesModal {
+        align: center middle;
+    }
+
+    _DiscardChangesModal > Vertical {
+        width: 54;
+        height: auto;
+        background: $surface;
+        border: thick $warning;
+        padding: 1 2;
+    }
+
+    _DiscardChangesModal #discard-title {
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    _DiscardChangesModal #discard-body {
+        margin-bottom: 1;
+    }
+
+    _DiscardChangesModal #discard-actions {
+        height: auto;
+        align: right middle;
+    }
+
+    _DiscardChangesModal Button {
+        margin-left: 2;
+    }
+    """
+
+    BINDINGS = [
+        Binding('escape', 'keep_editing', 'Keep editing', priority=True),
+        Binding('enter', 'discard', 'Discard', priority=True),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static('Unsaved changes', id='discard-title')
+            yield Static('Your changes to Settings have not been saved. Leave anyway?', id='discard-body')
+            with Horizontal(id='discard-actions'):
+                yield Button('Keep editing', id='discard-cancel')
+                yield Button('Discard and exit', id='discard-confirm', variant='error')
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == 'discard-confirm')
+
+    def action_keep_editing(self) -> None:
+        self.dismiss(False)
+
+    def action_discard(self) -> None:
+        self.dismiss(True)
+
+
+class ConfigApp(ShellScreen):
     """TUI form for editing lazy-take-notes configuration."""
 
     CSS = """
@@ -379,6 +439,7 @@ class ConfigApp(TextualApp):
         super().__init__(**kwargs)
         self._saved = False
         self._raw: dict = {}
+        self._baseline: dict | None = None
         self._load_current_config()
 
     def _load_current_config(self) -> None:
@@ -730,7 +791,7 @@ class ConfigApp(TextualApp):
                     yield _SelectRow(
                         'Theme',
                         'cfg-theme',
-                        list(self.available_themes.keys()),
+                        list(self.app.available_themes.keys()),
                         self._infra.theme,
                         help_text='Choose a color theme. Preview updates instantly.',
                     )
@@ -815,10 +876,11 @@ class ConfigApp(TextualApp):
         return data
 
     def on_mount(self) -> None:
-        """Apply saved theme and set initial visibility of model fields."""
-        self.theme = self._infra.theme
+        """Apply saved theme, set initial visibility, and snapshot the form."""
+        self.app.theme = self._infra.theme
         self._sync_model_fields_visibility(self._infra.llm_provider)
         self._sync_transcription_model_fields_visibility(self._infra.transcription_provider)
+        self._baseline = self._collect_form_data()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Toggle model fields when provider changes; preview theme on change."""
@@ -827,7 +889,7 @@ class ConfigApp(TextualApp):
         elif event.select.id == 'cfg-trans-provider':
             self._sync_transcription_model_fields_visibility(str(event.value))
         elif event.select.id == 'cfg-theme':
-            self.theme = str(event.value)
+            self.app.theme = str(event.value)
 
     def _sync_model_fields_visibility(self, provider: str) -> None:
         self._sync_provider_visibility(
@@ -878,6 +940,7 @@ class ConfigApp(TextualApp):
 
         path = write_config(data)
         self._saved = True
+        self._baseline = self._collect_form_data()
         self.notify(f'Saved to {path}', severity='information')
 
     def _test_connection(self) -> None:
@@ -923,13 +986,14 @@ class ConfigApp(TextualApp):
                 encoding='utf-8',
             )
         try:
-            with self.suspend():
+            with self.app.suspend():
                 subprocess.run([*editor_argv, str(path)], check=False)  # noqa: S603 -- argv from env/platform, not user shell
         except SuspendNotSupported:
             self.notify('Cannot open editor in this environment', severity='error')
             return
         self._load_current_config()
         self._repopulate_fields()
+        self._baseline = self._collect_form_data()
         self.notify('Reloaded from disk')
 
     def _repopulate_provider_select(self, widget_id: str, provider: str) -> None:
@@ -986,8 +1050,22 @@ class ConfigApp(TextualApp):
         self.query_one('#cfg-recognition-hints', TextArea).text = '\n'.join(self._raw.get('recognition_hints', []))
         self.query_one('#cfg-theme', Select).value = self._infra.theme
 
+    def _has_unsaved_changes(self) -> bool:
+        """True when the form no longer matches the values loaded or last saved."""
+        return self._baseline is not None and self._collect_form_data() != self._baseline
+
     def action_quit_app(self) -> None:
-        self.exit(self._saved)
+        if isinstance(self.app.screen, _DiscardChangesModal):
+            self.app.screen.dismiss(False)
+            return
+        if self._has_unsaved_changes():
+            self.app.push_screen(_DiscardChangesModal(), self._after_discard_prompt)
+            return
+        self.dismiss(self._saved)
+
+    def _after_discard_prompt(self, discard: bool | None) -> None:
+        if discard:
+            self.dismiss(self._saved)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

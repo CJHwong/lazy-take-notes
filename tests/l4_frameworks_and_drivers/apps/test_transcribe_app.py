@@ -161,7 +161,7 @@ class TestTranscribeAppActions:
         with patch.object(app, '_start_file_worker'):
             async with app.run_test() as pilot:
                 app._worker_done = True
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_called_once()
@@ -188,7 +188,7 @@ class TestTranscribeAppActions:
         with patch.object(app, '_start_file_worker'):
             async with app.run_test() as pilot:
                 app._digest_running = True
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_not_called()
@@ -214,7 +214,7 @@ class TestTranscribeAppActions:
         with patch.object(app, '_start_file_worker'):
             async with app.run_test() as pilot:
                 app._pending_quit = True
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
                     mock_exit.assert_called_once()
@@ -299,7 +299,7 @@ class TestTranscribeAppHints:
             async with app.run_test() as pilot:
                 await pilot.press('h')
                 await pilot.pause()
-                assert app.screen.__class__.__name__ == 'HelpModal'
+                assert app.app.screen.__class__.__name__ == 'HelpModal'
 
 
 class TestTranscribeAppDownloadModal:

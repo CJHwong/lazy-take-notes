@@ -117,4 +117,4 @@ class TestWelcomePicker:
             picker = WelcomePicker()
             async with picker.run_test() as pilot:
                 await pilot.pause()
-                assert picker.theme == 'textual-light'
+                assert picker.app.theme == 'textual-light'

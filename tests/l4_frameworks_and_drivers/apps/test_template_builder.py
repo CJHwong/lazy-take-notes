@@ -166,7 +166,7 @@ class TestTemplateBuilderQuit:
     async def test_escape_exits(self):
         app = TemplateBuilderApp()
         async with app.run_test() as pilot:
-            with patch.object(app, 'exit') as mock_exit:
+            with patch.object(app, 'dismiss') as mock_exit:
                 await pilot.press('escape')
                 await pilot.pause()
                 mock_exit.assert_called_once()
@@ -184,12 +184,12 @@ class TestSaveTemplateScreen:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(_SaveTemplateScreen(suggested_name='my_tmpl'))
+            app.app.push_screen(_SaveTemplateScreen(suggested_name='my_tmpl'))
             for _ in range(5):
                 await pilot.pause()
 
             # Query from the active screen (the modal), not from app root
-            screen = app.screen
+            screen = app.app.screen
             assert screen.query_one('#save-label')
             assert screen.query_one('#save-input')
             assert screen.query_one('#save-hint')
@@ -203,7 +203,7 @@ class TestSaveTemplateScreen:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(
+            app.app.push_screen(
                 _SaveTemplateScreen(suggested_name='test_name'),
                 callback=lambda v: dismissed_values.append(v),
             )
@@ -212,7 +212,7 @@ class TestSaveTemplateScreen:
 
             # Call dismiss directly to avoid pilot.press('enter') routing
             # to the wrong Input widget in CI timing
-            screen = app.screen
+            screen = app.app.screen
             assert isinstance(screen, _SaveTemplateScreen)
             screen.dismiss('my_template')
             for _ in range(3):
@@ -228,7 +228,7 @@ class TestSaveTemplateScreen:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(
+            app.app.push_screen(
                 _SaveTemplateScreen(suggested_name=''),
                 callback=lambda v: dismissed_values.append(v),
             )
@@ -237,7 +237,7 @@ class TestSaveTemplateScreen:
 
             from textual.widgets import Input as TInput
 
-            save_input = app.screen.query_one('#save-input', TInput)
+            save_input = app.app.screen.query_one('#save-input', TInput)
             save_input.value = ''
             await pilot.press('enter')
             for _ in range(3):
@@ -254,7 +254,7 @@ class TestSaveTemplateScreen:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.push_screen(
+            app.app.push_screen(
                 _SaveTemplateScreen(suggested_name='test'),
                 callback=lambda v: dismissed_values.append(v),
             )
@@ -262,7 +262,7 @@ class TestSaveTemplateScreen:
                 await pilot.pause()
 
             # The modal's escape binding calls action_cancel → dismiss(None)
-            screen = app.screen
+            screen = app.app.screen
             assert isinstance(screen, _SaveTemplateScreen)
             screen.action_cancel()
             for _ in range(3):

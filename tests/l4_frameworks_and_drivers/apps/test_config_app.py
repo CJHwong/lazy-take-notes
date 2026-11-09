@@ -11,6 +11,7 @@ import yaml
 from lazy_take_notes.l4_frameworks_and_drivers.apps.config import (
     ConfigApp,
     _dict_to_inline,  # noqa: PLC2701 -- testing internal helper
+    _DiscardChangesModal,  # noqa: PLC2701 -- testing internal modal
     _inline_to_dict,  # noqa: PLC2701 -- testing internal helper
     _resolve_editor,  # noqa: PLC2701 -- testing internal helper
     _to_float,  # noqa: PLC2701 -- testing internal helper
@@ -321,7 +322,7 @@ class TestConfigAppRawEditor:
             with (
                 patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['cat']),
                 patch(f'{_CONFIG_MOD}.subprocess.run') as mock_run,
-                patch.object(app, 'suspend', side_effect=lambda: _NullContext()),
+                patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
             ):
                 await pilot.press('e')
                 await pilot.pause()
@@ -346,7 +347,7 @@ class TestConfigAppRawEditor:
             with (
                 patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['cat']),
                 patch(f'{_CONFIG_MOD}.subprocess.run'),
-                patch.object(app, 'suspend', side_effect=lambda: _NullContext()),
+                patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
                 patch(f'{_CONFIG_MOD}.config_file_path', return_value=config_path),
             ):
                 await pilot.press('e')
@@ -379,7 +380,7 @@ class TestConfigAppRawEditor:
             await pilot.pause()
             with (
                 patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['vim']),
-                patch.object(app, 'suspend', side_effect=SuspendNotSupported()),
+                patch.object(app.app, 'suspend', side_effect=SuspendNotSupported()),
             ):
                 await pilot.press('e')
                 await pilot.pause()
@@ -443,7 +444,7 @@ class TestConfigAppAppearance:
         app, _ = _make_app(tmp_path, monkeypatch, config_data={'theme': 'nord'})
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert app.theme == 'nord'
+            assert app.app.theme == 'nord'
 
     @pytest.mark.asyncio
     async def test_theme_select_change_previews(self, tmp_path, monkeypatch):
@@ -454,7 +455,7 @@ class TestConfigAppAppearance:
             await pilot.pause()
             app.query_one('#cfg-theme', Select).value = 'nord'
             await pilot.pause()
-            assert app.theme == 'nord'
+            assert app.app.theme == 'nord'
 
     @pytest.mark.asyncio
     async def test_recording_preview_renders(self, tmp_path, monkeypatch):
@@ -566,7 +567,89 @@ class TestConfigAppQuit:
     async def test_escape_exits(self, tmp_path, monkeypatch):
         app, _ = _make_app(tmp_path, monkeypatch)
         async with app.run_test() as pilot:
-            with patch.object(app, 'exit') as mock_exit:
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_escape_with_unsaved_changes_warns(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_not_called()
+                assert isinstance(app.app.screen, _DiscardChangesModal)
+
+    @pytest.mark.asyncio
+    async def test_discard_exits(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                await pilot.click('#discard-confirm')
+                await pilot.pause()
+                mock_exit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_keep_editing_stays(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_not_called()
+                assert not isinstance(app.app.screen, _DiscardChangesModal)
+
+    @pytest.mark.asyncio
+    async def test_escape_after_save_exits_without_warning(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reverted_edit_is_not_dirty(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            field = app.query_one('#cfg-digest-model', Input)
+            original = field.value
+            field.value = 'changed-model'
+            await pilot.pause()
+            field.value = original
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
                 await pilot.press('escape')
                 await pilot.pause()
                 mock_exit.assert_called_once()

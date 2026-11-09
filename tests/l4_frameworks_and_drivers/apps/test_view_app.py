@@ -81,7 +81,7 @@ class TestViewAppQuit:
         session_dir = _make_session(tmp_path)
         app = ViewApp(session_dir=session_dir)
         async with app.run_test() as pilot:
-            with patch.object(app, 'exit') as mock_exit:
+            with patch.object(app, 'dismiss') as mock_exit:
                 await pilot.press('q')
                 await pilot.pause()
                 mock_exit.assert_called_once()
@@ -171,4 +171,4 @@ class TestViewAppTheme:
             app = ViewApp(session_dir=session_dir)
             async with app.run_test() as pilot:
                 await pilot.pause()
-                assert app.theme == 'nord'
+                assert app.app.theme == 'nord'
