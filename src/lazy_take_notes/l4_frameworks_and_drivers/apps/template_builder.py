@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
@@ -11,8 +10,9 @@ from textual.widgets import Button, Input, Markdown, Static
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 
-# Standalone TextualApp — no BaseApp inheritance (like ViewApp, ConfigApp).
+# Standalone ShellScreen — no BaseApp inheritance (like ViewApp, ConfigApp).
 # Constructs its own LLM client from InfraConfig.
 
 _MAX_AUTO_FIX = 2
@@ -145,7 +145,7 @@ class _ConfirmQuitScreen(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class TemplateBuilderApp(TextualApp):
+class TemplateBuilderApp(ShellScreen):
     """Chat + preview TUI for building session templates with an LLM."""
 
     CSS = """
@@ -235,7 +235,7 @@ class TemplateBuilderApp(TextualApp):
             load_theme,
         )
 
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         self._append_chat('assistant', _WELCOME)
         self.query_one('#tb-input', Input).focus()
 
@@ -414,7 +414,7 @@ class TemplateBuilderApp(TextualApp):
             self.notify('No template to save — generate one first.', severity='warning')
             return
         suggested = self._current_template.metadata.key or _slugify(self._current_template.metadata.name)
-        self.push_screen(
+        self.app.push_screen(
             _SaveTemplateScreen(suggested_name=suggested),
             callback=self._on_save_name,
         )
@@ -433,13 +433,13 @@ class TemplateBuilderApp(TextualApp):
 
     def action_quit_app(self) -> None:
         if self._current_template is not None and not self._saved:
-            self.push_screen(_ConfirmQuitScreen(), callback=self._on_quit_confirmed)
+            self.app.push_screen(_ConfirmQuitScreen(), callback=self._on_quit_confirmed)
         else:
-            self.exit()
+            self.dismiss()
 
     def _on_quit_confirmed(self, confirmed: bool | None) -> None:
         if confirmed:
-            self.exit()
+            self.dismiss()
 
 
 def _slugify(text: str) -> str:

@@ -51,7 +51,7 @@ class TestTemplatePicker:
             picker = TemplatePicker()
             async with picker.run_test() as pilot:
                 await pilot.pause()
-                assert picker.theme == 'textual-light'
+                assert picker.app.theme == 'textual-light'
 
     @pytest.mark.asyncio
     async def test_escape_returns_none(self):
@@ -160,10 +160,10 @@ class TestTemplatePicker:
     async def test_down_focuses_list_from_search(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            assert isinstance(picker.focused, Input)
+            assert isinstance(picker.app.focused, Input)
             await pilot.press('down')
             await pilot.pause()
-            assert not isinstance(picker.focused, Input)
+            assert not isinstance(picker.app.focused, Input)
 
     @pytest.mark.asyncio
     async def test_up_on_first_item_refocuses_search(self):
@@ -172,11 +172,11 @@ class TestTemplatePicker:
             # Down from search focuses list on first TemplateItem
             await pilot.press('down')
             await pilot.pause()
-            assert not isinstance(picker.focused, Input)
+            assert not isinstance(picker.app.focused, Input)
             # Up on first TemplateItem should refocus search input
             await pilot.press('up')
             await pilot.pause()
-            assert isinstance(picker.focused, Input)
+            assert isinstance(picker.app.focused, Input)
 
     @pytest.mark.asyncio
     async def test_select_noop_when_no_current_name(self):
@@ -199,7 +199,7 @@ class TestTemplatePicker:
         """[e] must not fire edit when the search Input has focus (to allow typing)."""
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            assert isinstance(picker.focused, Input)
+            assert isinstance(picker.app.focused, Input)
             original_name = picker._current_name
             await pilot.press('e')
             await pilot.pause()
@@ -352,11 +352,11 @@ class TestDeleteTemplate:
         """[x] must not fire delete when the search Input has focus."""
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
-            assert isinstance(picker.focused, Input)
+            assert isinstance(picker.app.focused, Input)
             await pilot.press('x')
             await pilot.pause()
             # Just typed 'x' into search — no confirm dialog pushed
-            assert len(picker.screen_stack) == 1
+            assert len(picker.app.screen_stack) == 2
 
     @pytest.mark.asyncio
     async def test_delete_warns_on_builtin(self):
@@ -371,7 +371,7 @@ class TestDeleteTemplate:
             picker.action_delete_template()
             await pilot.pause()
             # No confirm screen pushed — still on the main screen
-            assert len(picker.screen_stack) == 1
+            assert len(picker.app.screen_stack) == 2
 
     @pytest.mark.asyncio
     async def test_delete_noop_when_no_current(self):
@@ -405,7 +405,7 @@ class TestDeleteTemplate:
             picker.action_delete_template()
             await pilot.pause()
             # Confirm screen is now on the stack
-            assert len(picker.screen_stack) == 2
+            assert len(picker.app.screen_stack) == 3
 
     @pytest.mark.asyncio
     async def test_confirm_yes_deletes_user_template(self, tmp_path: Path, monkeypatch):
@@ -527,7 +527,7 @@ class TestDeleteTemplate:
             # Press 'x' through the actual key handler
             await pilot.press('x')
             await pilot.pause()
-            assert len(picker.screen_stack) == 2
+            assert len(picker.app.screen_stack) == 3
 
     @pytest.mark.asyncio
     async def test_confirm_button_click_yes(self, tmp_path: Path, monkeypatch):
@@ -551,7 +551,7 @@ class TestDeleteTemplate:
             picker.action_delete_template()
             await pilot.pause()
             # Click the Yes button directly
-            yes_btn = picker.screen.query_one('#confirm-yes', Button)
+            yes_btn = picker.app.screen.query_one('#confirm-yes', Button)
             yes_btn.press()
             await pilot.pause()
 
@@ -579,7 +579,7 @@ class TestDeleteTemplate:
 
             picker.action_delete_template()
             await pilot.pause()
-            no_btn = picker.screen.query_one('#confirm-no', Button)
+            no_btn = picker.app.screen.query_one('#confirm-no', Button)
             no_btn.press()
             await pilot.pause()
 
@@ -654,7 +654,7 @@ class TestEditTemplateKeyAndSuspend:
 
         picker = TemplatePicker()
         async with picker.run_test():
-            monkeypatch.setattr(picker, 'suspend', fake_suspend)
+            monkeypatch.setattr(picker.app, 'suspend', fake_suspend)
             picker._current_name = 'default_en'
             with patch.object(tp_mod.subprocess, 'run') as mock_run:
                 picker.action_edit_template()
@@ -679,7 +679,7 @@ class TestEditTemplateKeyAndSuspend:
 
         picker = TemplatePicker()
         async with picker.run_test():
-            monkeypatch.setattr(picker, 'suspend', raise_suspend)
+            monkeypatch.setattr(picker.app, 'suspend', raise_suspend)
             picker._current_name = 'default_en'
             # Should not raise
             picker.action_edit_template()
@@ -755,7 +755,7 @@ class TestBuiltinTemplatesNoticeIntegration:
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
             await pilot.pause()
-            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert isinstance(picker.app.screen, BuiltinTemplatesNotice)
 
     @pytest.mark.asyncio
     async def test_notice_not_shown_when_flag_exists(self, tmp_path: Path, monkeypatch):
@@ -767,7 +767,7 @@ class TestBuiltinTemplatesNoticeIntegration:
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
             await pilot.pause()
-            assert not isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert not isinstance(picker.app.screen, BuiltinTemplatesNotice)
 
     @pytest.mark.asyncio
     async def test_suppress_creates_flag_file(self, tmp_path: Path, monkeypatch):
@@ -778,13 +778,13 @@ class TestBuiltinTemplatesNoticeIntegration:
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
             await pilot.pause()
-            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert isinstance(picker.app.screen, BuiltinTemplatesNotice)
             assert not flag.exists()
 
             await pilot.press('d')
             await pilot.pause()
             assert flag.exists()
-            assert not isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert not isinstance(picker.app.screen, BuiltinTemplatesNotice)
 
     @pytest.mark.asyncio
     async def test_dismiss_without_suppress_no_flag(self, tmp_path: Path, monkeypatch):
@@ -795,9 +795,9 @@ class TestBuiltinTemplatesNoticeIntegration:
         picker = TemplatePicker()
         async with picker.run_test() as pilot:
             await pilot.pause()
-            assert isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert isinstance(picker.app.screen, BuiltinTemplatesNotice)
 
             await pilot.press('enter')
             await pilot.pause()
             assert not flag.exists()
-            assert not isinstance(picker.screen, BuiltinTemplatesNotice)
+            assert not isinstance(picker.app.screen, BuiltinTemplatesNotice)

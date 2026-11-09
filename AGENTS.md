@@ -108,8 +108,9 @@ Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti
 - **AudioSource** protocol: `SounddeviceAudioSource`, `CoreAudioTapSource`, `SoundCardLoopbackSource`, and `MixedAudioSource` are interchangeable behind a common interface; `DependencyContainer` always builds `MixedAudioSource` with platform-appropriate system backend
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
-- **Template picker**: Interactive TUI launched before the main app; selects template to configure the session
-- **Session picker**: Interactive TUI for `view` subcommand; lists saved session directories and loops back after each ViewApp exit
+- **Template picker**: Screen pushed by the shell before a session; selects the template that configures the session
+- **Session picker**: Screen for `view`; lists saved session directories and loops back after each ViewApp exit
+- **Single shell**: The kiosk runs one `ShellApp`. The welcome picker, pickers, and mode UIs are Textual Screens, so switching modes does not tear down and rebuild the terminal app. `ShellScreen.run()` runs one Screen on a minimal host for standalone commands and tests
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
 - **Plugin system**: External packages register CLI subcommands via Python `entry_points` (group `lazy_take_notes.plugins`). Plugins import shared helpers from `lazy_take_notes.plugin_api` — this is the stable public surface
 

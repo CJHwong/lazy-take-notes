@@ -114,7 +114,7 @@ class TestSessionPicker:
             await pilot.press('right')
             await pilot.pause()
             # List should still be focused (no crash, no side effect)
-            assert picker.focused is picker.query_one('#sp-list')
+            assert picker.app.focused is picker.query_one('#sp-list')
 
     @pytest.mark.asyncio
     async def test_up_arrow_on_first_item_focuses_search(self, tmp_path: Path):
@@ -129,7 +129,7 @@ class TestSessionPicker:
             await pilot.pause()
             from textual.widgets import Input
 
-            assert picker.focused is picker.query_one('#sp-search', Input)
+            assert picker.app.focused is picker.query_one('#sp-search', Input)
 
     @pytest.mark.asyncio
     async def test_preview_long_transcript_shows_more_lines(self, tmp_path: Path):
@@ -178,4 +178,4 @@ class TestSessionPicker:
             picker = SessionPicker(sessions_dir=tmp_path)
             async with picker.run_test() as pilot:
                 await pilot.pause()
-                assert picker.theme == 'textual-light'
+                assert picker.app.theme == 'textual-light'

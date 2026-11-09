@@ -97,34 +97,17 @@ def cli(ctx, config_path, output_dir):
     if ctx.invoked_subcommand is not None:
         return
 
-    from lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
-        WelcomePicker,
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.shell import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        ShellApp,
     )
 
-    # FIXME: replace with a single ShellApp that uses Textual Screens for
-    # pickers and main apps, eliminating inter-app terminal flicker entirely.
     kiosk = os.environ.get('LTN_KIOSK') == '1'
-    last_mode: str | None = None
     _clear_normal_screen()
-    while True:
-        mode = WelcomePicker(initial_mode=last_mode).run()
-        if mode is None:
-            return
-        last_mode = mode
-        if mode == 'record':
-            ctx.invoke(record)
-            if not kiosk:
-                return
-        elif mode == 'transcribe':
-            ctx.invoke(transcribe)
-            if not kiosk:
-                return
-        elif mode == 'view':
-            ctx.invoke(view)
-        elif mode == 'create-template':
-            ctx.invoke(create_template)
-        elif mode == 'config':
-            ctx.invoke(config)
+    ShellApp(
+        config_path=ctx.obj['config_path'],
+        output_dir=ctx.obj['output_dir'],
+        kiosk=kiosk,
+    ).run()
 
 
 def _check_template_language(template_name, language) -> None:

@@ -72,7 +72,7 @@ class TestFilePickerMount:
             # Two pauses: first drains on_mount events, second lets call_after_refresh fire
             await pilot.pause()
             await pilot.pause()
-            assert picker.focused is picker.query_one('#sp-list')
+            assert picker.app.focused is picker.query_one('#sp-list')
 
     @pytest.mark.asyncio
     async def test_mount_shows_parent_item(self, audio_dir: Path) -> None:
@@ -313,7 +313,7 @@ class TestFilePickerKeyboard:
             # List is focused at index 0 (ParentItem) — Up should hand focus to search
             await pilot.press('up')
             await pilot.pause()
-            assert picker.focused is picker.query_one('#sp-search', Input)
+            assert picker.app.focused is picker.query_one('#sp-search', Input)
 
 
 # ── 8. Edge Cases ─────────────────────────────────────────────────────────────

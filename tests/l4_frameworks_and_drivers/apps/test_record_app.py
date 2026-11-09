@@ -218,7 +218,7 @@ class TestHelpModal:
                 await pilot.press('h')
                 await pilot.pause()
 
-                assert app.screen.__class__.__name__ == 'HelpModal'
+                assert app.app.screen.__class__.__name__ == 'HelpModal'
 
     @pytest.mark.asyncio
     async def test_h_toggles_help_closed(self, tmp_path):
@@ -227,11 +227,11 @@ class TestHelpModal:
             async with app.run_test() as pilot:
                 await pilot.press('h')
                 await pilot.pause()
-                assert app.screen.__class__.__name__ == 'HelpModal'
+                assert app.app.screen.__class__.__name__ == 'HelpModal'
 
                 await pilot.press('h')
                 await pilot.pause()
-                assert app.screen.__class__.__name__ != 'HelpModal'
+                assert app.app.screen.__class__.__name__ != 'HelpModal'
 
     @pytest.mark.asyncio
     async def test_escape_dismisses_help(self, tmp_path):
@@ -240,11 +240,11 @@ class TestHelpModal:
             async with app.run_test() as pilot:
                 await pilot.press('h')
                 await pilot.pause()
-                assert app.screen.__class__.__name__ == 'HelpModal'
+                assert app.app.screen.__class__.__name__ == 'HelpModal'
 
                 await pilot.press('escape')
                 await pilot.pause()
-                assert app.screen.__class__.__name__ != 'HelpModal'
+                assert app.app.screen.__class__.__name__ != 'HelpModal'
 
 
 class TestCopyContent:
@@ -485,7 +485,7 @@ class TestQuitWithFinalDigest:
         app = make_app(tmp_path)
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     # 'q' defers exit until the audio worker confirms its flush is done
@@ -503,7 +503,7 @@ class TestQuitWithFinalDigest:
             async with app.run_test() as pilot:
                 app._pending_quit = True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_called_once()
@@ -576,8 +576,8 @@ class TestQueryErrorModal:
                 )
                 await pilot.pause()
 
-                assert isinstance(app.screen, QueryModal)
-                assert app.screen._is_error is True
+                assert isinstance(app.app.screen, QueryModal)
+                assert app.app.screen._is_error is True
 
     @pytest.mark.asyncio
     async def test_success_result_opens_modal_without_error(self, tmp_path):
@@ -587,8 +587,8 @@ class TestQueryErrorModal:
                 app.post_message(QueryResult(result='Here is your summary', action_label='Summary', is_error=False))
                 await pilot.pause()
 
-                assert isinstance(app.screen, QueryModal)
-                assert app.screen._is_error is False
+                assert isinstance(app.app.screen, QueryModal)
+                assert app.app.screen._is_error is False
 
 
 class TestContextEdit:
@@ -780,7 +780,7 @@ class TestModelDownloadProgress:
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 app._audio_model_name = 'breeze-q5'
-                with patch.object(app, 'push_screen'):
+                with patch.object(app.app, 'push_screen'):
                     app.post_message(ModelDownloadProgress(percent=10, model_name='breeze-q5'))
                     await pilot.pause()
 
@@ -903,7 +903,7 @@ class TestQuitGuards:
                 app.post_message(AudioWorkerStatus(status='recording'))
                 await pilot.pause()
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_not_called()
@@ -922,7 +922,7 @@ class TestQuitGuards:
                 bar = app.query_one('#status-bar', StatusBar)
                 assert bar.paused is True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_not_called()
@@ -935,7 +935,7 @@ class TestQuitGuards:
                 app._pending_quit = True
                 app._digest_running = True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_not_called()
@@ -948,7 +948,7 @@ class TestQuitGuards:
                 app._audio_stopped = True
                 app._digest_running = True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_not_called()
@@ -1137,7 +1137,7 @@ class TestQueryWorkerAsync:
                 await pilot.pause()
 
                 assert app._query_running is False
-                assert isinstance(app.screen, QueryModal)
+                assert isinstance(app.app.screen, QueryModal)
 
     @pytest.mark.asyncio
     async def test_query_exception_posts_error_result(self, tmp_path):
@@ -1151,8 +1151,8 @@ class TestQueryWorkerAsync:
                     await pilot.pause()
 
                 assert app._query_running is False
-                assert isinstance(app.screen, QueryModal)
-                assert app.screen._is_error is True
+                assert isinstance(app.app.screen, QueryModal)
+                assert app.app.screen._is_error is True
 
     @pytest.mark.asyncio
     async def test_query_returns_none_no_modal(self, tmp_path):
@@ -1166,7 +1166,7 @@ class TestQueryWorkerAsync:
 
                 assert app._query_running is False
                 # No QueryModal pushed for None result
-                assert not isinstance(app.screen, QueryModal)
+                assert not isinstance(app.app.screen, QueryModal)
 
     @pytest.mark.asyncio
     async def test_query_label_resolution(self, tmp_path):
@@ -1250,7 +1250,7 @@ class TestQuitWhenAlreadyStopped:
                 bar = app.query_one('#status-bar', StatusBar)
                 bar.stopped = True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_called_once()
@@ -1269,7 +1269,7 @@ class TestQuitWhenAlreadyStopped:
                 bar = app.query_one('#status-bar', StatusBar)
                 bar.stopped = True
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     await pilot.press('q')
                     await pilot.pause()
                     mock_exit.assert_called_once()
@@ -1598,7 +1598,7 @@ class TestBaseAppDefaults:
             async with app.run_test():
                 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 
-                with patch.object(app, 'exit') as mock_exit:
+                with patch.object(app, 'dismiss') as mock_exit:
                     BaseApp.action_quit_app(app)
                     mock_exit.assert_called_once()
 
@@ -1658,7 +1658,7 @@ class TestConsentNoticeOnMount:
                     await pilot.pause()
                     from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
 
-                    assert isinstance(app.screen, ConsentNotice)
+                    assert isinstance(app.app.screen, ConsentNotice)
 
     @pytest.mark.asyncio
     async def test_consent_notice_skipped_when_marker_exists(self, tmp_path):
@@ -1674,7 +1674,7 @@ class TestConsentNoticeOnMount:
                     await pilot.pause()
                     from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
 
-                    assert not isinstance(app.screen, ConsentNotice)
+                    assert not isinstance(app.app.screen, ConsentNotice)
 
     @pytest.mark.asyncio
     async def test_suppress_callback_creates_marker_file(self, tmp_path):
@@ -1689,12 +1689,12 @@ class TestConsentNoticeOnMount:
                     await pilot.pause()
                     from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
 
-                    assert isinstance(app.screen, ConsentNotice)
+                    assert isinstance(app.app.screen, ConsentNotice)
 
                     await pilot.press('n')
                     await pilot.pause()
                     assert marker.exists()
-                    assert not isinstance(app.screen, ConsentNotice)
+                    assert not isinstance(app.app.screen, ConsentNotice)
 
 
 class TestMicMuteToggle:
@@ -1813,7 +1813,7 @@ class TestBaseAppTheme:
             with patch.object(app, '_start_audio_worker'):
                 async with app.run_test() as pilot:
                     await pilot.pause()
-                    assert app.theme == 'nord'
+                    assert app.app.theme == 'nord'
 
 
 class TestSpeakerTurns:
@@ -1871,7 +1871,7 @@ class TestSpeakerTurns:
 
                 await pilot.click('#speaker-1')
                 await pilot.pause()
-                app.screen.query_one('#label-input', Input).value = 'Alice'
+                app.app.screen.query_one('#label-input', Input).value = 'Alice'
                 await pilot.press('enter')
                 await pilot.pause()
 

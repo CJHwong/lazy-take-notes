@@ -196,7 +196,7 @@ class TestLabelModal:
             async with app.run_test() as pilot:
                 await pilot.press('l')
                 await pilot.pause()
-                assert isinstance(app.screen, LabelModal)
+                assert isinstance(app.app.screen, LabelModal)
 
     @pytest.mark.asyncio
     async def test_enter_submits_text(self, tmp_path):
@@ -205,13 +205,13 @@ class TestLabelModal:
             async with app.run_test() as pilot:
                 await pilot.press('l')
                 await pilot.pause()
-                assert isinstance(app.screen, LabelModal)
+                assert isinstance(app.app.screen, LabelModal)
 
-                modal_input = app.screen.query_one('#label-input')
+                modal_input = app.app.screen.query_one('#label-input')
                 modal_input.value = 'my-session'
                 await pilot.press('enter')
                 await pilot.pause()
-                assert not isinstance(app.screen, LabelModal)
+                assert not isinstance(app.app.screen, LabelModal)
                 assert 'my-session' in app._output_dir.name
 
     @pytest.mark.asyncio
@@ -222,13 +222,13 @@ class TestLabelModal:
             async with app.run_test() as pilot:
                 await pilot.press('l')
                 await pilot.pause()
-                assert isinstance(app.screen, LabelModal)
+                assert isinstance(app.app.screen, LabelModal)
 
-                modal_input = app.screen.query_one('#label-input')
+                modal_input = app.app.screen.query_one('#label-input')
                 modal_input.value = ''
                 await pilot.press('enter')
                 await pilot.pause()
-                assert not isinstance(app.screen, LabelModal)
+                assert not isinstance(app.app.screen, LabelModal)
                 # Empty text → None → no rename
                 assert app._output_dir == original_dir
 
@@ -240,11 +240,11 @@ class TestLabelModal:
             async with app.run_test() as pilot:
                 await pilot.press('l')
                 await pilot.pause()
-                assert isinstance(app.screen, LabelModal)
+                assert isinstance(app.app.screen, LabelModal)
 
                 await pilot.press('escape')
                 await pilot.pause()
-                assert not isinstance(app.screen, LabelModal)
+                assert not isinstance(app.app.screen, LabelModal)
                 assert app._output_dir == original_dir
 
 

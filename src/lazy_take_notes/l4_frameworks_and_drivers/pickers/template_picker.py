@@ -173,7 +173,7 @@ class TemplatePicker(SearchablePicker[str]):
 
     def on_mount(self) -> None:  # noqa: D102 -- base class has the docstring; Textual dispatches both via MRO
         if not BUILTIN_TEMPLATES_NOTICED_PATH.exists():
-            self.push_screen(
+            self.app.push_screen(
                 BuiltinTemplatesNotice(on_suppress=self._suppress_builtin_notice),
             )
 
@@ -213,8 +213,8 @@ class TemplatePicker(SearchablePicker[str]):
         super().on_key(event)
 
     def action_new_template(self) -> None:
-        """Exit picker with a sentinel value to launch the template builder."""
-        self.exit('__create_template__')
+        """Dismiss with a sentinel value so the shell can launch the builder."""
+        self.dismiss('__create_template__')
 
     def _rebuild_list(self, query: str = '') -> None:
         """Rebuild the ListView contents, optionally filtered by *query*."""
@@ -296,7 +296,7 @@ class TemplatePicker(SearchablePicker[str]):
         path = ensure_user_copy(self._current_name)
         edit_name = self._current_name
         try:
-            with self.suspend():
+            with self.app.suspend():
                 subprocess.run([*editor_argv, str(path)], check=False)  # noqa: S603 -- argv built from env/platform, not user shell input
         except SuspendNotSupported:
             self.notify('Cannot open editor in this environment', severity='error')
@@ -320,7 +320,7 @@ class TemplatePicker(SearchablePicker[str]):
         if self._current_name not in self._user_names:
             self.notify('Only user templates can be deleted', severity='warning')
             return
-        self.push_screen(
+        self.app.push_screen(
             _ConfirmDeleteScreen(self._current_name),
             callback=self._on_delete_confirmed,
         )
@@ -363,12 +363,12 @@ class TemplatePicker(SearchablePicker[str]):
                 break
 
     def action_select_item(self) -> None:
-        if len(self.screen_stack) > 1:
+        if self.app.screen is not self:
             # Modal is active — don't let priority enter binding leak through.
             # Dismiss the notice if it's showing; leave other modals alone.
-            if isinstance(self.screen, BuiltinTemplatesNotice):
-                self.screen.dismiss()
+            if isinstance(self.app.screen, BuiltinTemplatesNotice):
+                self.app.screen.dismiss()
             return
         if self._current_name is None:
             return
-        self.exit(self._current_name)
+        self.dismiss(self._current_name)

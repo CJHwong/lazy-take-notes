@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from typing import ClassVar, TypeVar
 
-from textual.app import App, ComposeResult
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.events import Key
 from textual.widgets import Input, ListItem, ListView, Static
 
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 
 T = TypeVar('T')
 
@@ -25,18 +26,17 @@ class PickerListView(ListView):
     _selectable_type: ClassVar[type[ListItem]]
 
     def on_key(self, event: Key) -> None:
-        if event.key != 'up':
-            return
-        first_selectable = next(
-            (i for i, child in enumerate(self.children) if isinstance(child, self._selectable_type)),
-            None,
-        )
-        if first_selectable is not None and self.index == first_selectable:
-            self.app.query_one('#sp-search', Input).focus()
-            event.prevent_default()
+        if event.key == 'up':
+            first_selectable = next(
+                (i for i, child in enumerate(self.children) if isinstance(child, self._selectable_type)),
+                None,
+            )
+            if first_selectable is not None and self.index == first_selectable:
+                self.screen.query_one('#sp-search', Input).focus()
+                event.prevent_default()
 
 
-class SearchablePicker(App[T]):
+class SearchablePicker(ShellScreen[T]):
     """Abstract base for searchable pickers with a filter input and preview pane.
 
     Standardised widget IDs:
@@ -106,7 +106,7 @@ class SearchablePicker(App[T]):
         yield Static(self._footer_text(), id='sp-footer', markup=True)
 
     def on_mount(self) -> None:
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         self._rebuild_list()
         self.query_one('#sp-search', Input).focus()
 
@@ -118,12 +118,19 @@ class SearchablePicker(App[T]):
             self._on_item_highlighted(event.item)
 
     def on_key(self, event: Key) -> None:
-        if event.key == 'down' and self.focused is self.query_one('#sp-search', Input):
-            self.query_one('#sp-list', PickerListView).focus()
+        if event.key == 'down' and self.app.focused is self.query_one('#sp-search', Input):
+            list_view = self.query_one('#sp-list', PickerListView)
+            first_selectable = next(
+                (i for i, child in enumerate(list_view.children) if not child.disabled),
+                0,
+            )
+            list_view.index = first_selectable
+            list_view.focus()
             event.prevent_default()
+            event.stop()
 
     def action_cancel(self) -> None:
-        self.exit(None)
+        self.dismiss(None)
 
     def _search_placeholder(self) -> str:
         return 'Filter...'

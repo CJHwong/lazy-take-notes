@@ -184,46 +184,25 @@ def set_mic_muted(audio_source, muted: bool) -> None:
         audio_source.mic_muted = muted
 
 
-def run_transcribe(
-    ctx: click.Context,
+def build_transcribe_session(
+    config,
+    infra,
+    template,
+    output_dir: str | None,
+    label: str | None,
     *,
     audio_path: Path | None = None,
     subtitle_segments: list[TranscriptSegment] | None = None,
-    label: str | None = None,
     llm_client: LLMClient | None = None,
     transcriber: Transcriber | None = None,
-    template_name: str | None = None,
-    language: str | None = None,
-) -> SessionArtifacts | None:
-    """Run a complete transcription session — the high-level plugin entry point.
-
-    Handles the entire flow: config loading → template picker → session
-    directory → LLM preflight → dependency wiring → TranscribeApp launch.
-
-    Provide *audio_path* for whisper transcription, *subtitle_segments* for
-    subtitle replay, or both (subtitle_segments takes priority, audio_path
-    as fallback when segments are empty).
-
-    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
-    can locate and post-process the output. Returns None if the user cancels
-    the template picker before a session is created.
-    """
+):
+    """Prepare a TranscribeApp and its session directory, without running it."""
     from lazy_take_notes.l4_frameworks_and_drivers.apps.transcribe import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         TranscribeApp,
     )
     from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: container not loaded for --help
         DependencyContainer,
     )
-
-    config_path = ctx.obj['config_path']
-    output_dir = ctx.obj['output_dir']
-    config, infra, template_loader = load_config(config_path, output_dir)
-
-    template = select_template(
-        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
-    )
-    if template is None:
-        return None
 
     base_dir = resolve_base_dir(output_dir, config)
     out_dir = make_session_dir(base_dir, label)
@@ -254,6 +233,54 @@ def run_transcribe(
         missing_interactive_models=missing_interactive,
         label=label or '',
     )
+    return app, out_dir
+
+
+def run_transcribe(
+    ctx: click.Context,
+    *,
+    audio_path: Path | None = None,
+    subtitle_segments: list[TranscriptSegment] | None = None,
+    label: str | None = None,
+    llm_client: LLMClient | None = None,
+    transcriber: Transcriber | None = None,
+    template_name: str | None = None,
+    language: str | None = None,
+) -> SessionArtifacts | None:
+    """Run a complete transcription session — the high-level plugin entry point.
+
+    Handles the entire flow: config loading → template picker → session
+    directory → LLM preflight → dependency wiring → TranscribeApp launch.
+
+    Provide *audio_path* for whisper transcription, *subtitle_segments* for
+    subtitle replay, or both (subtitle_segments takes priority, audio_path
+    as fallback when segments are empty).
+
+    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
+    can locate and post-process the output. Returns None if the user cancels
+    the template picker before a session is created.
+    """
+    config_path = ctx.obj['config_path']
+    output_dir = ctx.obj['output_dir']
+    config, infra, template_loader = load_config(config_path, output_dir)
+
+    template = select_template(
+        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+    )
+    if template is None:
+        return None
+
+    app, out_dir = build_transcribe_session(
+        config,
+        infra,
+        template,
+        output_dir,
+        label,
+        audio_path=audio_path,
+        subtitle_segments=subtitle_segments,
+        llm_client=llm_client,
+        transcriber=transcriber,
+    )
     app.run()
     return SessionArtifacts(session_dir=out_dir, notes_path=NOTES.resolve(out_dir))
 
@@ -271,46 +298,25 @@ def preflight_microphone() -> None:
         click.echo(f'Warning: Cannot query audio devices ({e}).', err=True)
 
 
-def run_record(
-    ctx: click.Context,
+def build_record_session(
+    config,
+    infra,
+    template,
+    output_dir: str | None,
+    label: str | None,
     *,
-    label: str | None = None,
     llm_client: LLMClient | None = None,
     transcriber: Transcriber | None = None,
     audio_source: AudioSource | None = None,
-    template_name: str | None = None,
-    language: str | None = None,
     mute_mic: bool = False,
-) -> SessionArtifacts | None:
-    """Run a live recording session -- the high-level plugin entry point.
-
-    Handles the entire flow: config loading -> template picker -> session
-    directory -> LLM preflight -> microphone preflight -> dependency wiring
-    -> RecordApp launch.
-
-    Plugin-supplied *llm_client*, *transcriber*, or *audio_source* override
-    the defaults built by DependencyContainer.
-
-    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
-    can locate and post-process the output. Returns None if the user cancels
-    the template picker before a session is created.
-    """
+):
+    """Prepare a RecordApp and its session directory, without running it."""
     from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         RecordApp,
     )
     from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: container not loaded for --help
         DependencyContainer,
     )
-
-    config_path = ctx.obj['config_path']
-    output_dir = ctx.obj['output_dir']
-    config, infra, template_loader = load_config(config_path, output_dir)
-
-    template = select_template(
-        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
-    )
-    if template is None:
-        return None
 
     base_dir = resolve_base_dir(output_dir, config)
     out_dir = make_session_dir(base_dir, label)
@@ -341,6 +347,54 @@ def run_record(
         missing_digest_models=missing_digest,
         missing_interactive_models=missing_interactive,
         label=label or '',
+    )
+    return app, out_dir
+
+
+def run_record(
+    ctx: click.Context,
+    *,
+    label: str | None = None,
+    llm_client: LLMClient | None = None,
+    transcriber: Transcriber | None = None,
+    audio_source: AudioSource | None = None,
+    template_name: str | None = None,
+    language: str | None = None,
+    mute_mic: bool = False,
+) -> SessionArtifacts | None:
+    """Run a live recording session -- the high-level plugin entry point.
+
+    Handles the entire flow: config loading -> template picker -> session
+    directory -> LLM preflight -> microphone preflight -> dependency wiring
+    -> RecordApp launch.
+
+    Plugin-supplied *llm_client*, *transcriber*, or *audio_source* override
+    the defaults built by DependencyContainer.
+
+    Returns the session's :class:`SessionArtifacts` so callers (e.g. plugins)
+    can locate and post-process the output. Returns None if the user cancels
+    the template picker before a session is created.
+    """
+    config_path = ctx.obj['config_path']
+    output_dir = ctx.obj['output_dir']
+    config, infra, template_loader = load_config(config_path, output_dir)
+
+    template = select_template(
+        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+    )
+    if template is None:
+        return None
+
+    app, out_dir = build_record_session(
+        config,
+        infra,
+        template,
+        output_dir,
+        label,
+        llm_client=llm_client,
+        transcriber=transcriber,
+        audio_source=audio_source,
+        mute_mic=mute_mic,
     )
 
     from lazy_take_notes.l4_frameworks_and_drivers.keep_awake import (  # noqa: PLC0415 -- deferred: not loaded on --help

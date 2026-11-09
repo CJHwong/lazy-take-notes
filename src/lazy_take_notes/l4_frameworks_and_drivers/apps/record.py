@@ -89,7 +89,7 @@ class RecordApp(BaseApp):
         self._start_audio_worker()
         self._start_diarization_worker()
         if not CONSENT_NOTICED_PATH.exists():
-            self.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
+            self.app.push_screen(ConsentNotice(on_suppress=self._suppress_consent_notice))
 
     def _suppress_consent_notice(self) -> None:
         CONSENT_NOTICED_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -198,7 +198,7 @@ class RecordApp(BaseApp):
             bar.recording = True
             bar.paused = False
             bar.stopped = False
-            self.screen.refresh(layout=True)
+            self.app.screen.refresh(layout=True)
             self._update_hints('recording')
         elif message.status == 'stopped':
             bar.recording = False
@@ -217,7 +217,7 @@ class RecordApp(BaseApp):
                 if has_content and not self._final_digest_done:
                     self._run_final_digest()
                 else:
-                    self.exit()
+                    self.dismiss()
             elif self._audio_stopped:
                 has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
                 if has_content and not self._final_digest_done:
@@ -311,7 +311,7 @@ class RecordApp(BaseApp):
             if self._digest_running:
                 self.notify('Final digest in progress \u2014 please wait', severity='warning', timeout=3)
                 return
-            self.exit()
+            self.dismiss()
             return
 
         if self._digest_running:
@@ -341,4 +341,4 @@ class RecordApp(BaseApp):
             self._pending_quit = True
             self._run_final_digest()
         else:
-            self.exit()
+            self.dismiss()

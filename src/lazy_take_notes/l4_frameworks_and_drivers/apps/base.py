@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from textual import events
-from textual.app import App as TextualApp
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -33,6 +32,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     TranscriptChunk,
     TranscriptionStatus,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.download_modal import DownloadModal
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
@@ -45,7 +45,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import T
 log = logging.getLogger('ltn.app')
 
 
-class BaseApp(TextualApp):
+class BaseApp(ShellScreen):
     """Shared TUI shell — compose, digest/query routing, session management."""
 
     CSS_PATH = 'app.tcss'
@@ -146,7 +146,7 @@ class BaseApp(TextualApp):
             pass
 
     def on_mount(self) -> None:
-        self.theme = load_theme()
+        self.app.theme = load_theme()
         self._update_hints('idle')
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_max = self._config.digest.min_lines
@@ -247,7 +247,7 @@ class BaseApp(TextualApp):
             panel = self.query_one('#transcript-panel', TranscriptPanel)
             panel.render_segments(self._controller.all_segments, self._speaker_label)
 
-        self.push_screen(LabelModal(current_label=current, title=f'Name for S{speaker}'), apply)
+        self.app.push_screen(LabelModal(current_label=current, title=f'Name for S{speaker}'), apply)
 
     def _dismiss_download_modal(self) -> None:
         if self._download_modal is not None:
@@ -261,7 +261,7 @@ class BaseApp(TextualApp):
 
         if self._download_modal is None:
             self._download_modal = DownloadModal(model_name=message.model_name)
-            self.push_screen(self._download_modal)
+            self.app.push_screen(self._download_modal)
         else:
             self._download_modal.update_progress(message.percent)
 
@@ -291,7 +291,7 @@ class BaseApp(TextualApp):
     def on_query_result(self, message: QueryResult) -> None:
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
-        self.push_screen(QueryModal(title=message.action_label, body=message.result, is_error=message.is_error))
+        self.app.push_screen(QueryModal(title=message.action_label, body=message.result, is_error=message.is_error))
 
     # --- Workers ---
 
@@ -425,7 +425,7 @@ class BaseApp(TextualApp):
         self._run_digest_worker(is_final=False)
 
     def action_rename_session(self) -> None:
-        self.push_screen(
+        self.app.push_screen(
             LabelModal(current_label=self._session_label),
             callback=self._on_label_result,
         )
@@ -474,8 +474,8 @@ class BaseApp(TextualApp):
         self._run_query_worker(key)
 
     def action_show_help(self) -> None:
-        if isinstance(self.screen, HelpModal):
-            self.screen.dismiss()
+        if isinstance(self.app.screen, HelpModal):
+            self.app.screen.dismiss()
             return
 
         meta = self._template.metadata
@@ -513,7 +513,7 @@ class BaseApp(TextualApp):
         lines.append('### Keybindings')
         lines.extend(self._help_keybindings())
 
-        self.push_screen(HelpModal(body_md='\n'.join(lines)))
+        self.app.push_screen(HelpModal(body_md='\n'.join(lines)))
 
     def _help_keybindings(self) -> list[str]:
         """Return keybinding help table rows. Subclasses override for mode-specific bindings."""
@@ -542,4 +542,4 @@ class BaseApp(TextualApp):
         subprocess.Popen([opener, str(self._output_dir)])  # noqa: S603 -- fixed arg list, not shell=True
 
     def action_quit_app(self) -> None:
-        self.exit()
+        self.dismiss()
