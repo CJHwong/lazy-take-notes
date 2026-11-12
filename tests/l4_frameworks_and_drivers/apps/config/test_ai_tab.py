@@ -23,7 +23,18 @@ def app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ConfigApp:
 
 
 class TestRefreshModels:
-    async def test_refresh_lists_live_ollama_models(self, app: ConfigApp):
+    async def test_refresh_lists_models_from_the_client(self, app: ConfigApp, monkeypatch: pytest.MonkeyPatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
+
+        class FakeClient:
+            def list_models(self):
+                return [('gpt-oss:20b', 1), ('qwen3:8b', 2)]
+
+        monkeypatch.setattr(
+            DependencyContainer,
+            'resolve_llm_client',
+            staticmethod(lambda _infra: FakeClient()),
+        )
         async with app.run_test(size=(120, 60)) as pilot:
             await pilot.pause()
             app.query_one('#cfg-ollama-refresh', Button).press()
@@ -32,7 +43,7 @@ class TestRefreshModels:
             await pilot.pause()
 
             text = str(app.query_one('#cfg-ollama-models', Static).render())
-            assert text
+            assert 'gpt-oss:20b' in text
             assert 'Cannot list models' not in text
 
 
