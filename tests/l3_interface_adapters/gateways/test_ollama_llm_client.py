@@ -99,3 +99,23 @@ class TestOllamaLLMClient:
 
         client = OllamaLLMClient()
         assert client.check_models(['llama3.2']) == []
+
+
+class TestOllamaModelListing:
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
+    def test_list_models(self, mock_client_cls):
+        first = MagicMock(model='gpt-oss:20b', size=10)
+        second = MagicMock(model='qwen3:8b', size=20)
+        mock_client_cls.return_value.list.return_value = MagicMock(models=[first, second])
+
+        assert OllamaLLMClient().list_models() == [('gpt-oss:20b', 10), ('qwen3:8b', 20)]
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.Client')
+    def test_pull_model_reports_progress(self, mock_client_cls):
+        events = [MagicMock(status='pulling'), MagicMock(status='success')]
+        mock_client_cls.return_value.pull.return_value = events
+        seen = []
+
+        OllamaLLMClient().pull_model('gpt-oss:20b', on_progress=seen.append)
+
+        assert seen == events

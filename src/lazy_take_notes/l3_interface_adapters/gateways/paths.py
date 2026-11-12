@@ -1,11 +1,16 @@
-"""Shared path constants for configuration and user templates."""
+"""Shared path constants for configuration, templates, and the model cache."""
 
 from __future__ import annotations
 
-from platformdirs import user_config_path
+from pathlib import Path
+
+from platformdirs import user_cache_path, user_config_path
 
 CONFIG_DIR = user_config_path('lazy-take-notes')
 USER_TEMPLATES_DIR = CONFIG_DIR / 'templates'
+
+CACHE_DIR = user_cache_path('lazy-take-notes')
+LEGACY_NEMOTRON_STORE = Path.home() / '.cache' / 'nemotron-diarization'
 
 CONSENT_NOTICED_PATH = CONFIG_DIR / '.consent_noticed'
 BUILTIN_TEMPLATES_NOTICED_PATH = CONFIG_DIR / '.builtin_templates_noticed'

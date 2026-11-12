@@ -28,13 +28,29 @@ class SounddeviceAudioSource:
     integer multiple of SAMPLE_RATE (e.g. 44.1 kHz devices).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, device: str | None = None) -> None:
+        self._device = device
         self._stream: sd.InputStream | None = None
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
         self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
 
+    @staticmethod
+    def list_input_devices() -> list[str]:
+        """Return the names of devices with at least one input channel."""
+        devices = sd.query_devices()
+        names = [device['name'] for device in devices if device['max_input_channels'] > 0]
+        return list(dict.fromkeys(names))
+
+    def _input_info(self):
+        try:
+            return sd.query_devices(kind='input', device=self._device)
+        except (ValueError, sd.PortAudioError):
+            log.warning('input device %r is unavailable, using the default', self._device)
+            self._device = None
+            return sd.query_devices(kind='input')
+
     def open(self, sample_rate: int = SAMPLE_RATE, channels: int = 1) -> None:
-        device_info = sd.query_devices(kind='input')
+        device_info = self._input_info()
         native_sr_raw = device_info.get('default_samplerate', float(sample_rate))
         native_sr = int(round(native_sr_raw))
 
@@ -82,6 +98,7 @@ class SounddeviceAudioSource:
             self._queue.put(downsampled.copy())
 
         self._stream = sd.InputStream(
+            device=self._device,
             samplerate=stream_sr,
             blocksize=blocksize,
             channels=channels,

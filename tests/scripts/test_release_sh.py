@@ -16,6 +16,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).parents[2]
 RELEASE_SCRIPT = REPO_ROOT / 'scripts' / 'release.sh'
+BUILD_SCRIPT = REPO_ROOT / 'scripts' / 'trolley' / 'build.sh'
 
 pytestmark = pytest.mark.skipif(
     os.name != 'posix' or os.uname().sysname != 'Darwin',
@@ -54,6 +55,10 @@ class Tree:
         (root / 'scripts').mkdir()
         (root / 'scripts' / 'release.sh').write_text(RELEASE_SCRIPT.read_text())
         (root / 'scripts' / 'release.sh').chmod(0o755)
+
+        (root / 'scripts' / 'trolley').mkdir()
+        (root / 'scripts' / 'trolley' / 'build.sh').write_text(BUILD_SCRIPT.read_text())
+        (root / 'scripts' / 'trolley' / 'build.sh').chmod(0o755)
 
         self._write_project_files('0.1.0', trolley_version='0.1.0')
         self._write_tools()

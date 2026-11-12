@@ -115,3 +115,52 @@ class TestNemoSpeechDiarizer:
         with patch('subprocess.run', side_effect=subprocess.TimeoutExpired([], 5)):
             with pytest.raises(RuntimeError, match='timed out'):
                 NemoSpeechDiarizer(binary, model).diarize(audio, timeout=5)
+
+
+class TestManagedAssets:
+    @staticmethod
+    def _asset(asset_id: str):
+        from lazy_take_notes.l1_entities.model_asset import ModelAsset
+
+        return ModelAsset(
+            id=asset_id,
+            label=asset_id,
+            purpose='test',
+            group='speakers',
+            kind='hf',
+            url='https://example.test/x',
+            size=1,
+            sha256='0' * 64,
+            subdir='test',
+            entry='x',
+        )
+
+    @staticmethod
+    def _store(status, binary: str = '', model: str = ''):
+        from lazy_take_notes.l1_entities.model_asset import AssetState
+
+        class Store:
+            def status(self, asset_id: str):
+                path = binary if asset_id == 'nemo-runtime' else model
+                return AssetState(TestManagedAssets._asset(asset_id), status, path=path or None)
+
+        return Store()
+
+    def test_store_resolves_managed_files(self, tmp_path):
+        from lazy_take_notes.l1_entities.model_asset import AssetStatus
+
+        binary = tmp_path / 'nemo-speech'
+        model = tmp_path / 'model.gguf'
+        binary.write_text('')
+        model.write_text('')
+        diarizer = NemoSpeechDiarizer('', '', store=self._store(AssetStatus.READY, str(binary), str(model)))
+
+        assert diarizer._resolve() == (binary, model)
+
+    def test_missing_managed_file_names_the_fix(self):
+        from lazy_take_notes.l1_entities.model_asset import AssetStatus
+
+        diarizer = NemoSpeechDiarizer('', '', store=self._store(AssetStatus.MISSING))
+
+        with pytest.raises(RuntimeError, match='Settings > Models'):
+            diarizer._resolve()

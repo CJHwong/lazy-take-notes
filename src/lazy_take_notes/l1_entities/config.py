@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 class TranscriptionConfig(BaseModel):
     model: str
     models: dict[str, str] = Field(default_factory=dict)
+    input_device: str | None = None
     chunk_duration: float
     overlap: float
     silence_threshold: float

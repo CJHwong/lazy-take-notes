@@ -114,6 +114,28 @@ Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
 - **Plugin system**: External packages register CLI subcommands via Python `entry_points` (group `lazy_take_notes.plugins`). Plugins import shared helpers from `lazy_take_notes.plugin_api` — this is the stable public surface
 
+## Model Assets
+
+Models and the diarization runtime download on demand and are verified before use.
+
+- `l3_interface_adapters/gateways/model_catalog.py` pins every asset: source URL, size, SHA-256, cache path, and platform. Versions never float at runtime.
+- `cached_model_store.py` owns the cache. Root: `platformdirs.user_cache_path('lazy-take-notes')`. Layout: `assets/`, `downloads/`, `state.json`.
+- `download_engine.py` streams with resume, reports progress, checks size and SHA-256, and extracts archives with path-traversal checks.
+- `hf_model_resolver.py` is a thin adapter over the store. It keeps the `ModelResolver` interface for workers and plugins.
+- `nemo_speech_diarizer.py` resolves paths in this order: explicit config path, `LTN_NEMO_*` env, then the managed cache. It never downloads during a session.
+- The store adopts matching files from the old `pywhispercpp` and `~/.cache/nemotron-diarization` locations. It never deletes the originals.
+
+## Settings
+
+`apps/config/` contains the settings screen.
+
+- `app.py`: `ConfigApp`, save, numeric validation, unsaved-changes prompt, AI model list.
+- `models_tab.py`: asset rows, install, cancel, remove, cache use.
+- `audio_tab.py`: live input probe, microphone select, speaker labels, advanced audio settings.
+- `fields.py`: shared form widgets.
+
+Page order: Models, Digest, Audio, Sessions, Appearance. The shell is a left `ListView` nav plus a `ContentSwitcher`. Each page is a `SettingsSection` with two full-height columns that stack below about 100 columns. The Models page holds text generation, speech models, language overrides, and speaker asset install. The Audio page holds the speaker enable switch, device, and interval. Downloads run in thread workers and report through messages. Speaker runtime and model paths are not exposed. Advanced settings are always visible; no page uses collapsibles.
+
 ## Plugin System
 
 Plugins are external packages that add subcommands to the CLI (e.g. `lazy-take-notes my-source <input>`).

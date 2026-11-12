@@ -20,10 +20,17 @@ cd "$REPO_ROOT"
 
 APP_NAME="Lazy Take Notes"
 BUNDLE_ID="com.cjhwong.lazy-take-notes"
-APP="$REPO_ROOT/trolley/build/$BUNDLE_ID/aarch64-macos/dist/$APP_NAME.app"
-PLIST="$APP/Contents/Info.plist"
 RELEASE_DIR="$REPO_ROOT/trolley/release"
-MIC_USAGE="Lazy Take Notes records your microphone to transcribe speech."
+
+case "$(uname -m)" in
+    arm64) TARGET="aarch64-macos" ;;
+    x86_64) TARGET="x86_64-macos" ;;
+    *)
+        printf 'ERROR: unsupported architecture: %s\n' "$(uname -m)" >&2
+        exit 1
+        ;;
+esac
+APP="$REPO_ROOT/trolley/build/$BUNDLE_ID/$TARGET/dist/$APP_NAME.app"
 
 WITH_DMG=0
 for argument in "$@"; do
@@ -62,19 +69,10 @@ TROLLEY_VERSION=$(toml_value version "[app]" trolley.toml)
     || die "pyproject.toml says $PROJECT_VERSION but trolley.toml says $TROLLEY_VERSION"
 
 # --- Build -------------------------------------------------------------------
-command -v trolley >/dev/null 2>&1 \
-    || die "trolley is not installed. Run: brew install weedonandscott/tap/trolley"
-
-step "Building the app bundle"
-trolley package --formats mac-app
+# The build script packages the app and inserts the microphone usage
+# description. macOS denies microphone access without it.
+"$REPO_ROOT/scripts/trolley/build.sh"
 [ -d "$APP" ] || die "trolley finished but $APP is missing"
-
-step "Adding the microphone usage description"
-# Trolley has no config key for Info.plist entries, so the built plist is patched.
-plutil -remove NSMicrophoneUsageDescription "$PLIST" >/dev/null 2>&1 || true
-plutil -insert NSMicrophoneUsageDescription -string "$MIC_USAGE" "$PLIST"
-plutil -extract NSMicrophoneUsageDescription raw "$PLIST" >/dev/null \
-    || die "the Info.plist patch did not stick"
 
 # --- Sign --------------------------------------------------------------------
 IDENTITY="${LTN_SIGN_IDENTITY:-$(detect_identity)}"

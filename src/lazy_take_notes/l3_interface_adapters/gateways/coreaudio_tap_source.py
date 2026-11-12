@@ -24,8 +24,9 @@ _CHUNK_FRAMES = SAMPLE_RATE // 10  # 100ms chunks
 class CoreAudioTapSource:
     """Implements AudioSource by reading float32 PCM from the Swift coreaudio-tap subprocess."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, ensure_permission: bool = False) -> None:
         self._proc: subprocess.Popen | None = None
+        self._ensure_permission = ensure_permission
         self._queue: queue.Queue[np.ndarray] = queue.Queue()
         self._stop = threading.Event()
         self._exhausted = threading.Event()
@@ -73,7 +74,7 @@ class CoreAudioTapSource:
         # The desktop bundle has no terminal to grant the permission, and a tap
         # never asks. Ask through ScreenCaptureKit on first run.
         args = [str(_BINARY)]
-        if os.environ.get('LTN_KIOSK') == '1':
+        if self._ensure_permission or os.environ.get('LTN_KIOSK') == '1':
             args.append('--ensure-permission')
         self._proc = subprocess.Popen(  # noqa: S603 -- fixed arg list, not shell=True
             args,

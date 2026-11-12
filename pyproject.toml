@@ -39,6 +39,7 @@ dependencies = [
     "soundcard==0.4.5",
     "numpy==2.4.2",
     "huggingface_hub==1.4.1",
+    "requests==2.34.2",
     "pyperclip==1.11.0",
     "platformdirs==4.9.2",
 ]

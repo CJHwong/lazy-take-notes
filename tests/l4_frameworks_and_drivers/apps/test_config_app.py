@@ -8,19 +8,21 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from lazy_take_notes.l4_frameworks_and_drivers.apps.config import (
+from lazy_take_notes.l4_frameworks_and_drivers.apps.config.app import (
     ConfigApp,
-    _dict_to_inline,  # noqa: PLC2701 -- testing internal helper
     _DiscardChangesModal,  # noqa: PLC2701 -- testing internal modal
-    _inline_to_dict,  # noqa: PLC2701 -- testing internal helper
-    _resolve_editor,  # noqa: PLC2701 -- testing internal helper
-    _to_float,  # noqa: PLC2701 -- testing internal helper
-    _to_int,  # noqa: PLC2701 -- testing internal helper
+)
+from lazy_take_notes.l4_frameworks_and_drivers.apps.config.fields import (
+    dict_to_inline,
+    inline_to_dict,
+    resolve_editor,
+    to_float,
+    to_int,
 )
 
 # ── Monkeypatch helpers ──────────────────────────────────────────────────────
 
-_CONFIG_MOD = 'lazy_take_notes.l4_frameworks_and_drivers.apps.config'
+_CONFIG_MOD = 'lazy_take_notes.l4_frameworks_and_drivers.apps.config.app'
 
 
 def _patch_config_paths(monkeypatch, config_dir: Path, config_path: Path):
@@ -49,56 +51,56 @@ def _make_app(tmp_path: Path, monkeypatch, *, config_data: dict | None = None) -
 
 
 class TestHelpers:
-    def test_to_float_valid(self):
-        assert _to_float('3.14') == pytest.approx(3.14)
+    def testto_float_valid(self):
+        assert to_float('3.14') == pytest.approx(3.14)
 
-    def test_to_float_invalid(self):
-        assert _to_float('nope') == 0.0
+    def testto_float_invalid(self):
+        assert to_float('nope') == 0.0
 
-    def test_to_int_valid(self):
-        assert _to_int('42') == 42
+    def testto_int_valid(self):
+        assert to_int('42') == 42
 
-    def test_to_int_invalid(self):
-        assert _to_int('abc') == 0
+    def testto_int_invalid(self):
+        assert to_int('abc') == 0
 
-    def test_dict_to_inline(self):
-        assert _dict_to_inline({'zh': 'breeze', 'en': 'large'}) == 'zh: breeze, en: large'
+    def testdict_to_inline(self):
+        assert dict_to_inline({'zh': 'breeze', 'en': 'large'}) == 'zh: breeze, en: large'
 
-    def test_dict_to_inline_empty(self):
-        assert not _dict_to_inline({})
+    def testdict_to_inline_empty(self):
+        assert not dict_to_inline({})
 
-    def test_inline_to_dict(self):
-        assert _inline_to_dict('zh: breeze, en: large') == {'zh': 'breeze', 'en': 'large'}
+    def testinline_to_dict(self):
+        assert inline_to_dict('zh: breeze, en: large') == {'zh': 'breeze', 'en': 'large'}
 
-    def test_inline_to_dict_empty(self):
-        assert _inline_to_dict('') == {}
+    def testinline_to_dict_empty(self):
+        assert inline_to_dict('') == {}
 
-    def test_inline_to_dict_malformed_skips(self):
-        assert _inline_to_dict('no-colon, ok: yes') == {'ok': 'yes'}
+    def testinline_to_dict_malformed_skips(self):
+        assert inline_to_dict('no-colon, ok: yes') == {'ok': 'yes'}
 
 
 class TestResolveEditor:
     def test_visual_env_var(self, monkeypatch):
         monkeypatch.setenv('VISUAL', 'code --wait')
         monkeypatch.delenv('EDITOR', raising=False)
-        assert _resolve_editor() == ['code', '--wait']
+        assert resolve_editor() == ['code', '--wait']
 
     def test_editor_env_var(self, monkeypatch):
         monkeypatch.delenv('VISUAL', raising=False)
         monkeypatch.setenv('EDITOR', 'vim')
-        assert _resolve_editor() == ['vim']
+        assert resolve_editor() == ['vim']
 
     def test_visual_takes_precedence(self, monkeypatch):
         monkeypatch.setenv('VISUAL', 'emacs')
         monkeypatch.setenv('EDITOR', 'vim')
-        assert _resolve_editor() == ['emacs']
+        assert resolve_editor() == ['emacs']
 
     def test_platform_fallback(self, monkeypatch):
         monkeypatch.delenv('VISUAL', raising=False)
         monkeypatch.delenv('EDITOR', raising=False)
         # On macOS, should fall back to ['open', '-t']
         # On any platform, we just check it returns a list (not None)
-        result = _resolve_editor()
+        result = resolve_editor()
         assert isinstance(result, list)
         assert len(result) >= 1
 
@@ -112,9 +114,10 @@ class TestConfigAppComposition:
         app, _ = _make_app(tmp_path, monkeypatch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert app.query_one('#cfg-header')
+            assert app.query_one('#cfg-title')
+            assert app.query_one('#cfg-path')
             assert app.query_one('#cfg-footer')
-            assert app.query_one('#cfg-tabs')
+            assert app.query_one('#cfg-nav')
             assert app.query_one('#cfg-llm-provider')
             assert app.query_one('#cfg-digest-model')
             assert app.query_one('#cfg-output-dir')
@@ -206,6 +209,53 @@ class TestConfigAppSave:
         assert written['openai']['api_key'] == 'sk-secret'
 
     @pytest.mark.asyncio
+    async def test_clear_api_key_writes_null(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(
+            tmp_path,
+            monkeypatch,
+            config_data={'openai': {'api_key': 'sk-old'}},
+        )
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._clear_api_key = True
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['openai']['api_key'] is None
+
+    @pytest.mark.asyncio
+    async def test_bad_number_blocks_save(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-trans-chunk', Input).value = 'abc'
+
+            assert 'Chunk Duration must be a number.' in app._numeric_errors()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        assert not config_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_save_includes_input_device(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            select = app.query_one('#cfg-audio-device', Select)
+            select.set_options([('System default', '__default__'), ('Test mic', 'Test mic')])
+            select.value = 'Test mic'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['transcription']['input_device'] == 'Test mic'
+
+    @pytest.mark.asyncio
     async def test_save_with_recognition_hints(self, tmp_path, monkeypatch):
         from textual.widgets import TextArea
 
@@ -241,7 +291,7 @@ class TestConfigAppTestConnection:
         app, _ = _make_app(tmp_path, monkeypatch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with patch(
                 f'{_CONFIG_MOD}.InfraConfig.model_validate',
@@ -260,7 +310,7 @@ class TestConfigAppTestConnection:
         async with app.run_test() as pilot:
             await pilot.pause()
             # Focus the list view (not an Input) so 't' triggers the handler
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with patch(
                 'lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.OllamaLLMClient',
@@ -282,7 +332,7 @@ class TestConfigAppTestConnection:
             await pilot.pause()
             # Switch to openai provider
             app.query_one('#cfg-llm-provider', Select).value = 'openai'
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with patch(
                 'lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.OpenAICompatLLMClient',
@@ -317,10 +367,10 @@ class TestConfigAppRawEditor:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with (
-                patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['cat']),
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['cat']),
                 patch(f'{_CONFIG_MOD}.subprocess.run') as mock_run,
                 patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
             ):
@@ -342,10 +392,10 @@ class TestConfigAppRawEditor:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with (
-                patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['cat']),
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['cat']),
                 patch(f'{_CONFIG_MOD}.subprocess.run'),
                 patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
                 patch(f'{_CONFIG_MOD}.config_file_path', return_value=config_path),
@@ -360,9 +410,9 @@ class TestConfigAppRawEditor:
         app, _ = _make_app(tmp_path, monkeypatch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
-            with patch(f'{_CONFIG_MOD}._resolve_editor', return_value=None):
+            with patch(f'{_CONFIG_MOD}.resolve_editor', return_value=None):
                 await pilot.press('e')
                 await pilot.pause()
                 # Should not crash — notification shown instead
@@ -376,10 +426,10 @@ class TestConfigAppRawEditor:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app.query_one('#cfg-tabs').focus()
+            app.query_one('#cfg-nav').focus()
             await pilot.pause()
             with (
-                patch(f'{_CONFIG_MOD}._resolve_editor', return_value=['vim']),
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['vim']),
                 patch.object(app.app, 'suspend', side_effect=SuspendNotSupported()),
             ):
                 await pilot.press('e')
@@ -424,7 +474,7 @@ class TestConfigAppAppearance:
         app, _ = _make_app(tmp_path, monkeypatch)
         async with app.run_test() as pilot:
             await pilot.pause()
-            assert app.query_one('#tab-appearance')
+            assert app.query_one('#section-appearance')
             assert app.query_one('#cfg-theme')
 
     @pytest.mark.asyncio
@@ -545,20 +595,20 @@ class TestConfigAppTranscriptionProvider:
         async with app.run_test() as pilot:
             await pilot.pause()
             # Default whisper-cpp: model fields visible
-            assert app.query_one('#trans-model-fields').display is True
+            assert app.query_one('#models-transcription-fields').display is True
             assert app.query_one('#plugin-trans-model-note').display is False
 
             # Simulate switching to a plugin provider that manages models
             select = app.query_one('#cfg-trans-provider', Select)
             select.set_options([('whisper-cpp', 'whisper-cpp'), ('plugin-stt', 'plugin-stt')])
             with patch(
-                f'{_CONFIG_MOD}._plugin_manages_models',
+                f'{_CONFIG_MOD}.plugin_manages_models',
                 return_value=True,
             ):
                 select.value = 'plugin-stt'
                 await pilot.pause()
 
-            assert app.query_one('#trans-model-fields').display is False
+            assert app.query_one('#models-transcription-fields').display is False
             assert app.query_one('#plugin-trans-model-note').display is True
 
 
@@ -677,8 +727,8 @@ class TestDiarizationSettings:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert app.query_one('#cfg-diarization-enabled', Switch)
-            assert app.query_one('#cfg-diarization-binary', Input)
-            assert app.query_one('#cfg-diarization-model', Input)
+            assert len(app.query('#cfg-diarization-binary')) == 0
+            assert len(app.query('#cfg-diarization-model')) == 0
             assert app.query_one('#cfg-diarization-device', Select)
             assert app.query_one('#cfg-diarization-interval', Input)
             # digest.max_lines was the one setting missing from the page.
@@ -692,8 +742,6 @@ class TestDiarizationSettings:
         async with app.run_test() as pilot:
             await pilot.pause()
             app.query_one('#cfg-diarization-enabled', Switch).value = True
-            app.query_one('#cfg-diarization-binary', Input).value = '/opt/nemo-speech'
-            app.query_one('#cfg-diarization-model', Input).value = '/models/diar.gguf'
             app.query_one('#cfg-diarization-device', Select).value = 'cpu'
             app.query_one('#cfg-diarization-interval', Input).value = '30'
             await pilot.press('ctrl+s')
@@ -702,8 +750,8 @@ class TestDiarizationSettings:
         written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
         assert written['diarization'] == {
             'enabled': True,
-            'binary': '/opt/nemo-speech',
-            'model': '/models/diar.gguf',
+            'binary': '',
+            'model': '',
             'device': 'cpu',
             'interval_s': 30.0,
         }
@@ -712,7 +760,7 @@ class TestDiarizationSettings:
     async def test_existing_values_are_loaded_into_the_form(self, tmp_path, monkeypatch):
         from textual.widgets import Input, Switch
 
-        app, _ = _make_app(
+        app, config_path = _make_app(
             tmp_path,
             monkeypatch,
             config_data={
@@ -735,9 +783,14 @@ class TestDiarizationSettings:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert app.query_one('#cfg-diarization-enabled', Switch).value is True
-            assert app.query_one('#cfg-diarization-binary', Input).value == '/opt/nemo-speech'
             assert app.query_one('#cfg-diarization-interval', Input).value == '45'
             assert app.query_one('#cfg-digest-max-lines', Input).value == '40'
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['diarization']['binary'] == '/opt/nemo-speech'
+        assert written['diarization']['model'] == '/models/diar.gguf'
 
     @pytest.mark.asyncio
     async def test_save_blocked_when_enabled_without_audio_saving(self, tmp_path, monkeypatch):
@@ -753,3 +806,46 @@ class TestDiarizationSettings:
 
         assert app._saved is False
         assert not config_path.exists()
+
+
+class TestNewSettingsShape:
+    @pytest.mark.asyncio
+    async def test_nav_order_follows_change_frequency(self, tmp_path, monkeypatch):
+        from textual.widgets import ListItem
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            order = [item.id for item in app.query(ListItem)]
+            assert order == [
+                'nav-models',
+                'nav-digest',
+                'nav-audio',
+                'nav-sessions',
+                'nav-appearance',
+            ]
+
+    @pytest.mark.asyncio
+    async def test_default_model_radio_saves_the_uri(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.config.models_tab import ModelChooser
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 60)) as pilot:
+            await pilot.pause()
+            app.query_one(ModelChooser).select('breeze25-q8')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+
+        written = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+        assert written['transcription']['model'].startswith('hf://alan314159/')
+
+    @pytest.mark.asyncio
+    async def test_digest_advanced_is_not_folded(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-digest-compact', Input)
+            assert len(app.query('#cfg-digest-advanced')) == 0

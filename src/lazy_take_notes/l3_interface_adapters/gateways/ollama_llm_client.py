@@ -51,3 +51,21 @@ class OllamaLLMClient:
             return missing
         except Exception:
             return []
+
+    def list_models(self) -> list[tuple[str, int]]:
+        """Return ``(name, size_in_bytes)`` for every installed model."""
+        client = ollama_sync.Client(host=self._host)
+        response = client.list()
+        result: list[tuple[str, int]] = []
+        for model in getattr(response, 'models', []) or []:
+            name = getattr(model, 'model', None) or getattr(model, 'name', '')
+            if name:
+                result.append((name, int(getattr(model, 'size', 0) or 0)))
+        return result
+
+    def pull_model(self, model: str, on_progress=None) -> None:
+        """Pull a model and report each progress event."""
+        client = ollama_sync.Client(host=self._host)
+        for progress in client.pull(model, stream=True):
+            if on_progress is not None:
+                on_progress(progress)

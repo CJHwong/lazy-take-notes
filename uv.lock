@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11, <3.14"
 resolution-markers = [
     "python_full_version >= '3.12'",
@@ -717,6 +717,7 @@ dependencies = [
     { name = "pyperclip" },
     { name = "pywhispercpp" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "soundcard" },
     { name = "sounddevice" },
     { name = "textual" },
@@ -745,6 +746,7 @@ requires-dist = [
     { name = "pyperclip", specifier = "==1.11.0" },
     { name = "pywhispercpp", specifier = "==1.4.1" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "requests", specifier = "==2.34.2" },
     { name = "soundcard", specifier = "==0.4.5" },
     { name = "sounddevice", specifier = "==0.5.5" },
     { name = "textual", specifier = ">=8.0,<8.1" },
