@@ -45,12 +45,14 @@ class RecordApp(BaseApp):
         audio_source: AudioSource | None = None,
         transcriber: Transcriber | None = None,
         model_resolver_factory: Callable[[Callable[[int], None] | None], ModelResolver] | None = None,
+        asset_store=None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
         self._audio_source = audio_source
         self._transcriber = transcriber
         self._model_resolver_factory = model_resolver_factory
+        self._asset_store = asset_store
 
         # Audio control state
         self._audio_paused = threading.Event()
@@ -124,7 +126,12 @@ class RecordApp(BaseApp):
         )
 
         cfg = self._config.diarization
-        diarizer = NemoSpeechDiarizer(binary=cfg.binary or None, model=cfg.model or None, device=cfg.device)
+        diarizer = NemoSpeechDiarizer(
+            binary=cfg.binary or None,
+            model=cfg.model or None,
+            device=cfg.device,
+            store=self._asset_store,
+        )
         run_diarization_worker(
             post_message=self.post_message,
             is_cancelled=lambda: self._audio_shutdown.is_set(),

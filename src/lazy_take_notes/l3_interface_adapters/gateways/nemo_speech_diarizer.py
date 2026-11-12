@@ -14,7 +14,10 @@ import subprocess  # noqa: S404 -- intentional: fixed arg list, not shell=True
 import tempfile
 from pathlib import Path
 
+from lazy_take_notes.l1_entities.model_asset import AssetStatus
 from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+from lazy_take_notes.l3_interface_adapters.gateways import model_catalog
+from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
 
 log = logging.getLogger('ltn.diarize')
 
@@ -31,20 +34,36 @@ class NemoSpeechDiarizer:
         *,
         device: str = 'auto',
         preset: str = DEFAULT_PRESET,
+        store: CachedModelStore | None = None,
     ) -> None:
         self._binary = binary if binary is not None else os.environ.get('LTN_NEMO_BINARY', '')
         self._model = model if model is not None else os.environ.get('LTN_NEMO_MODEL', '')
         self._device = device
         self._preset = preset
+        self._store = store
 
     def _resolve(self) -> tuple[Path, Path]:
-        binary = Path(str(self._binary)).expanduser()
-        model = Path(str(self._model)).expanduser()
-        if not self._binary or not binary.is_file():
-            raise RuntimeError('nemo-speech binary not found. Set LTN_NEMO_BINARY to the executable path.')
-        if not self._model or not model.is_file():
-            raise RuntimeError('diarization model not found. Set LTN_NEMO_MODEL to the GGUF path.')
+        binary = self._resolve_one(str(self._binary), model_catalog.RUNTIME_ID, 'nemo-speech binary', 'LTN_NEMO_BINARY')
+        model = self._resolve_one(
+            str(self._model),
+            model_catalog.NEMOTRON_ID,
+            'diarization model',
+            'LTN_NEMO_MODEL',
+        )
         return binary, model
+
+    def _resolve_one(self, explicit: str, asset_id: str, label: str, env_var: str) -> Path:
+        if explicit:
+            path = Path(explicit).expanduser()
+            if path.is_file():
+                return path
+            raise RuntimeError(f'{label} not found at {path}. Set {env_var} to a valid file or clear the override.')
+        if self._store is None:
+            raise RuntimeError(f'{label} not found. Set {env_var} to the file path.')
+        state = self._store.status(asset_id)
+        if state.status is AssetStatus.READY and state.path:
+            return Path(state.path)
+        raise RuntimeError(f'{label} is not installed. Open Settings > Models to install it.')
 
     def diarize(self, audio_path: Path, timeout: float = 300.0) -> list[SpeakerTurn]:
         binary, model = self._resolve()

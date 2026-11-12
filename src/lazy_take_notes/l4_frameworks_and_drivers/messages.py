@@ -85,3 +85,33 @@ class AudioLevel(Message):
     def __init__(self, rms: float) -> None:
         super().__init__()
         self.rms = rms
+
+
+class AudioProbeLevel(Message):
+    """Posted by the settings audio probe with one source level."""
+
+    def __init__(self, source: str, rms: float) -> None:
+        super().__init__()
+        self.source = source
+        self.rms = rms
+
+
+class AudioProbePermission(Message):
+    """Posted by the settings audio probe with a source permission state."""
+
+    def __init__(self, source: str, state: str) -> None:
+        super().__init__()
+        self.source = source
+        self.state = state
+
+
+class AudioProbeDone(Message):
+    """Posted when the settings audio probe stops."""
+
+
+class AudioProbeError(Message):
+    """Posted when the settings audio probe cannot open a source."""
+
+    def __init__(self, error: str) -> None:
+        super().__init__()
+        self.error = error

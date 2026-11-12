@@ -150,7 +150,17 @@ output/
 
 ## Speaker labels (experimental)
 
-`take-note diarize <session-dir>` adds anonymous speaker labels to a saved transcript. It needs the native NeMo-Speech.cpp runtime and the Nemotron-3-Diarization GGUF:
+Speaker labels need the native NeMo-Speech.cpp runtime and the Nemotron-3-Diarization GGUF. Install both from Settings:
+
+```bash
+take-note config
+```
+
+Open the **Models** tab and press `Download` next to `NeMo Speech runtime` and `Nemotron 3 diarization`. The app downloads about 116 MB once, checks the pinned SHA-256 digest, and stores both in the shared cache. No paths to type.
+
+The app reads the recording while it runs, so `save_audio` must be on. `take-note diarize <session-dir>` labels a saved transcript with the same installed runtime and model.
+
+For a custom build, set an absolute path in `config.yaml`, or export the old overrides:
 
 ```bash
 export LTN_NEMO_BINARY=/path/to/nemo-speech
@@ -158,30 +168,49 @@ export LTN_NEMO_MODEL=/path/to/Nemotron-3-Diarization.q8_0.gguf
 take-note diarize output/2026-11-08_100000_standup
 ```
 
-The session must contain `recording.wav` (set `save_audio: true`). The command writes `speakers.json` and `transcript_speakers.txt` in the session directory.
+The command writes `speakers.json` and `transcript_speakers.txt` in the session directory.
 
 Labels are local to one session. `S1` in one meeting is not the same person as `S1` in another. Diarization runs offline: 20 minutes of audio took 3.7 s on Metal, and 61 minutes took 44 s on CPU.
 
 ### Live speaker labels
 
-Set the same paths in `config.yaml` to label the transcript while it records:
+Enable **Speaker Labels** on the **Audio** page. Install the runtime and model from the **Models** page. The app reuses the installed files and runs one pass over the audio recorded so far every 60 seconds. The same controls are in `config.yaml`:
 
 ```yaml
 diarization:
   enabled: true
-  binary: /path/to/nemo-speech
-  model: /path/to/Nemotron-3-Diarization.q8_0.gguf
   device: auto        # auto, cpu, or metal
   interval_s: 60      # one full pass over the audio so far
 output:
   save_audio: true    # diarization reads the recording
 ```
 
-The same fields are on the **Speakers** tab of `take-note config`.
+`binary` and `model` are optional overrides. Leave them blank to use the managed cache.
 
 A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript, is saved to `speakers.json`, and is used in the digest prompt, so the notes can attribute statements to a person.
 
 Speaker numbers follow arrival order, so a label already on screen stays valid when a new voice joins. Each pass reads the whole recording, which is cheap: about 11 s per hour on Metal.
+
+## Settings
+
+`take-note config` opens the settings screen. The app also opens it from the mode picker.
+
+| Page | What it controls |
+| --- | --- |
+| Models | Text generation provider and models, speech models, language overrides, speaker runtime install |
+| Digest | Summary triggers and token compaction |
+| Audio | Live input test, microphone choice, audio processing, speaker labels |
+| Sessions | Output folder, save toggles, auto-label, vocabulary, built-in templates |
+| Appearance | Theme and the recording preview |
+
+Pages use the full window: a left navigation column, then two content columns. Models is first because it is the setup page. Below about 100 columns, the two content columns stack.
+
+The Models page lists each transcript model as a row with its size, state, and one action. Language overrides use `Add language` rows with a locale and a model picker. Speaker runtime and model show only a status and an install or remove action. No model paths are exposed. Advanced settings are always visible. No page uses collapsible sections.
+
+Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show progress, and can be cancelled. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
+
+On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place.
+
 
 ## Desktop app (macOS)
 
@@ -189,9 +218,11 @@ Build a `.app` that runs the TUI in its own window using [Trolley](https://githu
 
 ```bash
 brew install weedonandscott/tap/trolley
-trolley run                        # build and launch
-trolley package --formats mac-app  # build .app only
+scripts/trolley/build.sh --run     # build, add the mic usage string, and launch
+scripts/trolley/build.sh           # build .app only
 ```
+
+The build script inserts `NSMicrophoneUsageDescription` into the app's `Info.plist` after Trolley packages it. Trolley has no config key for that entry, and macOS denies microphone access to the app without it.
 
 The bundle ships a launcher script, not a frozen Python binary. On first launch it installs the app into a uv tool environment, then reuses that environment on every later launch. The target machine needs `uv`, plus the CLI prerequisites: `ffmpeg`, and either Ollama or an OpenAI-compatible endpoint. If `uv` is missing, the launcher prints the install command and exits.
 
@@ -208,7 +239,7 @@ Moving the window between displays with different scale factors can leave the te
 The launcher installs from `main` by default. A bundle built from an unmerged branch must point at that checkout, or the installed code will not match the driver the bundle expects:
 
 ```bash
-LTN_DESKTOP_SOURCE=/path/to/lazy-take-notes trolley run
+LTN_DESKTOP_SOURCE=/path/to/lazy-take-notes scripts/trolley/build.sh --run
 ```
 
 The produced `.app` is ad-hoc signed. Distributing it to another machine needs a Developer ID signature and notarization. `scripts/release.sh` does both when they are available, and the last line of its output says whether it did:

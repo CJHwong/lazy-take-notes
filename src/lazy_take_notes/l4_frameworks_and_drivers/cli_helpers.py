@@ -346,6 +346,7 @@ def build_record_session(
         model_resolver_factory=container.model_resolver_factory,
         missing_digest_models=missing_digest,
         missing_interactive_models=missing_interactive,
+        asset_store=container.asset_store,
         label=label or '',
     )
     return app, out_dir

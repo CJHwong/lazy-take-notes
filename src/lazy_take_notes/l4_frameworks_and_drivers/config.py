@@ -20,6 +20,7 @@ APP_CONFIG_DEFAULTS: dict = {
         'overlap': 1.0,
         'silence_threshold': 0.01,
         'pause_duration': 1.5,
+        'input_device': None,
     },
     'digest': {
         'model': 'gpt-oss:20b',
@@ -56,7 +57,7 @@ def build_app_config(raw: dict) -> AppConfig:
 
 def _expand_transcription_aliases(cfg: dict) -> None:
     """Expand known short model aliases to hf:// URIs in-place."""
-    from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import (  # noqa: PLC0415 -- deferred: avoid import at module level
+    from lazy_take_notes.l3_interface_adapters.gateways.model_catalog import (  # noqa: PLC0415 -- deferred: avoid import at module level
         expand_model_alias,
     )
 

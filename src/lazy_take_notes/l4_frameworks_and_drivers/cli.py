@@ -231,6 +231,9 @@ def diarize(ctx, session_dir, device, timeout_s):
     transcript_speakers.txt into the session directory.
     """
     from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at  # noqa: PLC0415 -- deferred
+    from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import (  # noqa: PLC0415 -- deferred: model cache only on diarize
+        CachedModelStore,
+    )
     from lazy_take_notes.l3_interface_adapters.gateways.nemo_speech_diarizer import (  # noqa: PLC0415 -- deferred
         NemoSpeechDiarizer,
     )
@@ -243,7 +246,7 @@ def diarize(ctx, session_dir, device, timeout_s):
         raise click.ClickException(f'No transcript.txt in {session_dir}')
 
     try:
-        turns = NemoSpeechDiarizer(device=device).diarize(recording, timeout=timeout_s)
+        turns = NemoSpeechDiarizer(device=device, store=CachedModelStore()).diarize(recording, timeout=timeout_s)
     except RuntimeError as exc:
         raise click.ClickException(str(exc)) from exc
 
