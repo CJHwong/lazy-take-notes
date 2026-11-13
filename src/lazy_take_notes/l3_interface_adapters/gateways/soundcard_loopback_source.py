@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import queue
 import sys
 import threading
@@ -10,6 +11,9 @@ import numpy as np
 import soundcard as sc  # noqa: PLC0415 -- top-level import for L3 adapter; forbidden in L1/L2 by import-linter
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
+from lazy_take_notes.l3_interface_adapters.gateways._audio_buffer import AudioBuffer
+
+log = logging.getLogger('ltn.audio.loopback')
 
 
 def _patch_soundcard_numpy2_compat() -> None:
@@ -71,31 +75,51 @@ def _win_com_uninit() -> None:
 class SoundCardLoopbackSource:
     """Implements AudioSource using soundcard library loopback capture (Linux/Windows)."""
 
+    continuous_capture = False
+
     def __init__(self) -> None:
-        self._queue: queue.Queue[np.ndarray] = queue.Queue()
+        self._queue = AudioBuffer(max_frames=SAMPLE_RATE, sample_rate=SAMPLE_RATE, label='loopback')
+        self._error: RuntimeError | None = None
+        self._exhausted = threading.Event()
         self._stop = threading.Event()
+        self._ready = threading.Event()
         self._thread: threading.Thread | None = None
         self._recorder = None
-        self._com_owner = False  # tracks whether we initialized COM on the caller thread
+        self._com_owner = False
         self.mic_muted: bool = False  # not used directly; MixedAudioSource handles muting
+
+    @property
+    def exhausted(self) -> bool:
+        return self._exhausted.is_set()
+
+    @property
+    def dropped_frames(self) -> int:
+        return self._queue.dropped_frames
 
     def open(self, sample_rate: int, channels: int) -> None:
         if sys.platform == 'darwin':
-            raise RuntimeError('SoundCardLoopbackSource is not supported on macOS — use CoreAudioTapSource')
+            raise RuntimeError('SoundCardLoopbackSource is not supported on macOS; use CoreAudioTapSource')
 
-        _win_com_init()
-        self._com_owner = sys.platform == 'win32'
-
-        loopback = self._find_loopback()
+        self.close()
+        self._error = None
+        self._exhausted.clear()
+        self._queue = AudioBuffer(max_frames=sample_rate, sample_rate=sample_rate, label='loopback')
         self._stop.clear()
-        self._recorder = loopback.recorder(samplerate=sample_rate, channels=channels)
-        self._recorder.__enter__()  # noqa: PLC2801 -- manual context: open/close are separate methods
-        self._thread = threading.Thread(
-            target=self._reader,
-            args=(self._recorder, sample_rate),
-            daemon=True,
-        )
-        self._thread.start()
+        self._ready.clear()
+        self._thread = threading.Thread(target=self._reader, args=(None, sample_rate, channels), daemon=True)
+        try:
+            self._thread.start()
+        except Exception:
+            self._thread = None
+            raise
+        if not self._ready.wait(timeout=5):
+            self._stop.set()
+            raise RuntimeError('Loopback capture startup timed out; worker still owns its resources')
+        if self._error is not None:
+            self.close()
+            raise self._error from None
+        if self._stop.is_set():
+            raise RuntimeError('Loopback capture stopped during startup')
 
     @staticmethod
     def _find_loopback():
@@ -121,49 +145,93 @@ class SoundCardLoopbackSource:
 
         return loopbacks[0]
 
-    def _reader(self, recorder, sample_rate: int) -> None:
-        _win_com_init()
+    def _reader(self, recorder, sample_rate: int, channels: int = 1) -> None:
         try:
-            chunk_frames = sample_rate // 10  # 100ms
-            while not self._stop.is_set():
-                data = recorder.record(numframes=chunk_frames)
-                if data is None:
-                    continue
-                # soundcard returns (frames, channels) — flatten to mono float32
-                if data.ndim > 1:
-                    data = data.mean(axis=1)
-                self._queue.put(data.astype(np.float32))
+            _win_com_init()
+            self._com_owner = sys.platform == 'win32'
+            if recorder is None:
+                loopback = self._find_loopback()
+                # PulseAudio defaults can batch seconds of samples and delay shutdown.
+                blocksize = sample_rate // 10 if sys.platform == 'linux' else None
+                recorder = loopback.recorder(samplerate=sample_rate, channels=channels, blocksize=blocksize)
+                self._recorder = recorder
+                recorder.__enter__()  # noqa: PLC2801 -- worker owns complete native lifetime
+            if sys.platform != 'linux':
+                self._ready.set()
+            self._read_chunks(recorder, sample_rate)
+        except Exception as error:
+            if not self._stop.is_set():
+                self._error = RuntimeError(f'Loopback capture failed: {error}')
+                self._exhausted.set()
+                log.exception('loopback capture stopped')
         finally:
-            _win_com_uninit()
+            self._ready.set()
+            self._close_recorder()
+            self._release_com()
+
+    def _read_chunks(self, recorder, sample_rate: int) -> None:
+        while not self._stop.is_set():
+            samples = (
+                self._read_available_pulse(recorder)
+                if sys.platform == 'linux'
+                else recorder.record(numframes=sample_rate // 10)
+            )
+            if samples is None or not len(samples):
+                self._stop.wait(0.01)
+                continue
+            if self._stop.is_set():
+                continue
+            if samples.ndim > 1:
+                samples = samples.mean(axis=1)
+            self._queue.put(samples.astype(np.float32))
+            self._ready.set()
+
+    @staticmethod
+    def _read_available_pulse(recorder) -> np.ndarray | None:
+        # SoundCard 0.4.5 blocks even with numframes=None when the stream is empty.
+        # This worker is the only consumer, so a ready packet stays available.
+        from soundcard import pulseaudio  # noqa: PLC0415 -- pinned Linux backend exposes readiness
+
+        stream_state = pulseaudio._pulse._pa_stream_get_state(recorder.stream)
+        if stream_state in (pulseaudio._pa.PA_STREAM_FAILED, pulseaudio._pa.PA_STREAM_TERMINATED):
+            raise RuntimeError(f'PulseAudio stream stopped (state {stream_state})')
+        readable_bytes = pulseaudio._pulse._pa_stream_readable_size(recorder.stream)
+        if readable_bytes == int(pulseaudio._ffi.cast('size_t', -1)):
+            raise RuntimeError('PulseAudio readable size failed')
+        if readable_bytes == 0:
+            return None
+        return recorder.record(numframes=None)
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
         try:
             return self._queue.get(timeout=timeout)
         except queue.Empty:
+            if self._error is not None:
+                raise self._error from None
             return None
 
     def drain(self) -> None:
-        """Discard all buffered audio — called on pause so resume starts fresh."""
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
+        self._queue.clear()
 
     def close(self) -> None:
         self._stop.set()
-        # Join the reader thread BEFORE destroying the recorder — otherwise
-        # the reader may still be inside recorder.record() when PulseAudio
-        # tears down the stream, causing a pa_stream reference count assertion.
         if self._thread is not None:
             self._thread.join(timeout=2)
+            if self._thread.is_alive():
+                raise RuntimeError('Loopback reader did not stop; recorder remains open to prevent unsafe teardown')
             self._thread = None
-        if self._recorder is not None:
+        self.drain()
+
+    def _close_recorder(self) -> None:
+        recorder = self._recorder
+        self._recorder = None
+        if recorder is not None:
             try:
-                self._recorder.__exit__(None, None, None)  # noqa: PLC2801 -- manual context: open/close are separate methods
-            except Exception:  # noqa: BLE001, S110
-                pass
-            self._recorder = None
+                recorder.__exit__(None, None, None)  # noqa: PLC2801 -- port separates open and close
+            except Exception:
+                log.exception('failed to close loopback recorder')
+
+    def _release_com(self) -> None:
         if self._com_owner:
             _win_com_uninit()
             self._com_owner = False

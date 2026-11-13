@@ -16,7 +16,7 @@ a window on screen. `afplay`, `say`, and `ffplay` are captured.
 
 ### Build
 
-Requires Xcode Command Line Tools and Swift toolchain (macOS only).
+Requires Xcode Command Line Tools and Swift 5.10 or newer (macOS only).
 
 ```bash
 bash scripts/build_native.sh
@@ -121,9 +121,9 @@ read that with `AudioDeviceCreateIOProcIDWithBlock`.
 
 **Use the mono global tap**
 
-`CATapDescription(monoGlobalTapButExcludeProcesses: [])` gives 48 kHz mono, so the
-converter only resamples and never has to downmix. The stereo variant arrives interleaved
-and doubles the buffer arithmetic for no benefit.
+`CATapDescription(monoGlobalTapButExcludeProcesses: [])` supplies mono float32.
+The helper reads the tap format and the aggregate nominal rate at each start.
+It rebuilds the converter when the device or format changes.
 
 **Do not set the tap's sample rate**
 
@@ -136,18 +136,45 @@ Asking the system for 16 kHz directly is not supported.
 `AudioHardwareDestroyProcessTap`. A leaked tap keeps the system audio indicator lit after
 the app exits.
 
-**Allocation inside the audio callback**
+**Bounded callback handoff**
 
-The callback allocates two `AVAudioPCMBuffer`s and runs the converter. That is not
-real-time safe, and a long stall could drop samples. It matches the previous SCKit
-implementation, and at 48 kHz mono the work is small. If glitches appear under load, move
-the conversion to a serial queue and accept one buffer of latency.
+The callback copies samples and capture time into a preallocated Swift ring.
+The ring uses Apple's Swift Atomics package, pinned to version 1.3.1.
+Keep `Package.resolved` with the source so builds use the recorded dependency revision.
+This preserves macOS 14.2 capture support without the newer standard-library `Atomic` type.
+It does not allocate, convert samples, or write to a pipe.
+The ring has 64 slots, with room for 8192 mono frames per slot.
+Full or oversized buffers increment the dropped-frame counter.
+The consumer retains each slot until conversion finishes.
+
+The main control loop converts samples and writes stdout without blocking.
+It honors each converter input request and preserves the remaining input samples.
+Ignoring those requests loses samples when a capture buffer exceeds the requested size.
+Pending stdout storage has a 256,000-byte limit, equal to four seconds of output.
+This holds a supported three-second gap while a healthy consumer resumes.
+If storage fills, the helper reports an error and releases capture resources.
+It preserves partial-write suffixes, so later writes cannot corrupt float32 framing.
+
+Capture timestamps preserve gaps up to three seconds, including device rebuild gaps.
+A larger gap produces an explicit error instead of an unbounded silence allocation.
+Dropped frames and timestamp gaps appear on stderr.
+
+**Device recovery and first-buffer confirmation**
+
+The helper watches the default output, tap format, and aggregate nominal rate.
+It waits 300 ms after a change before rebuilding the tap and aggregate.
+It reports `capturing` only after receiving a buffer.
+Missing buffers trigger a rebuild after three seconds.
+Startup stops after three attempts without a delivered buffer.
+Zero-valued buffers count as delivery; valid silence does not trigger this watchdog.
 
 **Stdin-close detection for clean subprocess teardown**
 
 The binary watches stdin for EOF via `DispatchSource.makeReadSource`. When the Python
 parent closes `proc.stdin` (or crashes), stdin becomes readable with 0 bytes, and the
-binary sets `shouldStop = true` and exits cleanly. This prevents zombie processes.
+binary sets an atomic stop flag and exits cleanly. This prevents zombie processes.
+Dispatch signal sources handle SIGTERM and SIGINT outside the raw signal handler.
+This keeps Swift runtime calls out of the signal context.
 
 ### Python integration
 
@@ -155,8 +182,16 @@ The Python gateway is at:
 `src/lazy_take_notes/l3_interface_adapters/gateways/coreaudio_tap_source.py`
 
 It launches the binary via `subprocess.Popen` with `stdout=PIPE, stderr=PIPE, stdin=PIPE`.
-A background reader thread pumps stdout bytes (raw float32) into a `queue.Queue`.
+A background reader thread pumps stdout bytes (raw float32) into a bounded `AudioBuffer`.
 If the process exits with a non-zero code, the error is surfaced on the next `read()` call.
 
-Tests (all mocked — no real binary invoked):
-`tests/l3_interface_adapters/test_coreaudio_tap_source.py`
+Python adapter tests use process fakes and small executable helpers:
+`tests/l3_interface_adapters/gateways/test_coreaudio_tap_source.py`
+
+Native support tests exercise the ring, conversion, pipe stalls, and buffer health:
+
+```bash
+swift test --package-path native/coreaudio_tap
+```
+
+These tests do not replace the manual capture and device-switch checks.

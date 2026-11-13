@@ -842,3 +842,79 @@ class TestStreamingWavWriter:
         raw = path.read_bytes()
         assert struct.unpack('<I', raw[40:44])[0] == 640
         writer.close()
+
+
+class TestSourceFailureWarnings:
+    def test_reports_lost_source_while_healthy_audio_continues(self):
+        class DegradedSource(FakeAudioSource):
+            source_errors = ('System audio stopped: test helper exited',)
+
+        source = DegradedSource(chunks=[np.zeros(1600, dtype=np.float32)] * 3)
+        messages = []
+        remaining_reads = iter([False, False, False, True])
+
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: next(remaining_reads, True),
+            model_path='test-model',
+            language='en',
+            transcriber=FakeTranscriber(),
+            audio_source=source,
+        )
+
+        warnings = [
+            message.error
+            for message in messages
+            if isinstance(message, AudioWorkerStatus) and message.status == 'warning'
+        ]
+        assert warnings == ['System audio stopped: test helper exited']
+        assert any(isinstance(message, AudioLevel) for message in messages)
+        assert source.close_calls == 1
+
+    def test_reports_source_failure_without_audio_frames(self):
+        class FailedSource(FakeAudioSource):
+            source_errors = ('Microphone stopped: test input disconnected',)
+
+        messages = []
+        remaining_reads = iter([False, False, True])
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: next(remaining_reads, True),
+            model_path='test-model',
+            language='en',
+            transcriber=FakeTranscriber(),
+            audio_source=FailedSource(),
+        )
+
+        warnings = [
+            message.error
+            for message in messages
+            if isinstance(message, AudioWorkerStatus) and message.status == 'warning'
+        ]
+        assert warnings == ['Microphone stopped: test input disconnected']
+
+    def test_reports_failure_again_after_source_recovers(self):
+        class IntermittentSource(FakeAudioSource):
+            source_errors = ()
+
+            def read(self, timeout=0.1):
+                chunk = super().read(timeout)
+                self.source_errors = () if self._idx == 2 else ('System audio stopped',)
+                return chunk
+
+        messages = []
+        remaining_reads = iter([False, False, False, True])
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: next(remaining_reads, True),
+            model_path='test-model',
+            language='en',
+            transcriber=FakeTranscriber(),
+            audio_source=IntermittentSource(chunks=[np.zeros(1600, dtype=np.float32)] * 3),
+        )
+        warnings = [
+            message.error
+            for message in messages
+            if isinstance(message, AudioWorkerStatus) and message.status == 'warning'
+        ]
+        assert warnings == ['System audio stopped', 'System audio stopped']

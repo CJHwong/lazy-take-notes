@@ -164,6 +164,7 @@ def run_audio_worker(
     )
 
     all_segments: list[TranscriptSegment] = []
+    reported_source_errors: set[str] = set()
     total_samples_fed: int = 0
     _last_level_post: float = 0.0
     _level_accum: list[np.ndarray] = []
@@ -277,6 +278,11 @@ def run_audio_worker(
                 _collect_future()
 
                 data = audio_source.read(timeout=0.1)
+                source_errors: set[str] = set(getattr(audio_source, 'source_errors', ()))
+                for source_error in sorted(source_errors - reported_source_errors):
+                    log.warning('%s', source_error)
+                    post_message(AudioWorkerStatus(status='warning', error=source_error))
+                reported_source_errors = source_errors
                 if data is None:
                     gap = time.monotonic() - _last_data_time
                     # Check if the audio source signals permanent exhaustion

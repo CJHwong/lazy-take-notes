@@ -219,3 +219,50 @@ class TestSounddeviceAudioSource:
         # Should not raise
         src.close()
         assert src._stream is None
+
+
+@patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
+@patch(f'{MODULE}.sd.InputStream')
+def test_start_failure_closes_partial_stream(mock_stream_cls, _mock_qd):
+    import pytest
+
+    from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+    stream = mock_stream_cls.return_value
+    stream.start.side_effect = RuntimeError('start failed')
+    source = SounddeviceAudioSource()
+    with pytest.raises(RuntimeError, match='start failed'):
+        source.open(16000, 1)
+    stream.close.assert_called_once()
+    assert source._stream is None
+
+
+@patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
+@patch(f'{MODULE}.sd.InputStream')
+def test_finished_stream_reports_exhaustion(mock_stream_cls, _mock_qd):
+    import pytest
+
+    from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+    source = SounddeviceAudioSource()
+    source.open(16000, 1)
+    mock_stream_cls.call_args.kwargs['finished_callback']()
+    assert source.exhausted
+    with pytest.raises(RuntimeError, match='stopped unexpectedly'):
+        source.read(0.01)
+    source.close()
+
+
+@patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
+@patch(f'{MODULE}.sd.InputStream')
+def test_reopen_discards_previous_microphone_samples(mock_stream_cls, _mock_qd):
+    from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
+    source = SounddeviceAudioSource()
+    source.open(16000, 1)
+    callback = mock_stream_cls.call_args.kwargs['callback']
+    callback(np.ones((32, 1), dtype=np.float32), 32, None, None)
+    source.close()
+    source.open(16000, 1)
+    assert source.read(0.01) is None
+    source.close()
