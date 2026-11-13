@@ -118,6 +118,8 @@ class SoundCardLoopbackSource:
         if self._error is not None:
             self.close()
             raise self._error from None
+        if self._stop.is_set():
+            raise RuntimeError('Loopback capture stopped during startup')
 
     @staticmethod
     def _find_loopback():
@@ -149,10 +151,13 @@ class SoundCardLoopbackSource:
             self._com_owner = sys.platform == 'win32'
             if recorder is None:
                 loopback = self._find_loopback()
-                recorder = loopback.recorder(samplerate=sample_rate, channels=channels)
+                # PulseAudio defaults can batch seconds of samples and delay shutdown.
+                blocksize = sample_rate // 10 if sys.platform == 'linux' else None
+                recorder = loopback.recorder(samplerate=sample_rate, channels=channels, blocksize=blocksize)
                 self._recorder = recorder
                 recorder.__enter__()  # noqa: PLC2801 -- worker owns complete native lifetime
-            self._ready.set()
+            if sys.platform != 'linux':
+                self._ready.set()
             self._read_chunks(recorder, sample_rate)
         except Exception as error:
             if not self._stop.is_set():
@@ -166,12 +171,36 @@ class SoundCardLoopbackSource:
 
     def _read_chunks(self, recorder, sample_rate: int) -> None:
         while not self._stop.is_set():
-            samples = recorder.record(numframes=sample_rate // 10)
-            if samples is None or self._stop.is_set():
+            samples = (
+                self._read_available_pulse(recorder)
+                if sys.platform == 'linux'
+                else recorder.record(numframes=sample_rate // 10)
+            )
+            if samples is None or not len(samples):
+                self._stop.wait(0.01)
+                continue
+            if self._stop.is_set():
                 continue
             if samples.ndim > 1:
                 samples = samples.mean(axis=1)
             self._queue.put(samples.astype(np.float32))
+            self._ready.set()
+
+    @staticmethod
+    def _read_available_pulse(recorder) -> np.ndarray | None:
+        # SoundCard 0.4.5 blocks even with numframes=None when the stream is empty.
+        # This worker is the only consumer, so a ready packet stays available.
+        from soundcard import pulseaudio  # noqa: PLC0415 -- pinned Linux backend exposes readiness
+
+        stream_state = pulseaudio._pulse._pa_stream_get_state(recorder.stream)
+        if stream_state in (pulseaudio._pa.PA_STREAM_FAILED, pulseaudio._pa.PA_STREAM_TERMINATED):
+            raise RuntimeError(f'PulseAudio stream stopped (state {stream_state})')
+        readable_bytes = pulseaudio._pulse._pa_stream_readable_size(recorder.stream)
+        if readable_bytes == int(pulseaudio._ffi.cast('size_t', -1)):
+            raise RuntimeError('PulseAudio readable size failed')
+        if readable_bytes == 0:
+            return None
+        return recorder.record(numframes=None)
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
         try:

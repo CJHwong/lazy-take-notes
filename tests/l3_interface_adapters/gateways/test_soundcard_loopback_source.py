@@ -36,7 +36,17 @@ def _make_recorder(*, blocking=False):
     """Create a mock recorder with context manager support."""
     recorder = MagicMock()
     if blocking:
-        recorder.record.side_effect = lambda numframes: time.sleep(0.02)
+        first_buffer = True
+
+        def record(numframes):
+            nonlocal first_buffer
+            if first_buffer:
+                first_buffer = False
+                return np.zeros((32, 1), dtype=np.float32)
+            time.sleep(0.02)
+            return None
+
+        recorder.record.side_effect = record
     else:
         recorder.record.return_value = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=np.float32)
     recorder.__enter__ = MagicMock(return_value=recorder)
@@ -145,6 +155,7 @@ class TestSoundCardLoopbackSource:
         with patches[0], patches[1]:
             src = SoundCardLoopbackSource()
             src.open(16000, 1)
+            src.drain()
             result = src.read(timeout=0.05)
             src.close()
 
@@ -351,7 +362,13 @@ def test_blocked_reader_keeps_recorder_until_reader_stops(monkeypatch):
     release = threading.Event()
     entered = threading.Event()
 
+    first_buffer = True
+
     def record(numframes):
+        nonlocal first_buffer
+        if first_buffer:
+            first_buffer = False
+            return np.zeros((32, 1), dtype=np.float32)
         entered.set()
         release.wait(5)
         return None
@@ -395,3 +412,245 @@ def test_recorder_and_com_lifetime_stay_on_one_worker(monkeypatch):
     assert len(owner_threads) == 5
     assert len(set(owner_threads)) == 1
     assert owner_threads[0] != threading.get_ident()
+
+
+def test_loopback_requests_bounded_capture_fragments(monkeypatch):
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    loopback = _make_loopback()
+    loopback.recorder.return_value = _make_recorder(blocking=True)
+    with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+        source = SoundCardLoopbackSource()
+        source.open(16000, 1)
+        source.close()
+    assert loopback.recorder.call_args.kwargs['blocksize'] == 1600
+
+
+def test_server_fragment_pacing_allows_shutdown_after_first_read(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    release = threading.Event()
+    second_read = threading.Event()
+    loopback = _make_loopback()
+    recorder = MagicMock()
+
+    def create_recorder(*, samplerate, channels, blocksize=None):
+        fragment_seconds = blocksize / samplerate if blocksize else 2.1
+        calls = 0
+
+        def record(numframes):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                second_read.set()
+            release.wait(fragment_seconds)
+            frame_count = numframes if numframes is not None else blocksize
+            assert frame_count is not None
+            return np.zeros((frame_count, channels), dtype=np.float32)
+
+        recorder.record.side_effect = record
+        return recorder
+
+    loopback.recorder.side_effect = create_recorder
+    source = SoundCardLoopbackSource()
+    try:
+        with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+            source.open(16000, 1)
+        assert source.read(3) is not None
+        assert second_read.wait(1)
+        closing = time.monotonic()
+        source.close()
+        assert time.monotonic() - closing < 0.5
+    finally:
+        release.set()
+        source.close()
+    recorder.__exit__.assert_called_once()
+
+
+@pytest.fixture(autouse=True)
+def pulse_backend(monkeypatch):
+    backend = MagicMock()
+    backend._pa.PA_STREAM_READY = 2
+    backend._pa.PA_STREAM_FAILED = 3
+    backend._pa.PA_STREAM_TERMINATED = 4
+    backend._pulse._pa_stream_get_state.return_value = 2
+    backend._pulse._pa_stream_readable_size.return_value = 6400
+    backend._ffi.cast.return_value = 2**64 - 1
+    monkeypatch.setattr(loopback_mod.sc, 'pulseaudio', backend, raising=False)
+    return backend
+
+
+def test_no_packet_read_stays_cancellable(monkeypatch, pulse_backend):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    pulse_backend._pulse._pa_stream_readable_size.side_effect = iter([6400] + [0] * 10000)
+    entered = threading.Event()
+    release = threading.Event()
+    recorder = MagicMock()
+
+    first_buffer = True
+
+    def blocking_record(numframes):
+        nonlocal first_buffer
+        if first_buffer:
+            first_buffer = False
+            return np.zeros((128, 1), dtype=np.float32)
+        entered.set()
+        release.wait(5)
+        return None
+
+    recorder.record.side_effect = blocking_record
+    loopback = _make_loopback()
+    loopback.recorder.return_value = recorder
+    source = SoundCardLoopbackSource()
+    try:
+        with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+            source.open(16000, 1)
+        assert source.read(0.05) is not None
+        assert source.read(0.05) is None
+        assert not entered.is_set()
+        start = time.monotonic()
+        source.close()
+        assert time.monotonic() - start < 0.5
+    finally:
+        release.set()
+        source.close()
+
+
+@pytest.mark.parametrize('stream_state', [3, 4])
+def test_stopped_pulse_stream_reports_failure(monkeypatch, pulse_backend, stream_state):
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    pulse_backend._pulse._pa_stream_get_state.return_value = stream_state
+    recorder = MagicMock()
+    source = SoundCardLoopbackSource()
+    source._reader(recorder, 16000)
+    with pytest.raises(RuntimeError, match='PulseAudio stream stopped'):
+        source.read(0.01)
+    recorder.record.assert_not_called()
+
+
+def test_pulse_readable_size_error_is_not_a_packet(monkeypatch, pulse_backend):
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    pulse_backend._pulse._pa_stream_readable_size.return_value = 2**64 - 1
+    recorder = MagicMock()
+    source = SoundCardLoopbackSource()
+    source._reader(recorder, 16000)
+    with pytest.raises(RuntimeError, match='PulseAudio readable size failed'):
+        source.read(0.01)
+    recorder.record.assert_not_called()
+
+
+def test_ready_pulse_packet_preserves_silent_frames(pulse_backend):
+    recorder = MagicMock()
+    expected = np.zeros((128, 1), dtype=np.float32)
+    recorder.record.return_value = expected
+    result = SoundCardLoopbackSource._read_available_pulse(recorder)
+    assert result is expected
+    recorder.record.assert_called_once_with(numframes=None)
+
+
+def test_windows_keeps_fixed_frame_reads(monkeypatch):
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    source = SoundCardLoopbackSource()
+    recorder = MagicMock()
+
+    def record(numframes):
+        source._stop.set()
+        return np.zeros((numframes, 1), dtype=np.float32)
+
+    recorder.record.side_effect = record
+    with patch.object(loopback_mod, '_win_com_init'), patch.object(loopback_mod, '_win_com_uninit'):
+        source._reader(recorder, 16000)
+    recorder.record.assert_called_once_with(numframes=1600)
+
+
+def test_open_waits_for_first_delivered_buffer(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    release = threading.Event()
+    recording = threading.Event()
+    opened = threading.Event()
+    errors = []
+    recorder = MagicMock()
+
+    def record(numframes):
+        recording.set()
+        release.wait(5)
+        return np.zeros((128, 1), dtype=np.float32)
+
+    recorder.record.side_effect = record
+    loopback = _make_loopback()
+    loopback.recorder.return_value = recorder
+    source = SoundCardLoopbackSource()
+
+    def open_source():
+        try:
+            source.open(16000, 1)
+        except Exception as error:
+            errors.append(error)
+        finally:
+            opened.set()
+
+    opening = threading.Thread(target=open_source)
+    try:
+        with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+            opening.start()
+            assert recording.wait(1)
+            assert not opened.wait(0.05)
+            release.set()
+            assert opened.wait(1)
+        assert not errors
+        assert source.read(0.1) is not None
+    finally:
+        release.set()
+        opening.join(1)
+        source.close()
+
+
+def test_stop_during_linux_startup_reports_cancellation(monkeypatch, pulse_backend):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    pulse_backend._pulse._pa_stream_readable_size.return_value = 0
+    loopback = _make_loopback()
+    recorder = MagicMock()
+    loopback.recorder.return_value = recorder
+    source = SoundCardLoopbackSource()
+    errors = []
+
+    def open_source():
+        try:
+            source.open(16000, 1)
+        except Exception as error:
+            errors.append(error)
+
+    opening = threading.Thread(target=open_source)
+    with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+        opening.start()
+        deadline = time.monotonic() + 1
+        while not pulse_backend._pulse._pa_stream_readable_size.called and time.monotonic() < deadline:
+            time.sleep(0.001)
+        source.close()
+        opening.join(1)
+    assert not opening.is_alive()
+    assert len(errors) == 1
+    assert 'stopped during startup' in str(errors[0])
+    recorder.record.assert_not_called()
+    recorder.__exit__.assert_called_once()
+
+
+def test_failure_during_linux_startup_reports_capture_error(monkeypatch, pulse_backend):
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    pulse_backend._pulse._pa_stream_get_state.return_value = 3
+    loopback = _make_loopback()
+    recorder = MagicMock()
+    loopback.recorder.return_value = recorder
+    source = SoundCardLoopbackSource()
+    with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+        with pytest.raises(RuntimeError, match='PulseAudio stream stopped'):
+            source.open(16000, 1)
+    assert source._thread is None
+    recorder.record.assert_not_called()
+    recorder.__exit__.assert_called_once()
