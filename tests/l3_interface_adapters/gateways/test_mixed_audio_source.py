@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import numpy as np
@@ -42,6 +43,297 @@ class RestartableSource:
 
 
 class TestMixedAudioSource:
+    def test_partial_thread_start_failure_closes_sources_and_started_reader(self, monkeypatch):
+        original_start = threading.Thread.start
+        starts = 0
+
+        def fail_second_start(thread):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError('cannot create reader thread')
+            original_start(thread)
+
+        monkeypatch.setattr(threading.Thread, 'start', fail_second_start)
+        microphone, system = FakeAudioSource(), FakeAudioSource()
+        source = MixedAudioSource(microphone, system)
+
+        with pytest.raises(RuntimeError, match='cannot create reader thread'):
+            source.open(16000, 1)
+
+        assert microphone.close_calls == 1
+        assert system.close_calls == 1
+        assert not source._threads
+
+    def test_restart_discards_system_samples_from_the_previous_capture(self):
+        fail_now = threading.Event()
+
+        class RecoveringSource(FakeAudioSource):
+            delivered = False
+
+            def read(self, timeout=0.1):
+                if len(self.open_calls) == 1:
+                    if fail_now.wait(timeout=0.005):
+                        raise RuntimeError('device changed')
+                    return None
+                if not self.delivered:
+                    self.delivered = True
+                    return np.full(160, 0.4, dtype=np.float32)
+                return None
+
+        system = RecoveringSource()
+        source = MixedAudioSource(FakeAudioSource(), system)
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        source._sys_buf = np.full(160, 0.1, dtype=np.float32)
+        fail_now.set()
+        deadline = time.monotonic() + 1
+        try:
+            while source._sys_q.empty() and time.monotonic() < deadline:
+                time.sleep(0.005)
+            source._mic_q.put(np.zeros(160, dtype=np.float32))
+            result = source.read(timeout=0.1)
+            assert result is not None
+            np.testing.assert_allclose(result, 0.4)
+        finally:
+            source.close()
+
+    def test_reopen_without_buffers_eventually_reports_failure(self):
+        class SilentAfterReopen(FakeAudioSource):
+            def read(self, timeout=0.1):
+                if len(self.open_calls) == 1:
+                    raise RuntimeError('device disconnected')
+                return None
+
+        microphone = SilentAfterReopen()
+        source = MixedAudioSource(microphone, FakeAudioSource(), dead_audio_seconds=0.01)
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        deadline = time.monotonic() + 1
+        try:
+            while len(microphone.open_calls) < 4 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert len(microphone.open_calls) == 4
+            assert any('did not deliver a buffer' in error for error in source.source_errors)
+            assert not source.exhausted
+        finally:
+            source.close()
+
+    def test_startup_rollback_preserves_error_when_cleanup_also_fails(self):
+        class BrokenMicrophone(FakeAudioSource):
+            def close(self):
+                raise RuntimeError('microphone cleanup failed')
+
+        class BrokenSystem(FakeAudioSource):
+            def open(self, sample_rate, channels):
+                raise RuntimeError('system startup failed')
+
+        source = MixedAudioSource(BrokenMicrophone(), BrokenSystem())
+
+        with pytest.raises(RuntimeError, match='system startup failed'):
+            source.open(16000, 1)
+
+    def test_reopen_resets_dropped_frame_count(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        source._sys_q.put(np.ones(8000, dtype=np.float32))
+        assert source.dropped_frames == 4000
+
+        source.open(16000, 1)
+        try:
+            assert source.dropped_frames == 0
+        finally:
+            source.close()
+
+    def test_interleaved_sources_do_not_count_the_same_time_twice(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        source.open(16000, 1)
+        source._sys_q.put(np.full(1600, 0.2, dtype=np.float32))
+        timer = threading.Timer(0.02, lambda: source._mic_q.put(np.full(512, 0.1, dtype=np.float32)))
+        timer.start()
+        try:
+            result = source.read(timeout=0.1)
+            assert result is not None
+            assert result.size == 512
+            np.testing.assert_allclose(result, 0.3)
+            assert source._sys_buf.size == 1088
+        finally:
+            timer.join()
+            source.close()
+
+    def test_retry_count_is_bounded_and_both_failed_sources_exhaust(self):
+        class BrokenSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                raise RuntimeError('disconnected')
+
+        microphone, system = BrokenSource(), BrokenSource()
+        source = MixedAudioSource(microphone, system)
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        deadline = time.monotonic() + 1
+        try:
+            while not source.exhausted and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert source.exhausted
+            assert len(source.source_errors) == 2
+            assert len(microphone.open_calls) == 4
+            assert len(system.open_calls) == 4
+        finally:
+            source.close()
+
+    def test_recovery_confirms_a_fresh_buffer_before_clearing_the_error(self):
+        release_buffer = threading.Event()
+
+        class RecoveringSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                if len(self.open_calls) == 1:
+                    raise RuntimeError('disconnected')
+                if release_buffer.wait(timeout=0.005):
+                    return np.full(160, 0.2, dtype=np.float32)
+                return None
+
+        microphone = RecoveringSource()
+        source = MixedAudioSource(microphone, FakeAudioSource())
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        deadline = time.monotonic() + 1
+        try:
+            while len(microphone.open_calls) < 2 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert len(microphone.open_calls) == 2
+            assert source.source_errors
+            release_buffer.set()
+            assert source.read(timeout=0.5) is not None
+            assert not source.source_errors
+        finally:
+            source.close()
+
+    def test_stop_during_recovery_cannot_reopen_a_source(self):
+        class BrokenSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                raise RuntimeError('disconnected')
+
+        microphone = BrokenSource()
+        source = MixedAudioSource(microphone, FakeAudioSource())
+        source.open(16000, 1)
+        deadline = time.monotonic() + 1
+        while not source.source_errors and time.monotonic() < deadline:
+            time.sleep(0.005)
+        source.close()
+
+        assert len(microphone.open_calls) == 1
+        assert not source._threads
+
+    def test_continuous_source_restarts_when_buffers_stop(self):
+        class StalledSource(RestartableSource):
+            continuous_capture = True
+
+        microphone = StalledSource([[], [np.full(160, 0.1, dtype=np.float32)] * 10])
+        source = MixedAudioSource(microphone, FakeAudioSource(), dead_audio_seconds=0.03)
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        try:
+            result = source.read(timeout=0.5)
+            assert result is not None
+            assert len(microphone.open_calls) == 2
+        finally:
+            source.close()
+
+    def test_permission_wait_does_not_count_as_a_stalled_stream(self):
+        class PermissionSource(FakeAudioSource):
+            continuous_capture = True
+            awaiting_permission = True
+
+        microphone = PermissionSource()
+        source = MixedAudioSource(microphone, FakeAudioSource(), dead_audio_seconds=0.01)
+        source.open(16000, 1)
+        try:
+            assert source.read(timeout=0.05) is None
+            assert not source.source_errors
+            assert len(microphone.open_calls) == 1
+        finally:
+            source.close()
+
+    def test_system_audio_continues_without_microphone_frames(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        source._sys_q.put(np.full(1600, 0.2, dtype=np.float32))
+
+        result = source.read(timeout=0.01)
+
+        assert result is not None
+        np.testing.assert_allclose(result, 0.2)
+        assert source.last_mic_rms == 0.0
+
+    def test_source_errors_reach_caller_while_other_audio_continues(self):
+        class BrokenSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                raise RuntimeError('test device disconnected')
+
+        source = MixedAudioSource(BrokenSource(), FakeAudioSource())
+        source._restart_delay = 0.001
+        source.open(16000, 1)
+        deadline = time.monotonic() + 1
+        while not source.source_errors and time.monotonic() < deadline:
+            time.sleep(0.005)
+        source._sys_q.put(np.full(160, 0.2, dtype=np.float32))
+        try:
+            result = source.read(timeout=0.1)
+            assert result is not None
+            np.testing.assert_allclose(result, 0.2)
+            assert any('test device disconnected' in error for error in source.source_errors)
+            assert not source.exhausted
+        finally:
+            source.close()
+
+    def test_failed_startup_closes_already_open_microphone(self):
+        class BrokenSource(FakeAudioSource):
+            def open(self, sample_rate, channels):
+                raise RuntimeError('system startup failed')
+
+        microphone = FakeAudioSource()
+        source = MixedAudioSource(microphone, BrokenSource())
+
+        with pytest.raises(RuntimeError, match='system startup failed'):
+            source.open(16000, 1)
+
+        assert microphone.close_calls == 1
+
+    def test_close_still_closes_system_when_microphone_close_fails(self):
+        class BrokenSource(FakeAudioSource):
+            def close(self):
+                raise RuntimeError('microphone close failed')
+
+        system = FakeAudioSource()
+        source = MixedAudioSource(BrokenSource(), system)
+        source.open(16000, 1)
+
+        with pytest.raises(RuntimeError, match='microphone close failed'):
+            source.close()
+
+        assert system.close_calls == 1
+        assert not source._threads
+
+    def test_slow_consumer_keeps_recent_audio_with_bounded_duration(self, caplog):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        for index in range(100):
+            source._sys_q.put(np.full(1600, index / 1000, dtype=np.float32))
+
+        result = source.read(timeout=0.01)
+
+        assert result is not None
+        assert result.size <= 4000
+        assert result[-1] == pytest.approx(0.099)
+        assert 'dropped' in caplog.text
+
+    def test_frame_mismatch_cannot_accumulate_unbounded_system_delay(self, caplog):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        for _ in range(1000):
+            source._mic_q.put(np.zeros(1590, dtype=np.float32))
+            source._sys_q.put(np.zeros(1600, dtype=np.float32))
+            source.read(timeout=0.001)
+
+        assert source._sys_buf.size <= 4000
+        assert 'dropped' in caplog.text
+
     def test_system_signal_seen_delegates_to_system_source(self):
         class ReportingSource(FakeAudioSource):
             system_signal_seen = False
@@ -382,48 +674,21 @@ class TestMixedAudioSource:
         # Without the sys-active gate the gain would be ~5x. The gate must hold it at 1x.
         assert src._mic_gain == 1.0, f'Expected gain held at 1.0x, got {src._mic_gain}x'  # noqa: SLF001
 
-    def test_sys_queue_backlog_drained_into_one_concat(self):
-        """When the consumer has fallen behind by many sys chunks, the catch-up
-        drain inside read() must complete in linear time. The prior implementation
-        re-concatenated onto _sys_buf inside the per-chunk loop (O(K²) memcpy),
-        which stalled a single read() for seconds when K reached the thousands —
-        directly causing the user-reported long-meeting lag spiral.
+    def test_system_backlog_retains_recent_sample_order(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        for index in range(200):
+            source._sys_q.put(np.full(100, (index + 1) / 1000, dtype=np.float32))
+        source._mic_q.put(np.zeros(10, dtype=np.float32))
 
-        We can't easily assert on wall time here (CI noise), but we can pin the
-        observable semantics: every queued sys chunk's samples end up in _sys_buf
-        (or get consumed into the mixed output) regardless of how many were queued.
-        Concat ordering matters: the first-queued chunk's samples should land
-        before later ones."""
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        src = MixedAudioSource(mic, sys_audio)
-        src.open(16000, 1)
+        result = source.read(timeout=0.1)
 
-        # Pre-load 200 sys chunks (each tagged with a sentinel value so order is checkable).
-        sys_chunk_n = 100
-        n_chunks = 200
-        for i in range(n_chunks):
-            tag = (i + 1) / 1000.0  # 0.001, 0.002, ... distinct per chunk
-            src._sys_q.put(np.full(sys_chunk_n, tag, dtype=np.float32))  # noqa: SLF001
-
-        # Mic chunk small enough that one read consumes only the first sys chunk's samples,
-        # leaving the rest in _sys_buf where we can inspect ordering.
-        src._mic_q.put(np.zeros(10, dtype=np.float32))  # noqa: SLF001
-        result = src.read(timeout=0.5)
         assert result is not None
-
-        # After the read, _sys_buf should hold the remaining (n_chunks * sys_chunk_n) - 10 samples
-        # with the original chunk ordering preserved.
-        remaining = src._sys_buf  # noqa: SLF001
-        expected_total = n_chunks * sys_chunk_n - 10
-        assert len(remaining) == expected_total, f'Expected {expected_total} samples remaining, got {len(remaining)}'
-        # The first chunk had tag 0.001; the consumed 10 samples came from it. The
-        # next sys_chunk_n - 10 samples should still be tag 0.001, then chunk 2 starts.
-        np.testing.assert_allclose(remaining[: sys_chunk_n - 10], 0.001, atol=1e-6)
-        np.testing.assert_allclose(remaining[sys_chunk_n - 10 : 2 * sys_chunk_n - 10], 0.002, atol=1e-6)
-        # Spot-check the last chunk landed at the end.
-        np.testing.assert_allclose(remaining[-sys_chunk_n:], n_chunks / 1000.0, atol=1e-6)
-        src.close()
+        np.testing.assert_allclose(result, 0.161)
+        assert source._sys_buf.size == 3990
+        np.testing.assert_allclose(source._sys_buf[:90], 0.161)
+        np.testing.assert_allclose(source._sys_buf[90:190], 0.162)
+        np.testing.assert_allclose(source._sys_buf[-100:], 0.2)
+        assert source.dropped_frames == 16000
 
     def test_drain_clears_queues_and_source_buffers(self):
         """drain() must empty our queues AND delegate to the underlying sources."""
@@ -444,9 +709,8 @@ class TestMixedAudioSource:
         assert mic.drain_calls == 1
         assert sys_audio.drain_calls == 1
 
-    def test_dead_system_source_restarts_while_mic_is_active(self):
-        """A tap that streams exact zeros after delivering real audio is dead.
-        Core Audio left it alive with no error. Reopen it."""
+    def test_valid_system_silence_never_restarts_while_mic_is_active(self):
+        """Local speech does not imply computer playback."""
         mic = RestartableSource([[np.full(16, 0.001, dtype=np.float32)] * 500])
         sys_audio = RestartableSource(
             [
@@ -459,9 +723,7 @@ class TestMixedAudioSource:
         time.sleep(0.2)
         src.close()
 
-        assert len(sys_audio.open_calls) == 2, 'system source must be reopened once'
-        assert sys_audio.close_calls >= 1
-        assert sys_audio.drain_calls >= 1
+        assert len(sys_audio.open_calls) == 1
 
     def test_dead_system_source_waits_for_mic_activity(self):
         """Genuine system silence is all zeros. Without mic signal to prove the
@@ -475,9 +737,8 @@ class TestMixedAudioSource:
 
         assert len(sys_audio.open_calls) == 1
 
-    def test_dead_mic_source_restarts_after_signal(self):
-        """A live mic never emits exact zeros. After signal, a zero run means the
-        stream died and must be reopened."""
+    def test_valid_microphone_silence_never_restarts_after_signal(self):
+        """A muted device may deliver exact zeros after normal speech."""
         mic = RestartableSource(
             [
                 [np.full(16, 0.001, dtype=np.float32), *[np.zeros(16, dtype=np.float32)] * 4],
@@ -490,8 +751,7 @@ class TestMixedAudioSource:
         time.sleep(0.2)
         src.close()
 
-        assert len(mic.open_calls) == 2, 'mic source must be reopened once'
-        assert mic.drain_calls >= 1
+        assert len(mic.open_calls) == 1
 
     def test_zero_only_source_never_restarts(self):
         """A source that has never delivered signal is not dead; it is quiet.
@@ -506,9 +766,8 @@ class TestMixedAudioSource:
         assert len(mic.open_calls) == 1
         assert len(sys_audio.open_calls) == 1
 
-    def test_dead_system_source_restarts_once_per_signal_episode(self):
-        """One restart per episode. If the fresh tap also carries silence, wait
-        for signal again instead of reopening every few seconds."""
+    def test_extended_valid_silence_does_not_restart_the_system_source(self):
+        """Fresh buffers confirm delivery even when every sample is zero."""
         mic = RestartableSource([[np.full(16, 0.001, dtype=np.float32)] * 1000])
         sys_audio = RestartableSource(
             [
@@ -521,4 +780,4 @@ class TestMixedAudioSource:
         time.sleep(0.3)
         src.close()
 
-        assert len(sys_audio.open_calls) == 2
+        assert len(sys_audio.open_calls) == 1

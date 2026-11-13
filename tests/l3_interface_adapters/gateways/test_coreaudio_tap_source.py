@@ -235,7 +235,7 @@ class TestCoreAudioTapSource:
                 src.read(timeout=0.1)
             src.close()
 
-    def test_close_terminates_process(self, monkeypatch, tmp_path):
+    def test_close_prefers_stdin_eof(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')
 
         fake_binary = tmp_path / 'coreaudio-tap'
@@ -252,7 +252,9 @@ class TestCoreAudioTapSource:
             src.open(16000, 1)
             src.close()
 
-        mock_proc.terminate.assert_called_once()
+        mock_proc.stdin.close.assert_called()
+        mock_proc.terminate.assert_not_called()
+        mock_proc.wait.assert_called()
 
     def test_stderr_read_exception_still_sets_error(self, monkeypatch, tmp_path):
         monkeypatch.setattr(sys, 'platform', 'darwin')
@@ -389,9 +391,13 @@ class TestCoreAudioTapSource:
         import subprocess as subprocess_mod
 
         mock_proc = MagicMock()
-        mock_proc.stdout.read.side_effect = lambda size: time.sleep(10)
+        mock_proc.stdout.read.side_effect = lambda size: (time.sleep(0.02), b'')[1]
         mock_proc.stdin = MagicMock()
-        mock_proc.wait.side_effect = subprocess_mod.TimeoutExpired(cmd='coreaudio-tap', timeout=3)
+        mock_proc.wait.side_effect = [
+            subprocess_mod.TimeoutExpired(cmd='coreaudio-tap', timeout=1),
+            subprocess_mod.TimeoutExpired(cmd='coreaudio-tap', timeout=1),
+            0,
+        ]
 
         with patch('subprocess.Popen', return_value=mock_proc):
             src = CoreAudioTapSource()
@@ -400,3 +406,116 @@ class TestCoreAudioTapSource:
 
         mock_proc.terminate.assert_called_once()
         mock_proc.kill.assert_called_once()
+        assert mock_proc.wait.call_count == 3
+        mock_proc.stdout.close.assert_called_once()
+        mock_proc.stderr.close.assert_called_once()
+
+
+def test_reader_reassembles_partial_float_bytes():
+    class SplitPipe:
+        def __init__(self):
+            self.parts = iter([_float32_bytes([0.25])[:3], _float32_bytes([0.25])[3:], b''])
+
+        def read(self, size):
+            return next(self.parts)
+
+    source = CoreAudioTapSource()
+    process = MagicMock()
+    process.stdout = SplitPipe()
+    process.poll.return_value = 0
+    source._proc = process
+    source._reader()
+
+    np.testing.assert_array_equal(source.read(0.01), np.array([0.25], dtype=np.float32))
+    assert source.exhausted
+
+
+def test_reader_reports_truncated_float_at_eof():
+    source = CoreAudioTapSource()
+    process = MagicMock()
+    process.stdout = io.BytesIO(b'abc')
+    process.poll.return_value = 0
+    source._proc = process
+    source._reader()
+
+    with pytest.raises(RuntimeError, match='partial float32'):
+        source.read(0.01)
+
+
+def test_stderr_has_one_reader_and_keeps_exit_diagnostic():
+    source = CoreAudioTapSource()
+    process = MagicMock()
+    process.stdout = io.BytesIO(b'')
+    process.stderr = io.BytesIO(b'coreaudio-tap: aggregate failed\n')
+    process.poll.return_value = 7
+    process.wait.return_value = 7
+    source._proc = process
+    source._stderr_reader()
+    source._reader()
+
+    with pytest.raises(RuntimeError, match='aggregate failed'):
+        source.read(0.01)
+
+
+def test_open_rejects_non_native_output_format(monkeypatch):
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    with pytest.raises(ValueError, match='16000 Hz mono'):
+        CoreAudioTapSource().open(48000, 2)
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Helper requires POSIX executable scripts')
+def test_real_helper_partial_writes_and_exit_diagnostic(monkeypatch, tmp_path):
+    helper = tmp_path / 'helper'
+    helper.write_text(
+        f'#!{sys.executable}\n'
+        'import os, struct, sys, time\n'
+        'samples = struct.pack("2f", 0.25, -0.5)\n'
+        'os.write(1, samples[:3])\n'
+        'time.sleep(0.02)\n'
+        'os.write(1, samples[3:])\n'
+        'sys.stderr.write("capture device disappeared\\n")\n'
+        'sys.exit(7)\n'
+    )
+    helper.chmod(0o755)
+    monkeypatch.setattr(coreaudio_mod, '_BINARY', helper)
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    source = CoreAudioTapSource()
+    source.open(16000, 1)
+    process = source._proc
+    try:
+        np.testing.assert_array_equal(source.read(5), [0.25, -0.5])
+        with pytest.raises(RuntimeError, match='capture device disappeared'):
+            source.read(1)
+        assert source.exhausted
+    finally:
+        source.close()
+    assert process is not None
+    assert process.returncode == 7
+    assert process.stdout is not None
+    assert process.stderr is not None
+    assert process.stdin is not None
+    assert process.stdout.closed
+    assert process.stderr.closed
+    assert process.stdin.closed
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='Helper requires POSIX executable scripts')
+def test_real_helper_stops_on_stdin_eof(monkeypatch, tmp_path):
+    helper = tmp_path / 'helper'
+    helper.write_text(f'#!{sys.executable}\nimport sys\nsys.stdin.buffer.read()\n')
+    helper.chmod(0o755)
+    monkeypatch.setattr(coreaudio_mod, '_BINARY', helper)
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    source = CoreAudioTapSource()
+    source.open(16000, 1)
+    process = source._proc
+    reader = source._thread
+    diagnostic_reader = source._stderr_thread
+    source.close()
+    source.close()
+    assert process is not None
+    assert reader is not None
+    assert diagnostic_reader is not None
+    assert process.returncode == 0
+    assert not reader.is_alive()
+    assert not diagnostic_reader.is_alive()

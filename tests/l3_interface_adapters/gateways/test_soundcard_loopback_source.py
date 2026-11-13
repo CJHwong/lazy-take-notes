@@ -36,7 +36,7 @@ def _make_recorder(*, blocking=False):
     """Create a mock recorder with context manager support."""
     recorder = MagicMock()
     if blocking:
-        recorder.record.side_effect = lambda numframes: time.sleep(10)
+        recorder.record.side_effect = lambda numframes: time.sleep(0.02)
     else:
         recorder.record.return_value = np.array([[0.1], [0.2], [0.3], [0.4]], dtype=np.float32)
     recorder.__enter__ = MagicMock(return_value=recorder)
@@ -219,7 +219,7 @@ class TestSoundCardLoopbackSource:
                 return None
             if _calls[0] == 2:
                 return real_data
-            time.sleep(10)
+            time.sleep(0.02)
 
         mock_recorder.record.side_effect = _record_sequence
         loopback_device.recorder.return_value = mock_recorder
@@ -259,10 +259,9 @@ class TestSoundCardLoopbackSource:
             time.sleep(0.05)
             src.close()
 
-        # open() calls _win_com_init, reader thread calls _win_com_init
-        assert mock_ole32.CoInitializeEx.call_count >= 2
-        # close() calls _win_com_uninit (com_owner), reader finally calls _win_com_uninit
-        assert mock_ole32.CoUninitialize.call_count >= 2
+        # The worker owns COM setup and cleanup.
+        assert mock_ole32.CoInitializeEx.call_count == 1
+        assert mock_ole32.CoUninitialize.call_count == 1
         assert src._com_owner is False
 
 
@@ -317,3 +316,82 @@ class TestPatchSoundcardNumpy2Compat:
 
         # Must not raise — graceful no-op when mediafoundation isn't installed
         _patch_soundcard_numpy2_compat()
+
+
+def test_loopback_reader_error_reaches_read():
+    source = SoundCardLoopbackSource()
+    recorder = MagicMock()
+    recorder.record.side_effect = RuntimeError('device removed')
+    source._reader(recorder, 16000)
+    assert source.exhausted
+    with pytest.raises(RuntimeError, match='device removed'):
+        source.read(0.01)
+
+
+def test_windows_setup_failure_releases_com(monkeypatch):
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    with (
+        patch.object(loopback_mod, '_win_com_init'),
+        patch.object(loopback_mod, '_win_com_uninit') as uninitialize,
+        patch.object(SoundCardLoopbackSource, '_find_loopback', side_effect=RuntimeError('missing device')),
+    ):
+        source = SoundCardLoopbackSource()
+        with pytest.raises(RuntimeError, match='missing device'):
+            source.open(16000, 1)
+    uninitialize.assert_called_once()
+    assert source._com_owner is False
+
+
+def test_blocked_reader_keeps_recorder_until_reader_stops(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    source = SoundCardLoopbackSource()
+    recorder = MagicMock()
+    release = threading.Event()
+    entered = threading.Event()
+
+    def record(numframes):
+        entered.set()
+        release.wait(5)
+        return None
+
+    recorder.record.side_effect = record
+    loopback = _make_loopback()
+    loopback.recorder.return_value = recorder
+    with patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback):
+        source.open(16000, 1)
+    assert entered.wait(1)
+    try:
+        with pytest.raises(RuntimeError, match='prevent unsafe teardown'):
+            source.close()
+        recorder.__exit__.assert_not_called()
+        assert source._recorder is recorder
+    finally:
+        release.set()
+        source.close()
+    recorder.__exit__.assert_called_once()
+    assert source._recorder is None
+
+
+def test_recorder_and_com_lifetime_stay_on_one_worker(monkeypatch):
+    import threading
+
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    owner_threads = []
+    loopback = _make_loopback()
+    recorder = _make_recorder(blocking=True)
+    loopback.recorder.side_effect = lambda **kwargs: (owner_threads.append(threading.get_ident()), recorder)[1]
+    recorder.__enter__.side_effect = lambda: owner_threads.append(threading.get_ident())
+    recorder.__exit__.side_effect = lambda *arguments: owner_threads.append(threading.get_ident())
+    with (
+        patch.object(loopback_mod, '_win_com_init', side_effect=lambda: owner_threads.append(threading.get_ident())),
+        patch.object(loopback_mod, '_win_com_uninit', side_effect=lambda: owner_threads.append(threading.get_ident())),
+        patch.object(SoundCardLoopbackSource, '_find_loopback', return_value=loopback),
+    ):
+        source = SoundCardLoopbackSource()
+        source.open(16000, 1)
+        source.close()
+    assert len(owner_threads) == 5
+    assert len(set(owner_threads)) == 1
+    assert owner_threads[0] != threading.get_ident()

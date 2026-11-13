@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from lazy_take_notes.l3_interface_adapters.gateways._audio_buffer import AudioBuffer
+
 if TYPE_CHECKING:
     from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 
@@ -18,38 +20,11 @@ log = logging.getLogger('ltn.audio.mixed')
 
 
 class MixedAudioSource:
-    """Mix microphone and system audio from two AudioSource instances.
+    """Mix both sources while keeping a failed source from blocking its peer.
 
-    Chunk sizes may differ between sources: sounddevice fires at device block size (~512
-    samples / 32 ms) while system capture sources produce fixed 1600-sample (100 ms)
-    chunks. To handle this, _sys_buf accumulates all available system chunks on every
-    read() call (non-blocking drain) and dispenses exactly len(mic_chunk) samples per
-    mix — equal duration, not equal chunk count. Mic chunk timing drives output cadence
-    because mic data arrives more frequently; both sources contribute equally to the
-    final audio.
-
-    Output is peak-limited: when the combined signal would exceed 0.99 (float32) it is
-    scaled so the peak lands at 0.99, otherwise it passes through at full amplitude.
-
-    Auto-amplification: when the mic signal is consistently below the VAD silence
-    threshold but above the noise floor (~0.003), the mixer automatically boosts the
-    mic before mixing so speech clears the gate. Gain is computed from an exponential
-    moving average of mic RMS and capped at max_mic_gain (default 10x). The peak
-    limiter prevents the amplified signal from clipping.
-
-    Amp is gated by a second EMA of system-audio RMS: when system audio is currently
-    playing (sys RMS above noise floor) the gain is held at 1x. Without this gate,
-    speaker-to-mic acoustic bleed gets boosted alongside genuine speech, and the
-    remote voice appears in the mix twice — once via the system tap, once via the
-    amplified mic copy — producing a doubled / phased output that degrades both
-    recording quality and transcription accuracy.
-
-    Dead-stream recovery: Core Audio keeps a client alive after an IO overload and
-    hands it zero-filled buffers with no error. A live source never delivers exact
-    digital zeros, so each reader restarts its source after a sustained zero run.
-    It acts only after the source has delivered real signal once, and the system
-    tap additionally waits for mic activity, so genuine silence does not cause
-    churn.
+    Silence remains valid audio. Only delivery failures trigger recovery.
+    Excess queued audio is discarded with a warning to bound capture delay.
+    Gain, microphone mute, and the peak limiter apply after source selection.
     """
 
     def __init__(
@@ -63,22 +38,25 @@ class MixedAudioSource:
     ) -> None:
         self._mic = mic
         self._system = system_audio
-        self._mic_q: queue.Queue[np.ndarray] = queue.Queue()
-        self._sys_q: queue.Queue[np.ndarray] = queue.Queue()
-        # Rolling accumulation buffer for system audio chunks awaiting consumption.
-        # Filled by draining _sys_q on every read(); consumed in equal-duration slices.
+        self._mic_q = AudioBuffer(max_frames=4000, sample_rate=16_000, label='mixed microphone')
+        self._sys_q = AudioBuffer(max_frames=4000, sample_rate=16_000, label='mixed system')
         self._sys_buf: np.ndarray = np.array([], dtype=np.float32)
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
         self._sample_rate: int = 16_000
         self._channels: int = 1
-        # A live source never delivers exact digital zeros: the mic has a noise
-        # floor, and the system tap only reaches zero when the output mix is
-        # silent. A source that worked and then streams exact zeros has died.
-        # Core Audio leaves a dead client alive and streaming zero-filled
-        # buffers after an IO overload, with no error anywhere. Restart it.
         self._dead_audio_seconds = dead_audio_seconds
-        self._mic_signal_time: float = 0.0
+        self._ready = threading.Event()
+        self._state_lock = threading.Lock()
+        self._source_locks = (threading.Lock(), threading.Lock())
+        self._errors: dict[bool, str] = {}
+        self._failed: set[bool] = set()
+        self._restart_delay = 0.3
+        self._max_restarts = 3
+        self._system_generation = 0
+        self._seen_system_generation = 0
+        self._dropped_system_frames = 0
+        self._last_system_drop_log = 0.0
         # When True, mic audio is zeroed before mixing — system audio only.
         # Written by main thread, read by audio worker thread; bool assignment is
         # atomic under the GIL so no lock is needed.
@@ -108,105 +86,217 @@ class MixedAudioSource:
         """Whether the system source is still waiting for the user to grant access."""
         return getattr(self._system, 'awaiting_permission', False)
 
+    @property
+    def source_errors(self) -> tuple[str, ...]:
+        """Current delivery failures, including recovery in progress."""
+        with self._state_lock:
+            return tuple(self._errors.values())
+
+    @property
+    def dropped_frames(self) -> int:
+        return self._mic_q.dropped_frames + self._sys_q.dropped_frames + self._dropped_system_frames
+
+    @property
+    def exhausted(self) -> bool:
+        """Both sources stopped after their recovery attempts."""
+        with self._state_lock:
+            return len(self._failed) == 2
+
     def open(self, sample_rate: int, channels: int) -> None:
-        log.info(
-            'opening mixed source: mic=%s, system=%s',
-            type(self._mic).__name__,
-            type(self._system).__name__,
-        )
+        if self._threads:
+            raise RuntimeError('Mixed audio source is already open')
         self._sample_rate = sample_rate
         self._channels = channels
-        self._mic_signal_time = 0.0
-        self._mic.open(sample_rate, channels)
-        self._system.open(sample_rate, channels)
+        self._mic_q = AudioBuffer(
+            max_frames=max(1, sample_rate // 4), sample_rate=sample_rate, label='mixed microphone'
+        )
+        self._sys_q = AudioBuffer(max_frames=max(1, sample_rate // 4), sample_rate=sample_rate, label='mixed system')
+        self._dropped_system_frames = 0
+        self._last_system_drop_log = 0.0
+        self._errors.clear()
+        self._failed.clear()
+        self._clear_buffers()
+        try:
+            self._mic.open(sample_rate, channels)
+            self._system.open(sample_rate, channels)
+        except Exception:
+            self._close_sources()
+            raise
         self._stop.clear()
         self._threads = [
             threading.Thread(target=self._reader, args=(self._mic, self._mic_q, True), daemon=True),
             threading.Thread(target=self._reader, args=(self._system, self._sys_q, False), daemon=True),
         ]
-        for t in self._threads:
-            t.start()
+        try:
+            for thread in self._threads:
+                thread.start()
+        except Exception:
+            self._stop.set()
+            self._close_sources()
+            self._join_threads()
+            raise
 
-    def _reader(self, src: AudioSource, dest: queue.Queue, is_mic: bool) -> None:
-        zero_seconds = 0.0
-        saw_signal = False
+    def _reader(self, source: AudioSource, destination: AudioBuffer, is_mic: bool) -> None:
+        last_delivery = time.monotonic()
         while not self._stop.is_set():
-            chunk = src.read(timeout=0.05)
-            if chunk is None:
+            try:
+                chunk = self._read_source(source, last_delivery)
+            except Exception as error:
+                chunk = self._recover(source, destination, is_mic, error)
+                if chunk is None:
+                    return
+            if chunk is None or not chunk.size:
+                self._stop.wait(0.005)
                 continue
-            if chunk.size and chunk.any():
-                saw_signal = True
-                zero_seconds = 0.0
-                if is_mic:
-                    self._mic_signal_time = time.monotonic()
+            if self._stop.is_set():
+                return
+            last_delivery = time.monotonic()
+            self._set_error(is_mic, None)
+            destination.put(chunk)
+            self._ready.set()
+
+    def _read_source(self, source: AudioSource, last_delivery: float) -> np.ndarray | None:
+        chunk = source.read(timeout=0.05)
+        if chunk is not None and chunk.size:
+            return chunk
+        if getattr(source, 'exhausted', False):
+            raise RuntimeError('capture stream ended unexpectedly')
+        if getattr(source, 'awaiting_permission', False):
+            return None
+        if (
+            getattr(source, 'continuous_capture', False)
+            and time.monotonic() - last_delivery >= self._dead_audio_seconds
+        ):
+            raise RuntimeError('capture stopped delivering audio buffers')
+        return None
+
+    def _set_error(self, is_mic: bool, error: Exception | None) -> None:
+        label = 'Microphone' if is_mic else 'System audio'
+        with self._state_lock:
+            if error is None:
+                self._errors.pop(is_mic, None)
             else:
-                zero_seconds += chunk.size / self._sample_rate
-                if self._should_restart(is_mic, saw_signal, zero_seconds):
-                    self._restart(src, dest, is_mic)
-                    zero_seconds = 0.0
-                    saw_signal = False
-                    continue
-            dest.put(chunk)
+                self._errors[is_mic] = f'{label}: {error}'
+        self._ready.set()
 
-    def _should_restart(self, is_mic: bool, saw_signal: bool, zero_seconds: float) -> bool:
-        if self._stop.is_set() or not saw_signal or zero_seconds < self._dead_audio_seconds:
-            return False
-        if is_mic:
-            return True
-        # The system tap reaches exact zero whenever nothing plays. Restart it
-        # only while the mic shows the room is active, so a quiet stretch does
-        # not churn the tap open and closed every few seconds.
-        return time.monotonic() - self._mic_signal_time < 2.0
-
-    def _restart(self, src: AudioSource, dest: queue.Queue, is_mic: bool) -> None:
+    def _recover(
+        self, source: AudioSource, destination: AudioBuffer, is_mic: bool, error: Exception
+    ) -> np.ndarray | None:
         label = 'mic' if is_mic else 'system'
+        self._set_error(is_mic, error)
+        for attempt in range(self._max_restarts):
+            if self._stop.wait(self._restart_delay):
+                return None
+            log.warning('restarting %s audio source (attempt %d): %s', label, attempt + 1, error)
+            try:
+                self._reopen(source, destination, is_mic)
+                chunk = self._wait_for_first_buffer(source)
+                if chunk is not None:
+                    return chunk
+                error = RuntimeError('capture did not deliver a buffer after restart')
+            except Exception as reopen_error:
+                error = reopen_error
+            self._set_error(is_mic, error)
         if self._stop.is_set():
-            return
-        log.warning(
-            'restarting %s audio source after %.0fs of exact silence (stream died, no error reported)',
-            label,
-            self._dead_audio_seconds,
-        )
+            return None
+        log.error('%s audio recovery failed: %s', label, error)
         try:
-            src.close()
+            with self._source_locks[int(is_mic)]:
+                source.close()
         except Exception:
-            log.exception('failed to close %s audio source before restart', label)
-        self._discard(dest)
-        try:
-            src.open(self._sample_rate, self._channels)
-            src.drain()
-        except Exception:
-            log.exception('failed to reopen %s audio source', label)
-        if is_mic:
-            self._mic_signal_time = 0.0
+            log.exception('failed to close %s audio source after recovery', label)
+        with self._state_lock:
+            self._failed.add(is_mic)
+        self._ready.set()
+        return None
+
+    def _reopen(self, source: AudioSource, destination: AudioBuffer, is_mic: bool) -> None:
+        with self._source_locks[int(is_mic)]:
+            if self._stop.is_set():
+                return
+            source.close()
+            self._discard(destination)
+            if not is_mic:
+                self._system_generation += 1
+            source.open(self._sample_rate, self._channels)
+
+    def _wait_for_first_buffer(self, source: AudioSource) -> np.ndarray | None:
+        deadline = time.monotonic() + max(0.05, min(self._dead_audio_seconds, 3.0))
+        while not self._stop.is_set() and time.monotonic() < deadline:
+            chunk = source.read(timeout=0.05)
+            if chunk is not None and chunk.size:
+                return chunk
+            if getattr(source, 'exhausted', False):
+                raise RuntimeError('capture stream ended during restart')
+            self._stop.wait(0.005)
+        return None
 
     @staticmethod
-    def _discard(dest: queue.Queue) -> None:
+    def _discard(destination: AudioBuffer) -> None:
         while True:
             try:
-                dest.get_nowait()
+                destination.get_nowait()
             except queue.Empty:
                 break
+
+    def _take_microphone(self, timeout: float) -> np.ndarray | None:
+        deadline = time.monotonic() + timeout
+        while True:
+            self._ready.clear()
+            chunks = self._take_pending(self._mic_q)
+            if chunks:
+                return np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
+            if self.exhausted:
+                return None
+            with self._state_lock:
+                microphone_failed = True in self._errors
+            system_pending = not self._sys_q.empty() or self._sys_buf.size
+            if system_pending and (microphone_failed or not self._threads):
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self._stop.is_set():
+                return None
+            self._ready.wait(remaining)
+
+    @staticmethod
+    def _take_pending(source_queue: AudioBuffer) -> list[np.ndarray]:
+        chunks: list[np.ndarray] = []
+        while True:
+            try:
+                chunks.append(source_queue.get_nowait())
+            except queue.Empty:
+                return chunks
+
+    def _take_system(self) -> None:
+        if self._seen_system_generation != self._system_generation:
+            self._sys_buf = np.array([], dtype=np.float32)
+            self._seen_system_generation = self._system_generation
+        chunks = self._take_pending(self._sys_q)
+        if chunks:
+            self._sys_buf = np.concatenate([self._sys_buf, *chunks])
+        limit = max(1, self._sample_rate // 4)
+        discarded = self._sys_buf.size - limit
+        if discarded > 0:
+            self._dropped_system_frames += discarded
+            if time.monotonic() - self._last_system_drop_log >= 1.0:
+                log.warning(
+                    'system audio buffer dropped %d old samples (%.3fs)',
+                    self._dropped_system_frames,
+                    self._dropped_system_frames / self._sample_rate,
+                )
+                self._last_system_drop_log = time.monotonic()
+            self._sys_buf = self._sys_buf[-limit:].copy()
 
     def read(self, timeout: float = 0.1) -> np.ndarray | None:
-        # Mic chunk timing drives output cadence (see class docstring).
-        try:
-            first = self._mic_q.get(timeout=timeout)
-        except queue.Empty:
-            return None
-
-        # Catch-up: drain any additional queued mic chunks and merge them.
-        # Without this, a FIFO backlog on _mic_q becomes permanent lag —
-        # consumer rate matches producer rate forever but the backlog never drains.
-        # By pulling all pending chunks in one call, we let the consumer catch up
-        # whenever it gets behind (e.g. GC pause, LLM CPU contention, pause/resume).
-        extras: list[np.ndarray] = []
-        while True:
-            try:
-                extras.append(self._mic_q.get_nowait())
-            except queue.Empty:
-                break
-        mic = np.concatenate([first, *extras]) if extras else first
+        mic = self._take_microphone(timeout)
+        self._take_system()
+        if mic is None:
+            self.last_mic_rms = 0.0
+            if not self._sys_buf.size:
+                return None
+            system = self._sys_buf
+            self._sys_buf = np.array([], dtype=np.float32)
+            return self._limit_peak(system)
 
         # Pre-mute, pre-mix mic RMS. np.dot avoids a temporary mic**2 allocation.
         self.last_mic_rms = math.sqrt(float(np.dot(mic, mic)) / mic.size) if mic.size else 0.0
@@ -248,22 +338,6 @@ class MixedAudioSource:
         if self.mic_muted:
             mic *= 0
 
-        # Drain ALL available system chunks into the rolling buffer non-blocking.
-        # get_nowait() is intentional: blocking here would stall the mic path and
-        # cause _mic_q to accumulate unboundedly.
-        # Collect into a list first and concatenate once — the prior pattern of
-        # re-concatenating onto _sys_buf inside the loop was O(K²) in the number
-        # of queued chunks, which produced multi-second stalls on a single read()
-        # when the consumer had fallen behind by minutes (3000 chunks → ~2.6 s).
-        pending: list[np.ndarray] = []
-        while True:
-            try:
-                pending.append(self._sys_q.get_nowait())
-            except queue.Empty:
-                break
-        if pending:
-            self._sys_buf = np.concatenate([self._sys_buf, *pending]) if self._sys_buf.size else np.concatenate(pending)
-
         if len(self._sys_buf) == 0:
             return mic  # no system audio yet; pass mic through at full amplitude
 
@@ -286,37 +360,59 @@ class MixedAudioSource:
         else:
             self._sys_rms_ema += 0.05 * (sys_rms - self._sys_rms_ema)
 
-        # Peak limiter: scale to 0.99 only when clipping. Two scalar reductions
-        # (max + min) instead of np.abs() to avoid a temp-array allocation on
-        # every read (~31 Hz hot path).
-        combined = mic + sys
-        peak = max(float(combined.max()), float(-combined.min()))
+        return self._limit_peak(mic + sys)
+
+    @staticmethod
+    def _limit_peak(samples: np.ndarray) -> np.ndarray:
+        peak = max(float(samples.max()), float(-samples.min()))
         if peak > 0.99:
-            combined *= 0.99 / peak
-        return combined
+            samples = samples * (0.99 / peak)
+        return samples
 
-    def drain(self) -> None:
-        """Discard all buffered audio — called on pause so resume starts fresh.
-
-        Drains our own mixing queues AND delegates to each underlying source so
-        their internal queues don't bleed pause-period audio through on resume.
-        """
-        for q in (self._mic_q, self._sys_q):
-            self._discard(q)
+    def _clear_buffers(self) -> None:
+        for source_queue in (self._mic_q, self._sys_q):
+            self._discard(source_queue)
         self._sys_buf = np.array([], dtype=np.float32)
         self.last_mic_rms = 0.0
         self._mic_rms_ema = 0.0
         self._sys_rms_ema = 0.0
         self._mic_gain = 1.0
         self._gain_logged = False
-        self._mic.drain()
-        self._system.drain()
+
+    def drain(self) -> None:
+        self._clear_buffers()
+        for is_mic, source in ((True, self._mic), (False, self._system)):
+            with self._source_locks[int(is_mic)]:
+                source.drain()
+
+    def _close_sources(self) -> list[Exception]:
+        errors: list[Exception] = []
+        for is_mic, source in ((True, self._mic), (False, self._system)):
+            try:
+                with self._source_locks[int(is_mic)]:
+                    source.close()
+            except Exception as error:
+                log.exception('failed to close %s audio source', 'mic' if is_mic else 'system')
+                errors.append(error)
+        return errors
+
+    def _join_threads(self) -> list[Exception]:
+        errors: list[Exception] = []
+        for thread in self._threads:
+            if thread.ident is not None:
+                thread.join(timeout=2)
+            if thread.is_alive():
+                errors.append(RuntimeError('Audio reader did not stop'))
+        self._threads = [thread for thread in self._threads if thread.is_alive()]
+        return errors
 
     def close(self) -> None:
-        log.debug('closing mixed source')
         self._stop.set()
-        self._mic.close()
-        self._system.close()
-        for t in self._threads:
-            t.join(timeout=2)
-        self._threads = []
+        self._ready.set()
+        errors = self._close_sources()
+        errors.extend(self._join_threads())
+        self._discard(self._mic_q)
+        self._discard(self._sys_q)
+        self._sys_buf = np.array([], dtype=np.float32)
+        if errors:
+            raise errors[0]
