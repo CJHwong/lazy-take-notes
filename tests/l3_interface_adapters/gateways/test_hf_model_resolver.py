@@ -72,7 +72,7 @@ class TestHfModelResolver:
     def test_passthrough_name(self, tmp_path: Path):
         resolver = HfModelResolver(store=CachedModelStore(tmp_path / 'cache', assets={}))
 
-        assert resolver.resolve('some-custom-model') == 'some-custom-model'
+        assert resolver.resolve('base.en') == 'base.en'
 
     def test_malformed_hf_uri_raises(self, tmp_path: Path):
         resolver = HfModelResolver(store=CachedModelStore(tmp_path / 'cache', assets={}))

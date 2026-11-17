@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import subprocess  # noqa: S404 -- only the exception type is used
 from pathlib import Path
+
+import pytest
 
 from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
 from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
@@ -92,3 +96,37 @@ class TestDiarizationWorker:
         )
 
         assert diarizer.calls == 0
+
+
+class _RaisingDiarizer:
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+        self.calls = 0
+
+    def diarize(self, audio_path: Path, timeout: float = 300.0) -> list[SpeakerTurn]:
+        self.calls += 1
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        json.JSONDecodeError('Expecting value', '', 0),
+        KeyError('speaker'),
+        UnicodeDecodeError('utf-8', b'\xff', 0, 1, 'invalid start byte'),
+        PermissionError(13, 'Permission denied'),
+        subprocess.TimeoutExpired(['nemo'], 300),
+        ValueError('bad turn'),
+    ],
+    ids=['bad-json', 'missing-key', 'bad-utf8', 'no-exec-bit', 'timeout', 'value-error'],
+)
+def test_any_failed_pass_keeps_the_worker_alive(tmp_path, error):
+    audio = tmp_path / 'recording.wav'
+    audio.write_bytes(b'\0' * 4096)
+    diarizer = _RaisingDiarizer(error)
+    messages: list = []
+
+    run_diarization_worker(messages.append, _canceller(3), audio, diarizer, interval_s=0.0)
+
+    assert diarizer.calls == 1
+    assert [m for m in messages if isinstance(m, SpeakerTurns)] == []

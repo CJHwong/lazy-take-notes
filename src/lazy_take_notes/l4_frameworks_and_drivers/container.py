@@ -121,7 +121,16 @@ class DependencyContainer:
         )
 
         mic, system = DependencyContainer.build_audio_sources(device)
-        return MixedAudioSource(mic, system, silence_threshold=silence_threshold)
+        test_tone = None
+        if sys.platform == 'darwin':
+            # Measured on the Core Audio tap only: it sends exact zeros when
+            # nothing plays, and it captures this tone even with output muted.
+            from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import (  # noqa: PLC0415 -- deferred: audio stack loaded only when needed
+                play_test_tone,
+            )
+
+            test_tone = play_test_tone
+        return MixedAudioSource(mic, system, silence_threshold=silence_threshold, test_tone=test_tone)
 
     @staticmethod
     def resolve_llm_client(infra: InfraConfig) -> LLMClient:

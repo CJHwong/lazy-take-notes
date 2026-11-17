@@ -64,6 +64,8 @@ class StatusBar(Static):
     silence_threshold: reactive[float] = reactive(0.0)
     last_digest_time: reactive[float] = reactive(0.0)
     mic_muted: reactive[bool] = reactive(False)
+    # Capture problems that last until fixed, e.g. 'MIC LOST'. Shown in red.
+    audio_alert: reactive[str] = reactive('')
     mode_label: reactive[str] = reactive('')
     keybinding_hints: reactive[str] = reactive('')
     quick_action_hints: reactive[str] = reactive('')
@@ -150,6 +152,11 @@ class StatusBar(Static):
         left_parts = []
         if self.mode_label:
             left_parts.append(self.mode_label)
+        markup_extra = 0
+        if self.audio_alert:
+            open_tag, close_tag = '[bold white on red]', '[/]'
+            markup_extra = len(open_tag) + len(close_tag)
+            left_parts.append(f'{open_tag} {self.audio_alert} {close_tag}')
         if self.mic_muted:
             left_parts.append('MIC ✕')
         left_parts.extend(
@@ -179,7 +186,7 @@ class StatusBar(Static):
         hints = self.keybinding_hints
         if hints:
             hints_width = cell_len(hints.replace(r'\[', '['))
-            gap = content_width - cell_len(left) - hints_width
+            gap = content_width - (cell_len(left) - markup_extra) - hints_width
             if gap >= 2:
                 left = left + ' ' * gap + hints
 

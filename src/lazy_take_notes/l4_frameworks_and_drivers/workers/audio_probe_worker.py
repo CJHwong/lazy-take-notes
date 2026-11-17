@@ -64,6 +64,8 @@ def run_audio_probe(
                 post_message(AudioProbePermission('system', _system_state(system)))
         post_message(AudioProbePermission('mic', 'allowed' if mic_seen else 'no_signal'))
         post_message(AudioProbePermission('system', _system_state(system)))
+    except Exception as exc:  # noqa: BLE001 -- an unplugged device is a UI error, not a crash
+        post_message(AudioProbeError(str(exc)))
     finally:
         _close(mic, system)
         post_message(AudioProbeDone())

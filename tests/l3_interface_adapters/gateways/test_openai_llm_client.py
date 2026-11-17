@@ -164,3 +164,20 @@ class TestOpenAICompatLLMClient:
         client.check_connectivity()
 
         mock_cls.assert_called_once_with(api_key='sk-test', base_url='https://api.groq.com/openai/v1')
+
+
+@patch('lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.openai.AsyncOpenAI')
+@pytest.mark.asyncio
+async def test_every_async_call_has_a_timeout(mock_cls):
+    from lazy_take_notes.l2_use_cases.ports.llm_client import LLM_REQUEST_TIMEOUT_S
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=_make_chat_response())
+    mock_cls.return_value = mock_client
+    client = OpenAICompatLLMClient(api_key='test')
+
+    await client.chat('model', [ChatMessage(role='user', content='hi')])
+    await client.chat_single('model', 'hi')
+
+    for call in mock_cls.call_args_list:
+        assert call.kwargs['timeout'] == LLM_REQUEST_TIMEOUT_S

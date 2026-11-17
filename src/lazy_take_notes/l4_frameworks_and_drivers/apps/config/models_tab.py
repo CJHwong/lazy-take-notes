@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess  # noqa: S404 -- used to open the cache folder, not a shell command
 import sys
 import threading
@@ -43,6 +44,8 @@ _STATUS_TEXT = {
     AssetStatus.CORRUPT: 'Damaged',
     AssetStatus.UNSUPPORTED: 'Unsupported',
 }
+
+log = logging.getLogger('ltn.config')
 
 
 def _megabytes(size: int) -> str:
@@ -403,7 +406,15 @@ class ModelsTab(SettingsSection):
         self.run_worker(self._load_states, thread=True, group='models-load')
 
     def _load_states(self) -> None:
-        self.post_message(self.Loaded(self._store.list_assets()))
+        try:
+            states = self._store.list_assets()
+        except Exception as exc:  # noqa: BLE001 -- an unreadable cache leaves the rows unknown, not a crash
+            log.error('Cannot read the model cache: %s', exc, exc_info=True)
+            self.app.call_from_thread(
+                self.notify, f'Cannot read the model cache: {exc}', severity='error', markup=False, timeout=10
+            )
+            return
+        self.post_message(self.Loaded(states))
 
     def model_value(self) -> str:
         return self._chooser.selected_uri or str(self._raw.get('transcription', {}).get('model', ''))

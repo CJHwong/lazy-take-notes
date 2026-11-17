@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -16,10 +17,12 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Static, TextArea
+from textual.worker import Worker, WorkerCancelled, WorkerFailed
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
 from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
@@ -43,6 +46,26 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusB
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
 
 log = logging.getLogger('ltn.app')
+
+# Most file systems cap one name at 255 bytes. The timestamp prefix and the
+# separator use 18 bytes; CJK labels use 3 bytes per character.
+_LABEL_MAX_BYTES = 200
+
+
+def _fit_name(label: str) -> str:
+    return label.encode('utf-8')[:_LABEL_MAX_BYTES].decode('utf-8', errors='ignore')
+
+
+async def _wait_for_replaced(workers: list[Worker]) -> None:
+    """Let a replaced digest finish unwinding before the next one builds its prompt.
+
+    run_worker(exclusive=True) only requests the cancel. An HTTP client needs a
+    few loop turns to unwind, and until then the replaced prompt is still in the
+    shared history, so the new request would carry it.
+    """
+    for worker in workers:
+        with contextlib.suppress(WorkerCancelled, WorkerFailed):
+            await worker.wait()
 
 
 class BaseApp(ShellScreen):
@@ -99,6 +122,11 @@ class BaseApp(ShellScreen):
         self._label_running = False
         self._final_digest_done = False
         self._final_digest_started = False
+        # Bumped per digest worker. Only the newest worker may clear
+        # _digest_running: a cancelled older worker must not clear it while the
+        # final digest that replaced it still runs.
+        self._digest_generation = 0
+        self._last_persist_error: str | None = None
 
         # Register dynamic quick action bindings (positional: 1-5)
         for i, qa in enumerate(template.quick_actions):
@@ -186,6 +214,7 @@ class BaseApp(ShellScreen):
             len(self._controller.all_segments) + len(message.segments),
         )
         should_digest = self._controller.on_transcript_segments(message.segments)
+        self._report_persist_error()
 
         panel = self.query_one('#transcript-panel', TranscriptPanel)
         if self._controller.speaker_turns:
@@ -198,6 +227,14 @@ class BaseApp(ShellScreen):
 
         if self.auto_digest and should_digest and not self._digest_running:
             self._run_digest_worker()
+
+    def _report_persist_error(self) -> None:
+        """Warn once per distinct disk failure; the session keeps recording."""
+        error = self._controller.take_persist_error()
+        if error is None or error == self._last_persist_error:
+            return
+        self._last_persist_error = error
+        self.notify(f'{error} (see {DEBUG_LOG.name})', severity='warning', timeout=10)
 
     def _speaker_label(self, segment) -> str | None:
         return self._controller.speaker_label(segment)
@@ -229,13 +266,21 @@ class BaseApp(ShellScreen):
                 for turn in self._controller.speaker_turns
             ],
         }
-        (self._output_dir / 'speakers.json').write_text(json.dumps(payload, indent=2), encoding='utf-8')
+        try:
+            (self._output_dir / 'speakers.json').write_text(json.dumps(payload, indent=2), encoding='utf-8')
+        except OSError as e:
+            log.error('Could not save speakers.json: %s', e, exc_info=True)
+            if self._last_persist_error != 'speakers':
+                self._last_persist_error = 'speakers'
+                self.notify(f'Could not save speakers: {e}', severity='warning', timeout=10)
 
     def on_click(self, event: events.Click) -> None:
         widget_id = getattr(event.widget, 'id', '') or ''
-        if not widget_id.startswith('speaker-'):
+        suffix = widget_id.removeprefix('speaker-')
+        # The bar itself is 'speaker-bar'; only chips carry a number.
+        if suffix == widget_id or not suffix.isdigit():
             return
-        speaker = int(widget_id.removeprefix('speaker-'))
+        speaker = int(suffix)
         current = self._controller.speaker_names.get(speaker, '')
 
         def apply(name: str | None) -> None:
@@ -273,6 +318,7 @@ class BaseApp(ShellScreen):
         bar.buf_count = len(self._controller.digest_state.buffer)
         bar.last_digest_time = time.monotonic()
         bar.activity = ''
+        self._report_persist_error()
 
         if message.is_final:
             self._final_digest_done = True
@@ -302,11 +348,13 @@ class BaseApp(ShellScreen):
             self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...' if is_final else 'Digesting...'
-        self._digest_running = True
+        generation = self._start_digest_generation()
+        replaced = self._running_digest_workers()
 
         async def _digest_task() -> None:
             try:
-                result = await self._controller.run_digest(is_final=is_final)
+                await _wait_for_replaced(replaced)
+                result = await self._run_digest_safely(is_final)
                 if result.data is not None:
                     self.post_message(
                         DigestReady(
@@ -323,9 +371,29 @@ class BaseApp(ShellScreen):
                         )
                     )
             finally:
-                self._digest_running = False
+                self._end_digest_generation(generation)
 
         self.run_worker(_digest_task, exclusive=True, group='digest')
+
+    def _running_digest_workers(self) -> list[Worker]:
+        return [w for w in self.workers if w.node is self and w.group == 'digest' and not w.is_finished]
+
+    def _start_digest_generation(self) -> int:
+        self._digest_generation += 1
+        self._digest_running = True
+        return self._digest_generation
+
+    def _end_digest_generation(self, generation: int) -> None:
+        if generation == self._digest_generation:
+            self._digest_running = False
+
+    async def _run_digest_safely(self, is_final: bool) -> DigestResult:
+        """Run one digest. A worker that raises ends the app, so any bug becomes a failed digest."""
+        try:
+            return await self._controller.run_digest(is_final=is_final)
+        except Exception as e:
+            log.error('Digest crashed: %s', e, exc_info=True)
+            return DigestResult(error=f'{type(e).__name__}: {e}')
 
     def _run_query_worker(self, key: str) -> None:
         bar = self.query_one('#status-bar', StatusBar)
@@ -359,11 +427,13 @@ class BaseApp(ShellScreen):
         self._final_digest_started = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...'
-        self._digest_running = True
+        generation = self._start_digest_generation()
+        replaced = self._running_digest_workers()
 
         async def _final_task() -> None:
             try:
-                result = await self._controller.run_digest(is_final=True)
+                await _wait_for_replaced(replaced)
+                result = await self._run_digest_safely(is_final=True)
                 if result.data is not None:
                     self.post_message(
                         DigestReady(
@@ -386,9 +456,11 @@ class BaseApp(ShellScreen):
                         timeout=10,
                     )
             finally:
-                self._digest_running = False
+                self._end_digest_generation(generation)
 
-        self.run_worker(_final_task, exclusive=True, group='final')
+        # Same group as periodic digests: the final digest replaces a running
+        # one instead of racing it on the shared message history.
+        self.run_worker(_final_task, exclusive=True, group='digest')
 
     def _run_label_worker(self) -> None:
         """Generate an AI label in parallel with the final digest (fire-and-forget)."""
@@ -433,7 +505,7 @@ class BaseApp(ShellScreen):
     def _on_label_result(self, label: str | None) -> None:
         if not label:
             return
-        safe_label = re.sub(r'[^\w\-]', '_', label.strip())
+        safe_label = _fit_name(re.sub(r'[^\w\-]', '_', label.strip()))
         if not safe_label:
             return
 
@@ -445,7 +517,15 @@ class BaseApp(ShellScreen):
         new_path = self._output_dir.parent / new_name
 
         if new_path != self._output_dir:
-            self._output_dir.rename(new_path)
+            if new_path.exists():
+                self.notify(f'Session folder {new_name} already exists', severity='error', timeout=8)
+                return
+            try:
+                self._output_dir.rename(new_path)
+            except OSError as e:
+                log.error('Could not rename %s: %s', self._output_dir, e, exc_info=True)
+                self.notify(f'Could not rename the session folder: {e}', severity='error', timeout=8)
+                return
             self._output_dir = new_path
 
             from lazy_take_notes.l3_interface_adapters.gateways.file_persistence import (  # noqa: PLC0415 -- L4 reaches into concrete adapter for relocate

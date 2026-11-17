@@ -106,3 +106,99 @@ class TestRunDigest:
         _, messages = fake_llm.chat_calls[0]
         user_msg = messages[-1].content
         assert 'Full transcript text' in user_msg
+
+
+class TestDigestFaults:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'bad_template',
+        ['{unknown_var}', 'stray { brace', '{line_count:%%}'],
+        ids=['unknown-variable', 'unclosed-brace', 'bad-format-spec'],
+    )
+    async def test_a_malformed_template_returns_an_error_instead_of_raising(self, digest_state, template, bad_template):
+        broken = template.model_copy(update={'digest_user_template': bad_template})
+        fake_llm = FakeLLMClient(response=VALID_DIGEST_RESPONSE)
+        messages_before = list(digest_state.messages)
+
+        result = await RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=broken)
+
+        assert not result.ok
+        assert 'Template error' in result.error
+        assert digest_state.messages == messages_before
+        assert fake_llm.chat_calls == []
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_digest_removes_its_prompt_from_the_history(self, digest_state, template):
+        import asyncio
+
+        fake_llm = FakeLLMClient()
+
+        async def _hang(*a, **kw):
+            await asyncio.Event().wait()
+
+        fake_llm.chat = _hang  # type: ignore[invalid-assignment]
+        messages_before = list(digest_state.messages)
+        task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
+        await asyncio.sleep(0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert digest_state.messages == messages_before
+
+
+class TestDigestPromptOwnership:
+    """Each digest removes its own prompt, even after a newer digest appended one."""
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_digest_keeps_a_newer_prompt(self, digest_state, template):
+        import asyncio
+
+        from lazy_take_notes.l1_entities.chat_message import ChatMessage
+
+        fake_llm = FakeLLMClient()
+
+        async def _hang(*a, **kw):
+            await asyncio.Event().wait()
+
+        fake_llm.chat = _hang  # type: ignore[invalid-assignment]
+        before = list(digest_state.messages)
+        task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
+        await asyncio.sleep(0)
+        newer = ChatMessage(role='user', content='final prompt')
+        digest_state.messages.append(newer)  # the replacing final digest got here first
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert digest_state.messages == [*before, newer]
+        assert digest_state.messages[-1] is newer
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('outcome', ['raises', 'empty'])
+    async def test_a_failed_digest_keeps_a_newer_prompt(self, digest_state, template, outcome):
+        import asyncio
+
+        from lazy_take_notes.l1_entities.chat_message import ChatMessage
+        from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse
+
+        newer = ChatMessage(role='user', content='final prompt')
+        release = asyncio.Event()
+        fake_llm = FakeLLMClient()
+
+        async def _late_failure(*a, **kw):
+            await release.wait()
+            if outcome == 'raises':
+                raise ConnectionError('dropped')
+            return ChatResponse(content='   ')
+
+        fake_llm.chat = _late_failure  # type: ignore[invalid-assignment]
+        before = list(digest_state.messages)
+        task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
+        await asyncio.sleep(0)
+        digest_state.messages.append(newer)
+        release.set()
+
+        result = await task
+        assert not result.ok
+        assert digest_state.messages == [*before, newer]

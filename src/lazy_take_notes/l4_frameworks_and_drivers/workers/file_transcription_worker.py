@@ -6,6 +6,8 @@ import logging
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
+
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
@@ -127,34 +129,54 @@ def run_file_transcription(
     all_segments: list[TranscriptSegment] = []
     post_message(AudioWorkerStatus(status='recording'))
 
+    # A whisper failure ends this file, not the app. Keep the segments so far,
+    # so the screen can still show, digest, and save them.
+    try:
+        _transcribe_chunks(use_case, audio, is_cancelled, post_message, all_segments)
+    except Exception as exc:
+        log.error('Transcription failed: %s', exc, exc_info=True)
+        post_message(AudioWorkerStatus(status='error', error=str(exc)))
+        return all_segments
+    finally:
+        transcriber.close()
+
+    post_message(AudioWorkerStatus(status='stopped'))
+    return all_segments
+
+
+def _transcribe_chunks(
+    use_case: TranscribeAudioUseCase,
+    audio: np.ndarray,
+    is_cancelled: Callable[[], bool],
+    post_message: Callable,
+    all_segments: list[TranscriptSegment],
+) -> None:
     offset = 0
     while offset < len(audio) and not is_cancelled():
         chunk = audio[offset : offset + _FEED_CHUNK]
         offset += len(chunk)
         use_case.feed_audio(chunk)
         use_case.set_session_offset(offset / SAMPLE_RATE)
-
         if use_case.should_trigger():
-            post_message(TranscriptionStatus(active=True))
-            try:
-                segments = use_case.process_buffer()
-            finally:
-                post_message(TranscriptionStatus(active=False))
-            if segments:
-                all_segments.extend(segments)
-                post_message(TranscriptChunk(segments=segments))
+            _post_segments(_bracketed(use_case.process_buffer, post_message), post_message, all_segments)
 
-    # Flush remaining audio
     if not is_cancelled():
-        post_message(TranscriptionStatus(active=True))
-        try:
-            tail = use_case.flush()
-        finally:
-            post_message(TranscriptionStatus(active=False))
-        if tail:
-            all_segments.extend(tail)
-            post_message(TranscriptChunk(segments=tail))
+        _post_segments(_bracketed(use_case.flush, post_message), post_message, all_segments)
 
-    transcriber.close()
-    post_message(AudioWorkerStatus(status='stopped'))
-    return all_segments
+
+def _bracketed(step: Callable[[], list[TranscriptSegment]], post_message: Callable) -> list[TranscriptSegment]:
+    post_message(TranscriptionStatus(active=True))
+    try:
+        return step()
+    finally:
+        post_message(TranscriptionStatus(active=False))
+
+
+def _post_segments(
+    segments: list[TranscriptSegment],
+    post_message: Callable,
+    all_segments: list[TranscriptSegment],
+) -> None:
+    if segments:
+        all_segments.extend(segments)
+        post_message(TranscriptChunk(segments=segments))

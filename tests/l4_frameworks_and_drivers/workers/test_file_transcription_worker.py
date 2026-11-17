@@ -267,3 +267,35 @@ class TestRunSubtitleReplay:
         assert result == []
         statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
         assert statuses == ['recording', 'stopped']
+
+
+class TestRunFileTranscriptionFaults:
+    def _run(self, mock_transcriber, audio=_SIGNAL_AUDIO):
+        mock_load, mock_resolver_cls, _ = _make_mocks(audio=audio)
+        return TestRunFileTranscription()._run(mock_load, mock_resolver_cls, mock_transcriber)
+
+    def test_transcribe_failure_mid_loop_posts_error_and_closes(self):
+        audio_26s = np.ones(16000 * 26, dtype=np.float32) * 0.1
+        mock_transcriber = MagicMock()
+        mock_transcriber.transcribe.side_effect = RuntimeError('whisper died')
+
+        result, messages = self._run(mock_transcriber, audio=audio_26s)
+
+        assert result == []
+        errors = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'error']
+        assert errors and 'whisper died' in errors[0].error
+        active = [m.active for m in messages if isinstance(m, TranscriptionStatus)]
+        assert active[-1] is False
+        mock_transcriber.close.assert_called_once()
+
+    def test_flush_failure_keeps_earlier_segments(self):
+        audio_26s = np.ones(16000 * 26, dtype=np.float32) * 0.1
+        mock_transcriber = MagicMock()
+        mock_transcriber.transcribe.side_effect = [_FAKE_SEGMENTS, RuntimeError('flush died')]
+
+        result, messages = self._run(mock_transcriber, audio=audio_26s)
+
+        assert result == _FAKE_SEGMENTS
+        statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert statuses[-1] == 'error'
+        mock_transcriber.close.assert_called_once()

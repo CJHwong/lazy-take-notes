@@ -82,7 +82,7 @@ def load_config(config_path, output_dir):
     return config, infra, template_loader
 
 
-def pick_template(template_loader, *, show_builtins: bool = True):
+def pick_template(template_loader, *, show_builtins: bool = True, config_path: str | None = None):
     """Show the interactive template picker. Returns a SessionTemplate, or None if cancelled.
 
     Handles the create-template loop internally — if the user presses [n] to
@@ -92,6 +92,7 @@ def pick_template(template_loader, *, show_builtins: bool = True):
         TemplateBuilderApp,
     )
     from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred: Textual not loaded on --help
+        EditTemplateRequest,
         TemplatePicker,
     )
 
@@ -103,7 +104,11 @@ def pick_template(template_loader, *, show_builtins: bool = True):
         if picker_result is None:
             return None
         if picker_result == '__create_template__':
-            TemplateBuilderApp().run()
+            TemplateBuilderApp(config_path=config_path).run()
+            continue
+        if isinstance(picker_result, EditTemplateRequest):
+            base = template_loader.load(picker_result.name)
+            TemplateBuilderApp(config_path=config_path, base_template=base, base_key=picker_result.name).run()
             continue
         break
 
@@ -169,13 +174,13 @@ def resolve_language(template_loader, language: str):
     return template_loader.load(meta.key)
 
 
-def select_template(template_loader, *, template_name, language, show_builtins):
+def select_template(template_loader, *, template_name, language, show_builtins, config_path=None):
     """Resolve a template from --language / --template, or fall back to the picker."""
     if language:
         return resolve_language(template_loader, language)
     if template_name:
         return load_template_key(template_loader, template_name)
-    return pick_template(template_loader, show_builtins=show_builtins)
+    return pick_template(template_loader, show_builtins=show_builtins, config_path=config_path)
 
 
 def set_mic_muted(audio_source, muted: bool) -> None:
@@ -265,7 +270,11 @@ def run_transcribe(
     config, infra, template_loader = load_config(config_path, output_dir)
 
     template = select_template(
-        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+        template_loader,
+        template_name=template_name,
+        language=language,
+        show_builtins=infra.show_builtin_templates,
+        config_path=config_path,
     )
     if template is None:
         return None
@@ -298,6 +307,56 @@ def preflight_microphone() -> None:
         click.echo(f'Warning: Cannot query audio devices ({e}).', err=True)
 
 
+def build_preflight_plan(
+    config,
+    infra,
+    template,
+    output_dir: str | None,
+    *,
+    llm_client: LLMClient | None = None,
+    transcriber: Transcriber | None = None,
+    audio_source: AudioSource | None = None,
+    mute_mic: bool = False,
+):
+    """Build the objects the preflight checks and the session then share."""
+    from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import (  # noqa: PLC0415 -- deferred: not loaded on --help
+        CachedModelStore,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred: avoid circular import at module level
+        DependencyContainer,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.preflight import (  # noqa: PLC0415 -- deferred: not loaded on --help
+        PreflightPlan,
+    )
+
+    store = CachedModelStore()
+    try:
+        client = llm_client or DependencyContainer.resolve_llm_client(infra)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from None
+    backend = DependencyContainer.resolve_transcription_backend(infra, store)
+    return PreflightPlan(
+        config=config,
+        template=template,
+        base_dir=resolve_base_dir(output_dir, config),
+        llm_client=client,
+        llm_provider=infra.llm_provider,
+        transcriber=transcriber or backend.create_transcriber(),
+        model_resolver_factory=backend.create_model_resolver,
+        asset_store=store,
+        check_audio=audio_source is None,
+        mic_muted=mute_mic,
+        owns_transcriber=transcriber is None,
+    )
+
+
+def missing_models_after_preflight(config, report) -> tuple[list[str], list[str]]:
+    """An overridden AI check starts the session in transcript-only mode."""
+    if report.llm_ok:
+        return [], []
+    return [config.digest.model], [config.interactive.model]
+
+
 def build_record_session(
     config,
     infra,
@@ -309,8 +368,12 @@ def build_record_session(
     transcriber: Transcriber | None = None,
     audio_source: AudioSource | None = None,
     mute_mic: bool = False,
+    preflight=None,
 ):
-    """Prepare a RecordApp and its session directory, without running it."""
+    """Prepare a RecordApp and its session directory, without running it.
+
+    With a preflight report the checks already ran, so none repeat here.
+    """
     from lazy_take_notes.l4_frameworks_and_drivers.apps.record import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         RecordApp,
     )
@@ -319,11 +382,13 @@ def build_record_session(
     )
 
     base_dir = resolve_base_dir(output_dir, config)
+    if preflight is not None:
+        missing_digest, missing_interactive = missing_models_after_preflight(config, preflight)
+    else:
+        missing_digest, missing_interactive = preflight_llm(infra, config)
+        if audio_source is None:
+            preflight_microphone()
     out_dir = make_session_dir(base_dir, label)
-
-    missing_digest, missing_interactive = preflight_llm(infra, config)
-    if audio_source is None:
-        preflight_microphone()
 
     container = DependencyContainer(
         config,
@@ -381,9 +446,33 @@ def run_record(
     config, infra, template_loader = load_config(config_path, output_dir)
 
     template = select_template(
-        template_loader, template_name=template_name, language=language, show_builtins=infra.show_builtin_templates
+        template_loader,
+        template_name=template_name,
+        language=language,
+        show_builtins=infra.show_builtin_templates,
+        config_path=config_path,
     )
     if template is None:
+        return None
+
+    from lazy_take_notes.l4_frameworks_and_drivers.apps.preflight_screen import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
+        PreflightScreen,
+    )
+
+    plan = build_preflight_plan(
+        config,
+        infra,
+        template,
+        output_dir,
+        llm_client=llm_client,
+        transcriber=transcriber,
+        audio_source=audio_source,
+        mute_mic=mute_mic,
+    )
+    report = PreflightScreen(plan).run()
+    if report is None:
+        if plan.owns_transcriber:
+            plan.transcriber.close()
         return None
 
     app, out_dir = build_record_session(
@@ -392,10 +481,11 @@ def run_record(
         template,
         output_dir,
         label,
-        llm_client=llm_client,
-        transcriber=transcriber,
+        llm_client=plan.llm_client,
+        transcriber=plan.transcriber,
         audio_source=audio_source,
         mute_mic=mute_mic,
+        preflight=report,
     )
 
     from lazy_take_notes.l4_frameworks_and_drivers.keep_awake import (  # noqa: PLC0415 -- deferred: not loaded on --help

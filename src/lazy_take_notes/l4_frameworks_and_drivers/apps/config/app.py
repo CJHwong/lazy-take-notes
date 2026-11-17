@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
+import logging
 import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell commands
 
+import yaml
 from pydantic import ValidationError
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
@@ -51,6 +54,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.container import (
 from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 
 # ── Theme preview ─────────────────────────────────────────────────────────────
+
+log = logging.getLogger('ltn.config')
 
 
 class ConfigApp(ShellScreen):
@@ -163,7 +168,15 @@ class ConfigApp(ShellScreen):
         self._clear_api_key = False
         self._raw: dict = {}
         self._baseline: dict | None = None
-        self._load_current_config()
+        self._load_error = ''
+        try:
+            self._load_current_config()
+        except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError) as exc:
+            # Settings is where the user fixes a broken file, so it must still open.
+            log.error('Cannot read config.yaml: %s', exc, exc_info=True)
+            self._load_error = str(exc)
+            self._raw = copy.deepcopy(APP_CONFIG_DEFAULTS)
+            self._infra = InfraConfig()
 
     def _load_current_config(self) -> None:
         """Load existing config merged with defaults."""
@@ -386,6 +399,13 @@ class ConfigApp(ShellScreen):
         nav.index = 0
         nav.focus()
         self._baseline = self._collect_form_data()
+        if self._load_error:
+            self.notify(
+                f'config.yaml cannot be read ({self._load_error}). Showing defaults. Press [e] to fix the file.',
+                severity='error',
+                markup=False,
+                timeout=20,
+            )
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """Toggle model fields when provider changes; preview theme on change."""
@@ -444,7 +464,12 @@ class ConfigApp(ShellScreen):
             self.notify(f'Validation error: {exc}', severity='error', timeout=8)
             return
 
-        path = write_config(data)
+        try:
+            path = write_config(data)
+        except (OSError, yaml.YAMLError) as exc:
+            log.error('Cannot save config: %s', exc, exc_info=True)
+            self.notify(f'Cannot save config: {exc}', severity='error', markup=False, timeout=10)
+            return
         self._saved = True
         self._clear_api_key = False
         self._baseline = self._collect_form_data()
@@ -514,20 +539,34 @@ class ConfigApp(ShellScreen):
         if not path.exists():
             from lazy_take_notes.l3_interface_adapters.gateways.paths import CONFIG_DIR  # noqa: PLC0415 -- deferred
 
-            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-            import yaml as _yaml  # noqa: PLC0415 -- one-shot use
-
-            path.write_text(
-                _yaml.dump(self._raw, default_flow_style=False, allow_unicode=True, sort_keys=False),
-                encoding='utf-8',
-            )
+            try:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    yaml.dump(self._raw, default_flow_style=False, allow_unicode=True, sort_keys=False),
+                    encoding='utf-8',
+                )
+            except OSError as exc:
+                log.error('Cannot create %s: %s', path, exc, exc_info=True)
+                self.notify(f'Cannot create {path}: {exc}', severity='error', markup=False)
+                return
         try:
             with self.app.suspend():
                 subprocess.run([*editor_argv, str(path)], check=False)  # noqa: S603 -- argv from env/platform, not user shell
         except SuspendNotSupported:
             self.notify('Cannot open editor in this environment', severity='error')
             return
-        self._load_current_config()
+        except OSError as exc:
+            # $EDITOR can name a program that is not installed.
+            log.error('Cannot open editor %s: %s', editor_argv, exc, exc_info=True)
+            self.notify(f'Cannot open editor: {exc}', severity='error', markup=False)
+            return
+        try:
+            self._load_current_config()
+        except (OSError, ValueError, TypeError, AttributeError, yaml.YAMLError) as exc:
+            # A hand edit can leave YAML that does not parse or is not a mapping.
+            log.error('Cannot reload %s: %s', path, exc, exc_info=True)
+            self.notify(f'Cannot reload {path.name}: {exc}', severity='error', markup=False, timeout=12)
+            return
         self._repopulate_fields()
         self._baseline = self._collect_form_data()
         self.notify('Reloaded from disk')

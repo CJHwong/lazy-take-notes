@@ -129,6 +129,8 @@ output:
 
 Templates control the LLM prompts, labels, and quick-action keys for a session. The template picker launches at startup — built-ins are listed there.
 
+In the picker, `n` builds a new template with AI, `e` opens the highlighted one in your editor, and `a` edits it with AI: describe the change, confirm it, and the app lists the fields that changed. Saving keeps the original name; for a built-in, that saves your copy, which overrides it.
+
 To add your own or override a built-in, drop a `.yaml` file in the `templates/` subdirectory of your config path (see table above). See [docs/TEMPLATES.md](docs/TEMPLATES.md) for the full schema and variable reference.
 
 ## Output

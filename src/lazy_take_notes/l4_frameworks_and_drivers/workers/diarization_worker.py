@@ -32,8 +32,10 @@ def run_diarization_worker(
             if size > processed_size + 1024:
                 try:
                     turns = diarizer.diarize(audio_path, timeout=timeout_s)
-                except RuntimeError as exc:
-                    log.warning('diarization pass failed: %s', exc)
+                except Exception as exc:
+                    # A thread worker that raises ends the whole app, so one bad
+                    # pass (bad JSON, missing key, lost exec bit) only skips a pass.
+                    log.warning('diarization pass failed: %s: %s', type(exc).__name__, exc, exc_info=True)
                 else:
                     if turns:
                         speakers = len({turn.speaker for turn in turns})

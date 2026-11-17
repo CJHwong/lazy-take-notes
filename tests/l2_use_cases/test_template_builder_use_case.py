@@ -113,6 +113,26 @@ class TestGenerate:
         assert 'Schema validation failed' in result.error
 
     @pytest.mark.asyncio
+    async def test_a_failed_call_leaves_the_history_unchanged(self):
+        # A user turn with no reply would make the next request send two user turns in a row.
+        class DeadLLM(FakeLLMClient):
+            async def chat(self, model, messages):
+                raise ConnectionError('Connection refused')
+
+        history = [ChatMessage(role='user', content='hi'), ChatMessage(role='assistant', content='hello')]
+        with pytest.raises(ConnectionError):
+            await _make_use_case(DeadLLM()).generate('I want a template', 'test-model', history)
+        assert [message.content for message in history] == ['hi', 'hello']
+
+    @pytest.mark.asyncio
+    async def test_the_new_message_is_sent_after_the_history(self):
+        fake_llm = FakeLLMClient()
+        history = [ChatMessage(role='user', content='hi'), ChatMessage(role='assistant', content='hello')]
+        await _make_use_case(fake_llm).generate('next', 'test-model', history)
+        sent = fake_llm.chat_calls[-1][1]
+        assert [message.content for message in sent[1:]] == ['hi', 'hello', 'next']
+
+    @pytest.mark.asyncio
     async def test_history_maintained_across_calls(self):
         fake_llm = FakeLLMClient(response='What kind of meeting?')
         use_case = _make_use_case(fake_llm)
@@ -166,6 +186,91 @@ class TestAutoFix:
 
         assert result.template is None
         assert result.error
+
+
+def _make_edit_use_case(fake_llm: FakeLLMClient, base: SessionTemplate) -> TemplateBuildUseCase:
+    example = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+    return TemplateBuildUseCase(llm_client=fake_llm, example_template=example, base_template=base)
+
+
+def _system_prompt(fake_llm: FakeLLMClient) -> str:
+    return fake_llm.chat_calls[-1][1][0].content
+
+
+class TestEditMode:
+    """Editing feeds the current template in, and asks before it changes anything."""
+
+    @pytest.mark.asyncio
+    async def test_the_edit_prompt_carries_the_template_and_asks_first(self):
+        fake_llm = FakeLLMClient(response='Apply this change?')
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        await _make_edit_use_case(fake_llm, base).generate('add a risks action', 'm', [])
+        prompt = _system_prompt(fake_llm)
+        assert '"system_prompt": "You are a meeting assistant."' in prompt
+        assert 'Apply this change?' in prompt
+        assert 'ALWAYS ask 1-3 focused' not in prompt  # the create interview does not apply
+
+    @pytest.mark.asyncio
+    async def test_the_create_prompt_has_no_current_template(self):
+        fake_llm = FakeLLMClient()
+        await _make_use_case(fake_llm).generate('hi', 'm', [])
+        assert '## Current template' not in _system_prompt(fake_llm)
+
+    @pytest.mark.asyncio
+    async def test_a_second_edit_builds_on_the_first(self):
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        edited = {**_VALID_TEMPLATE_DICT, 'system_prompt': 'You are a terse assistant.'}
+        fake_llm = FakeLLMClient(response=_wrap_json(json.dumps(edited)))
+        use_case = _make_edit_use_case(fake_llm, base)
+        history: list[ChatMessage] = []
+        await use_case.generate('yes', 'm', history)
+
+        fake_llm.set_response('Apply this change?')
+        await use_case.generate('also shorter', 'm', history)
+        prompt = _system_prompt(fake_llm)
+        assert 'You are a terse assistant.' in prompt
+        assert 'You are a meeting assistant.' not in prompt
+
+    @pytest.mark.asyncio
+    async def test_an_accepted_version_is_not_repeated_in_the_history(self):
+        # The prompt already holds the newest template; old copies would contradict it.
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        fake_llm = FakeLLMClient(response=_wrap_json(_VALID_JSON, preamble='Done.'))
+        history: list[ChatMessage] = []
+        await _make_edit_use_case(fake_llm, base).generate('yes', 'm', history)
+        assert '```json' not in history[-1].content
+        assert history[-1].content.startswith('Done.')
+
+    @pytest.mark.asyncio
+    async def test_an_invalid_version_stays_in_the_history_for_the_fix(self):
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        broken = {**_VALID_TEMPLATE_DICT, 'digest_user_template': 'Notes {no_such_field}'}
+        fake_llm = FakeLLMClient(response=_wrap_json(json.dumps(broken)))
+        use_case = _make_edit_use_case(fake_llm, base)
+        history: list[ChatMessage] = []
+        result = await use_case.generate('yes', 'm', history)
+        assert result.validation_errors
+        assert '```json' in history[-1].content
+        assert use_case.current_template is base
+
+
+class TestJsonOnlyReply:
+    """A reply that is only the JSON fence must not show raw JSON as the chat message."""
+
+    @pytest.mark.asyncio
+    async def test_the_message_is_empty_for_a_valid_template(self):
+        fake_llm = FakeLLMClient(response=f'```json\n{_VALID_JSON}\n```')
+        result = await _make_use_case(fake_llm).generate('go', 'm', [])
+        assert result.template is not None
+        assert not result.assistant_message
+
+    @pytest.mark.asyncio
+    async def test_the_edit_history_records_a_short_note(self):
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        fake_llm = FakeLLMClient(response=f'```json\n{_VALID_JSON}\n```')
+        history: list[ChatMessage] = []
+        await _make_edit_use_case(fake_llm, base).generate('yes', 'm', history)
+        assert history[-1].content == 'Template updated.'
 
 
 class TestBuilderResult:

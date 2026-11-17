@@ -33,6 +33,22 @@ class AudioWorkerStatus(Message):
         self.error = error
 
 
+class AudioHealth(Message):
+    """Posted by audio worker when a capture source is lost, silent, or back.
+
+    ``mic`` is ``ok``, ``lost``, or ``silent``; ``system`` is ``ok`` or ``lost``.
+    ``processing`` is ``error`` while the audio loop fails on every chunk.
+    """
+
+    def __init__(self, mic: str, system: str, detail: str = '', notice: str = '', processing: str = 'ok') -> None:
+        super().__init__()
+        self.mic = mic
+        self.system = system
+        self.detail = detail
+        self.notice = notice
+        self.processing = processing
+
+
 class DigestReady(Message):
     """Posted by controller when a digest cycle completes successfully."""
 

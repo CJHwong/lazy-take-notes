@@ -159,6 +159,35 @@ class FakePersistence:
         return self._output_dir / CONTEXT.name
 
 
+class FailingPersistence(FakePersistence):
+    """Persistence fake whose named write methods raise, like a full or vanished disk."""
+
+    def __init__(self, error: BaseException, failing: set[str], output_dir: Path | None = None):
+        super().__init__(output_dir)
+        self._error = error
+        self._failing = failing
+
+    def _fail_if(self, method: str) -> None:
+        if method in self._failing:
+            raise self._error
+
+    def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
+        self._fail_if('save_transcript_lines')
+        return super().save_transcript_lines(segments, append=append)
+
+    def save_digest_md(self, markdown: str, digest_number: int) -> Path:
+        self._fail_if('save_digest_md')
+        return super().save_digest_md(markdown, digest_number)
+
+    def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:
+        self._fail_if('save_history')
+        return super().save_history(markdown, digest_number, is_final=is_final)
+
+    def save_session_context(self, context: str) -> Path:
+        self._fail_if('save_session_context')
+        return super().save_session_context(context)
+
+
 # --- Standard Fixtures ---
 
 

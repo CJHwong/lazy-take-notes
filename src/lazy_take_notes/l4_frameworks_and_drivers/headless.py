@@ -33,7 +33,6 @@ from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
     load_template_key,
     make_session_dir,
     preflight_llm,
-    preflight_microphone,
     resolve_base_dir,
     resolve_language,
     set_mic_muted,
@@ -477,6 +476,32 @@ def _warn_missing_models(missing_digest: list[str], missing_interactive: list[st
         click.echo(f'⚠ model not available: {model} (cycles using it will fail)', err=True)
 
 
+def _run_headless_preflight(config, infra, template, output_dir, *, mute_mic: bool = False):
+    """Check every requirement before the session folder exists. Exit on a hard failure.
+
+    An unavailable AI model keeps the old headless contract: warn and record the
+    transcript only. Headless has no button to confirm anything else.
+    """
+    from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
+        build_preflight_plan,
+    )
+    from lazy_take_notes.l4_frameworks_and_drivers.preflight import (  # noqa: PLC0415 -- deferred
+        format_report_line,
+        run_preflight,
+    )
+
+    plan = build_preflight_plan(config, infra, template, output_dir, mute_mic=mute_mic)
+    report = run_preflight(plan)
+    for check in report.checks:
+        click.echo(format_report_line(check), err=True)
+    if report.blocked:
+        plan.transcriber.close()
+        raise click.ClickException('Preflight failed; fix the items marked FAIL and run again.')
+    for check in report.failures:
+        click.echo(f'⚠ continuing despite: {check.title}', err=True)
+    return plan
+
+
 def run_record_headless(
     ctx: click.Context,
     *,
@@ -491,11 +516,12 @@ def run_record_headless(
     config, infra, template_loader = load_config(ctx.obj['config_path'], ctx.obj['output_dir'])
     template = _select_headless_template(template_loader, template_name, language)
 
+    plan = _run_headless_preflight(config, infra, template, ctx.obj['output_dir'], mute_mic=mute_mic)
     out_dir = make_session_dir(resolve_base_dir(ctx.obj['output_dir'], config), label)
-    _warn_missing_models(*preflight_llm(infra, config))
-    preflight_microphone()
 
-    container = _build_container(config, template, out_dir, infra)
+    container = _build_container(
+        config, template, out_dir, infra, llm_client=plan.llm_client, transcriber=plan.transcriber
+    )
     if mute_mic:
         set_mic_muted(container.audio_source, True)
     launcher = _audio_launcher(

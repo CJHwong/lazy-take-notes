@@ -83,3 +83,18 @@ class TestAudioProbe:
 
         assert any(isinstance(event, AudioProbeError) for event in events)
         assert isinstance(events[-1], AudioProbeDone)
+
+    def test_read_failure_reports_error_and_done(self):
+        class Unplugged(FakeSource):
+            def read(self, timeout: float = 0.1):
+                raise OSError('device unplugged')
+
+        mic = Unplugged([])
+        system = FakeSource([])
+
+        events = run(mic, system)
+
+        errors = [event for event in events if isinstance(event, AudioProbeError)]
+        assert errors and 'device unplugged' in errors[0].error
+        assert isinstance(events[-1], AudioProbeDone)
+        assert mic.closed and system.closed

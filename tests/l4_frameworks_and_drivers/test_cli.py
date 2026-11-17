@@ -38,6 +38,23 @@ _BUILD = 'lazy_take_notes.l4_frameworks_and_drivers.config.build_app_config'
 _INFRA = 'lazy_take_notes.l4_frameworks_and_drivers.config.InfraConfig'
 _PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker.TemplatePicker'
 _SESSION_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker.SessionPicker'
+
+
+@pytest.fixture(autouse=True)
+def _preflight_passes():
+    """The record flow runs the preflight screen first; these tests cover what comes after it."""
+    from lazy_take_notes.l4_frameworks_and_drivers.preflight import PreflightReport, new_checks
+
+    with (
+        patch('lazy_take_notes.l4_frameworks_and_drivers.cli_helpers.build_preflight_plan') as plan,
+        patch(
+            'lazy_take_notes.l4_frameworks_and_drivers.apps.preflight_screen.PreflightScreen.run',
+            return_value=PreflightReport(new_checks()),
+        ),
+    ):
+        yield plan
+
+
 _FILE_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker.FilePicker'
 _WELCOME_PICKER = 'lazy_take_notes.l4_frameworks_and_drivers.pickers.welcome_picker.WelcomePicker'
 
@@ -876,9 +893,32 @@ class TestTemplateSelection:
         from lazy_take_notes.l4_frameworks_and_drivers import cli_helpers as ch
 
         sentinel = object()
-        monkeypatch.setattr(ch, 'pick_template', lambda loader, show_builtins: sentinel)
-        result = ch.select_template(self._loader(), template_name=None, language=None, show_builtins=True)
+        calls = []
+        monkeypatch.setattr(ch, 'pick_template', lambda loader, **kwargs: calls.append(kwargs) or sentinel)
+        result = ch.select_template(
+            self._loader(), template_name=None, language=None, show_builtins=True, config_path='/c.yaml'
+        )
         assert result is sentinel
+        assert calls == [{'show_builtins': True, 'config_path': '/c.yaml'}]  # the builder behind [n] gets it
+
+    def test_edit_with_ai_runs_the_builder_then_shows_the_picker_again(self, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers import cli_helpers as ch
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import EditTemplateRequest
+
+        results = iter([EditTemplateRequest('standup'), None])
+        monkeypatch.setattr(ch, '_clear_normal_screen', lambda: None)
+        loader = MagicMock()
+        with (
+            patch('lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker.TemplatePicker') as picker,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder.TemplateBuilderApp') as builder,
+        ):
+            picker.return_value.run.side_effect = lambda: next(results)
+            assert ch.pick_template(loader, config_path='/c.yaml') is None
+        builder.assert_called_once_with(
+            config_path='/c.yaml', base_template=loader.load.return_value, base_key='standup'
+        )
+        builder.return_value.run.assert_called_once()
+        assert picker.return_value.run.call_count == 2
 
     def test_set_mic_muted_on_supporting_source(self):
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import set_mic_muted
@@ -1117,3 +1157,23 @@ class TestSessionEntryPointsReturnArtifacts:
         assert isinstance(result, SessionArtifacts)
         assert result.session_dir == out_dir
         assert result.notes_path == notes
+
+
+class TestRecordPreflight:
+    def test_back_from_preflight_creates_no_session(self, tmp_path: Path):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import run_record
+
+        ctx = MagicMock(obj={'config_path': None, 'output_dir': str(tmp_path)})
+        with (
+            patch(
+                'lazy_take_notes.l4_frameworks_and_drivers.cli_helpers.load_config',
+                return_value=(MagicMock(), MagicMock(), MagicMock()),
+            ),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.cli_helpers.select_template', return_value=MagicMock()),
+            patch(
+                'lazy_take_notes.l4_frameworks_and_drivers.apps.preflight_screen.PreflightScreen.run', return_value=None
+            ),
+            patch('lazy_take_notes.l4_frameworks_and_drivers.cli_helpers.build_record_session') as build,
+        ):
+            assert run_record(ctx) is None
+        build.assert_not_called()

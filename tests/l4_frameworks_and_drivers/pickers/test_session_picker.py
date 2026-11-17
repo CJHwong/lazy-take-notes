@@ -179,3 +179,18 @@ class TestSessionPicker:
             async with picker.run_test() as pilot:
                 await pilot.pause()
                 assert picker.app.theme == 'textual-light'
+
+
+class TestSessionPickerFaults:
+    @pytest.mark.asyncio
+    async def test_undecodable_transcript_preview_does_not_crash(self, tmp_path: Path):
+        session_dir = _create_session(tmp_path, '2026-02-20_120000', has_digest=True)
+        (session_dir / 'transcript.txt').write_bytes(b'\xff\xfe\xfa bad')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            from textual.widgets import Markdown
+
+            md = picker.query_one('#sp-preview-md', Markdown)
+            assert 'Cannot read' in md.source
+            assert 'Key points' in md.source

@@ -447,7 +447,7 @@ def status(ctx, session):
 @click.pass_context
 def create_template(ctx):
     """Build a custom template with AI assistance."""
-    _launch_template_builder()
+    _launch_template_builder(ctx.obj['config_path'])
 
 
 @cli.command()
@@ -461,13 +461,13 @@ def config(ctx):
     ConfigApp().run()
 
 
-def _launch_template_builder() -> None:
+def _launch_template_builder(config_path: str | None = None) -> None:
     """Launch the TemplateBuilderApp."""
     from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import (  # noqa: PLC0415 -- deferred: Textual TUI not loaded for --help
         TemplateBuilderApp,
     )
 
-    TemplateBuilderApp().run()
+    TemplateBuilderApp(config_path=config_path).run()
 
 
 @cli.group('plugin')

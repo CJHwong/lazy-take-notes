@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
+import time
 
 import numpy as np
 import sounddevice as sd
@@ -12,6 +14,48 @@ from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l3_interface_adapters.gateways._audio_buffer import AudioBuffer
 
 log = logging.getLogger('ltn.audio.sounddevice')
+
+# PortAudio re-init tears down every stream in the process, so it must never
+# overlap the test tone playback.
+_PORTAUDIO_LOCK = threading.Lock()
+
+# -66 dBFS: far below hearing and below the transcription silence threshold.
+TEST_TONE_AMPLITUDE = 0.0005
+_TONE_RATE = 48_000
+_TONE_SECONDS = 0.2
+_LOCK_TIMEOUT_S = 2.0
+
+
+def play_test_tone() -> bool:
+    """Play an inaudible tone on the default output. False when nothing can play it."""
+    t = np.arange(int(_TONE_RATE * _TONE_SECONDS)) / _TONE_RATE
+    tone = (TEST_TONE_AMPLITUDE * np.sin(2 * np.pi * 997 * t)).astype(np.float32)
+    if not _PORTAUDIO_LOCK.acquire(timeout=_LOCK_TIMEOUT_S):
+        log.warning('test tone skipped: audio device list is being refreshed')
+        return False
+    try:
+        sd.play(tone, _TONE_RATE)
+        # Sleep instead of sd.wait(): a dead output device must not hang the caller.
+        time.sleep(_TONE_SECONDS + 0.1)
+        sd.stop()
+    except (sd.PortAudioError, OSError, ValueError) as error:
+        log.warning('test tone could not play: %s', error)
+        return False
+    finally:
+        _PORTAUDIO_LOCK.release()
+    return True
+
+
+def refresh_device_list() -> None:
+    """PortAudio lists devices once at init; re-init to see a reconnected headset."""
+    if not _PORTAUDIO_LOCK.acquire(timeout=_LOCK_TIMEOUT_S):
+        log.warning('device list refresh skipped: test tone still playing')
+        return
+    try:
+        sd._terminate()  # noqa: SLF001 -- sounddevice has no public re-init
+        sd._initialize()  # noqa: SLF001 -- sounddevice has no public re-init
+    finally:
+        _PORTAUDIO_LOCK.release()
 
 
 class SounddeviceAudioSource:
@@ -32,7 +76,10 @@ class SounddeviceAudioSource:
     continuous_capture = True
 
     def __init__(self, device: str | None = None) -> None:
+        self._configured_device = device
         self._device = device
+        self._opened_before = False
+        self.device_notice = ''
         self._stream: sd.InputStream | None = None
         self._queue = AudioBuffer(max_frames=SAMPLE_RATE, sample_rate=SAMPLE_RATE, label='microphone')
         self._closing = True
@@ -57,12 +104,18 @@ class SounddeviceAudioSource:
         return list(dict.fromkeys(names))
 
     def _input_info(self):
+        self._device = self._configured_device
+        self.device_notice = ''
         try:
             return sd.query_devices(kind='input', device=self._device)
         except (ValueError, sd.PortAudioError):
             log.warning('input device %r is unavailable, using the default', self._device)
             self._device = None
-            return sd.query_devices(kind='input')
+            info = sd.query_devices(kind='input')
+            self.device_notice = (
+                f'Microphone {self._configured_device!r} is unavailable; using {info.get("name", "the default input")}'
+            )
+            return info
 
     def open(self, sample_rate: int = SAMPLE_RATE, channels: int = 1) -> None:
         self.close()
@@ -70,6 +123,9 @@ class SounddeviceAudioSource:
         self._exhausted = False
         self._queue = AudioBuffer(max_frames=sample_rate, sample_rate=sample_rate, label='microphone')
         generation = self._generation
+        if self._opened_before:
+            refresh_device_list()
+        self._opened_before = True
         device_info = self._input_info()
         native_sr_raw = device_info.get('default_samplerate', float(sample_rate))
         native_sr = int(round(native_sr_raw))

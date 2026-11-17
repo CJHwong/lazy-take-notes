@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pyperclip
+from rich.markup import escape
 from textual.binding import Binding
 from textual.widgets import RichLog, TextArea
 
@@ -36,7 +37,8 @@ class TranscriptPanel(RichLog):
         for seg in segments:
             timestamp = format_wall_time(seg.wall_start)
             self._all_text.append(f'[{timestamp}] {seg.text}')
-            self.write(f'[dim]\\[{timestamp}][/dim] {seg.text}')
+            # Whisper can emit text like '[/INST]'; unescaped it is a markup error.
+            self.write(f'[dim]\\[{timestamp}][/dim] {escape(seg.text)}')
 
     def render_segments(
         self,
@@ -53,7 +55,8 @@ class TranscriptPanel(RichLog):
             timestamp = format_wall_time(seg.wall_start)
             label = label_for(seg) if label_for is not None else None
             prefix = f'{label}: ' if label else ''
-            return f'[{timestamp}] {prefix}{seg.text}', f'[dim]\\[{timestamp}][/dim] {prefix}{seg.text}'
+            plain = f'{prefix}{seg.text}'
+            return f'[{timestamp}] {plain}', f'[dim]\\[{timestamp}][/dim] {escape(plain)}'
 
         at_bottom = self.scroll_offset.y >= max(0, self.max_scroll_y - 1)
         self.clear()

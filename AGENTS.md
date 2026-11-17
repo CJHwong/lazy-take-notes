@@ -85,8 +85,17 @@ Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti
 
 `DependencyContainer._build_mixed_source()` selects the system audio backend by platform. `MixedAudioSource.mic_muted` flag (bool, GIL-atomic) controls mic muting at read time — reader threads always run.
 
+A capture cut never ends the recording. `MixedAudioSource` retries a lost source with backoff (0.3, 1, 2, then every 5 s) until `close()`, so `exhausted` stays false in a live session. `MixedAudioSource.health` reports each source:
+
+- `lost`: a read failed, or a continuous source delivered nothing for `dead_audio_seconds` (3 s). Judged by delivery time too, so a reader stuck inside a source is still reported.
+- `silent` (mic only): the raw mic sent exact zeros for 3 s. A real mic never does. It means a missing permission or input volume 0, so it is reported, not restarted. Mute does not trigger it.
+- System audio: the Core Audio tap also sends exact zeros when nothing plays. After 30 s of that, `play_test_tone()` plays 0.2 s at -66 dBFS. The tap captures it before the volume stage, so mute and volume 0 do not hide it. A tap that misses the tone is restarted and stays `lost` until a real sample arrives. macOS only.
+
+The audio worker posts `AudioHealth` on each change. `RecordApp` shows `MIC LOST`, `MIC SILENT`, `SYS LOST`, or `AUDIO ERROR` (the audio loop failing for 1 s straight) in red on the status bar until it clears, with one toast per change. A mic reopen re-initializes PortAudio, which otherwise keeps the device list from process start and cannot see a reconnected headset. The re-init and the tone share `_PORTAUDIO_LOCK`.
+
 ## Data Flow
 
+0. **Preflight**: `preflight.run_preflight` checks the output folder, template, mic, system audio, speech model, speaker assets, and AI model before the session folder exists
 1. **Audio capture**: AudioSource → numpy float32 buffer → VAD trigger → whisper transcribe (off-thread) → TranscriptSegment
 2. **Transcript buffering**: App receives TranscriptChunk → updates panel, persists to disk, appends to DigestState.buffer
 3. **Digest trigger**: When buffer >= min_lines AND elapsed >= min_interval, or buffer >= max_lines (force) → launch async digest task
@@ -109,9 +118,17 @@ Always uses `MixedAudioSource` (mic + system audio blended, 0.5 attenuation anti
 - **SessionController** (L3) owns all business state (DigestState, segments, latest_digest, user_context); App (L4) is thin compose + routing
 - **DependencyContainer** (L4) is the composition root — inject fakes for testing
 - **Template picker**: Screen pushed by the shell before a session; selects the template that configures the session
+- **Template builder**: `TemplateBuilderApp` creates a template, or edits one when it gets `base_template` (picker key `a` returns `EditTemplateRequest`). Edit mode uses its own system prompt with the newest accepted version, asks before it changes anything, and drops accepted JSON from the history. `diff_templates` (L2) lists the changed fields after each version. It loads the `--config` file and builds its client with `DependencyContainer.resolve_llm_client`, so provider plugins work. LLM calls stop after `LLM_TIMEOUT_S`
 - **Session picker**: Screen for `view`; lists saved session directories and loops back after each ViewApp exit
 - **Single shell**: The kiosk runs one `ShellApp`. The welcome picker, pickers, and mode UIs are Textual Screens, so switching modes does not tear down and rebuild the terminal app. `ShellScreen.run()` runs one Screen on a minimal host for standalone commands and tests
 - **Session context**: User-editable text area in the digest column; included in digest prompts and persisted on final digest
+- **Fault tolerance in a live session**: A Textual handler or worker that raises ends the whole app, including thread workers (`exit_on_error=True`). Session code catches at each boundary instead: disk writes go through `SessionController._persist` and warn once; digest workers turn any exception into a failed digest; the diarization worker skips a failed pass. Transcript text and speaker names are markup-escaped before rendering. `tests/l4_frameworks_and_drivers/apps/test_record_app_faults.py` drives each fault into a running `RecordApp`
+- **Digest workers**: Periodic and final digests share the `digest` worker group, so a final digest replaces a running one. A generation counter lets only the newest worker clear `_digest_running`. Each digest removes its own prompt by identity on failure or cancellation
+- **Whisper subprocess recovery**: A timeout or dead pipe kills the child, so a late reply can never be read as the next chunk's result. A chunk that hit a dead child is retried once on a fresh child; a timed-out chunk is not
+- **Crash evidence and last-resort net**: `SessionHostApp` (base of `ShellApp` and the standalone host) logs any unexpected exception with its traceback to the session `debug.log`, shows a toast, and keeps running. `ShellScreen._dispatch_message` keeps a screen's message loop alive after a handler raises. More than `ERROR_BURST_LIMIT` errors in `ERROR_BURST_WINDOW_S` means an error loop, so the session ends cleanly instead. `faulthandler` writes native crashes into the same file
+- **Shutdown signals**: SIGTERM and SIGHUP stop audio, save the session context, and exit after the audio flush (at most `SHUTDOWN_GRACE_S`). The final LLM digest is skipped. The handler is a `signal.signal` handler, not an asyncio one: it arms the exit watchdog before the event loop runs, so a hung loop still exits
+- **Preflight**: Every record entry point (kiosk shell, `record`, `--headless`) runs `preflight.py` first. Checks use the objects the session then reuses: the same LLM client, and the same transcriber, so the model loaded by preflight carries into the session (`SubprocessWhisperTranscriber.load_model` is a no-op for a loaded path). The LLM check sends one tiny request, which catches auth errors and usage limits. A failed AI check or a mic sending exact zeros offers "Start anyway" (an AI failure starts transcript-only); every other failure blocks. Headless exits on a hard failure and keeps transcript-only for an AI failure
+- **Threads never wait on the event loop**: Check threads update `PreflightScreen` with `post_message`, not `call_from_thread`. With `call_from_thread`, a real start hung with the loop thread waiting on a lock; a posted message never makes a worker wait for the loop
 - **Plugin system**: External packages register CLI subcommands via Python `entry_points` (group `lazy_take_notes.plugins`). Plugins import shared helpers from `lazy_take_notes.plugin_api` — this is the stable public surface
 
 ## Model Assets
@@ -124,6 +141,7 @@ Models and the diarization runtime download on demand and are verified before us
 - `hf_model_resolver.py` is a thin adapter over the store. It keeps the `ModelResolver` interface for workers and plugins.
 - `nemo_speech_diarizer.py` resolves paths in this order: explicit config path, `LTN_NEMO_*` env, then the managed cache. It never downloads during a session.
 - The store adopts matching files from the old `pywhispercpp` and `~/.cache/nemotron-diarization` locations. It never deletes the originals.
+- A speech model name resolves to a catalog asset, an `hf://` URI, a file path, or a pywhispercpp name (pywhispercpp downloads those itself). Any other name raises `ModelResolutionError`: pywhispercpp would load no model and the whisper child would die on the first chunk.
 
 ## Settings
 

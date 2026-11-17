@@ -162,10 +162,9 @@ class TestSubprocessWhisperTranscriberTranscribe:
             with pytest.raises(RuntimeError, match='Timeout'):
                 t.transcribe(np.zeros(16000, dtype=np.float32), language='en')
 
-    def test_transcribe_raises_on_eof(self):
+    def test_transcribe_raises_when_the_child_dies_twice(self):
         ctx, parent_conn, process = _make_ctx([{'status': 'ready'}])
-        parent_conn.poll.side_effect = [True, True]
-        parent_conn.recv.side_effect = [{'status': 'ready'}, EOFError]
+        parent_conn.recv.side_effect = [{'status': 'ready'}, EOFError, {'status': 'ready'}, EOFError]
         with patch(
             'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
             return_value=ctx,
@@ -315,3 +314,141 @@ class TestCloseEdgeCases:
             t.close()
 
         assert t._conn is None
+
+
+def _two_process_ctx(first_responses: list, second_responses: list):
+    """mp context whose first and second spawns get separate pipes and processes."""
+    conns, processes = [], []
+    for responses in (first_responses, second_responses):
+        conn = MagicMock()
+        conn.poll.return_value = True
+        conn.recv.side_effect = responses
+        process = MagicMock()
+        process.is_alive.return_value = True
+        conns.append(conn)
+        processes.append(process)
+    ctx = MagicMock()
+    ctx.Pipe.side_effect = [(conns[0], MagicMock()), (conns[1], MagicMock())]
+    ctx.Process.side_effect = processes
+    return ctx, conns, processes
+
+
+_SEG = TranscriptSegment(text='fresh', wall_start=0.0, wall_end=1.0)
+_AUDIO = np.zeros(16000, dtype=np.float32)
+
+
+class TestSubprocessRecovery:
+    def test_a_timed_out_call_kills_the_child_and_the_next_call_uses_a_fresh_one(self):
+        first = [{'status': 'ready'}]
+        ctx, conns, processes = _two_process_ctx(first, [{'status': 'ready'}, {'status': 'ok', 'segments': [_SEG]}])
+        conns[0].poll.side_effect = [True, False]
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
+            return_value=ctx,
+        ):
+            t = SubprocessWhisperTranscriber()
+            t.load_model('/fake/model.bin')
+            with pytest.raises(RuntimeError):
+                t.transcribe(_AUDIO, language='en')
+
+            processes[0].terminate.assert_called_once()
+            conns[0].close.assert_called()
+
+            assert t.transcribe(_AUDIO, language='en') == [_SEG]
+
+        assert ctx.Process.call_count == 2
+
+    def test_a_late_reply_from_a_timed_out_child_is_never_read(self):
+        stale = {'status': 'ok', 'segments': [TranscriptSegment(text='stale', wall_start=0.0, wall_end=1.0)]}
+        ctx, conns, _processes = _two_process_ctx(
+            [{'status': 'ready'}, stale], [{'status': 'ready'}, {'status': 'ok', 'segments': [_SEG]}]
+        )
+        conns[0].poll.side_effect = [True, False]
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
+            return_value=ctx,
+        ):
+            t = SubprocessWhisperTranscriber()
+            t.load_model('/fake/model.bin')
+            with pytest.raises(RuntimeError, match='Timeout'):
+                t.transcribe(_AUDIO, language='en')
+
+            assert t.transcribe(_AUDIO, language='en') == [_SEG]
+
+    def test_a_failed_respawn_raises_and_leaves_no_child(self):
+        ctx, conns, processes = _two_process_ctx(
+            [{'status': 'ready'}, EOFError], [{'status': 'error', 'error': 'model gone'}]
+        )
+        with patch(
+            'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
+            return_value=ctx,
+        ):
+            t = SubprocessWhisperTranscriber()
+            t.load_model('/fake/model.bin')
+            with pytest.raises(RuntimeError, match='model gone'):
+                t.transcribe(_AUDIO, language='en')
+
+        processes[1].terminate.assert_called_once()
+
+
+def test_a_pipe_that_fails_to_close_still_kills_the_child():
+    ctx, conns, processes = _two_process_ctx(
+        [{'status': 'ready'}, EOFError], [{'status': 'ready'}, {'status': 'ok', 'segments': [_SEG]}]
+    )
+    conns[0].close.side_effect = OSError(9, 'Bad file descriptor')
+    with patch(
+        'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
+        return_value=ctx,
+    ):
+        t = SubprocessWhisperTranscriber()
+        t.load_model('/fake/model.bin')
+        assert t.transcribe(_AUDIO, language='en') == [_SEG]
+
+    processes[0].terminate.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', ['eof', 'broken_pipe'])
+def test_a_chunk_that_hits_a_dead_child_is_retried_on_a_fresh_one(failure):
+    ctx, conns, processes = _two_process_ctx(
+        [{'status': 'ready'}, EOFError], [{'status': 'ready'}, {'status': 'ok', 'segments': [_SEG]}]
+    )
+    if failure == 'broken_pipe':
+        conns[0].recv.side_effect = [{'status': 'ready'}]
+        conns[0].send.side_effect = BrokenPipeError(32, 'Broken pipe')
+    with patch(
+        'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context',
+        return_value=ctx,
+    ):
+        t = SubprocessWhisperTranscriber()
+        t.load_model('/fake/model.bin')
+
+        assert t.transcribe(_AUDIO, language='en') == [_SEG]
+
+    processes[0].terminate.assert_called_once()
+    assert conns[1].send.call_count == 1
+
+
+class TestModelReuse:
+    """Preflight loads the model; the session must not load it a second time."""
+
+    _CTX = 'lazy_take_notes.l3_interface_adapters.gateways.subprocess_whisper_transcriber.mp.get_context'
+
+    def test_loading_the_same_model_into_a_live_child_is_a_no_op(self):
+        ctx, _parent, process = _make_ctx([{'status': 'ready'}])
+        process.is_alive.return_value = True
+        with patch(self._CTX, return_value=ctx):
+            transcriber = SubprocessWhisperTranscriber()
+            transcriber.load_model('/fake/model.bin')
+            transcriber.load_model('/fake/model.bin')
+        assert ctx.Process.call_count == 1
+
+    def test_a_different_model_or_a_dead_child_loads_again(self):
+        ctx, parent, process = _make_ctx([{'status': 'ready'}] * 3)
+        process.is_alive.return_value = True
+        with patch(self._CTX, return_value=ctx):
+            transcriber = SubprocessWhisperTranscriber()
+            transcriber.load_model('/fake/a.bin')
+            transcriber.load_model('/fake/b.bin')
+            process.is_alive.return_value = False
+            transcriber.load_model('/fake/b.bin')
+        assert ctx.Process.call_count == 3

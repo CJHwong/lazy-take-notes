@@ -620,6 +620,39 @@ class TestDeleteTemplate:
             assert picker._templates == original
 
 
+class TestEditWithAI:
+    """[a] hands the highlighted template to the LLM builder."""
+
+    @pytest.mark.asyncio
+    async def test_a_returns_an_edit_request_for_the_highlighted_template(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import EditTemplateRequest
+
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.press('tab')
+            await pilot.pause()
+            name = picker._current_name
+            await pilot.press('a')
+            await pilot.pause()
+        assert name
+        assert picker.return_value == EditTemplateRequest(name)
+
+    @pytest.mark.asyncio
+    async def test_a_types_into_the_search_box(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.press('a')
+            await pilot.pause()
+            assert picker.query_one(Input).value == 'a'
+            assert picker.return_value is None
+
+    @pytest.mark.asyncio
+    async def test_the_footer_shows_the_key(self):
+        picker = TemplatePicker()
+        async with picker.run_test():
+            assert '[a] Edit with AI' in picker._footer_text()
+
+
 class TestEditTemplateKeyAndSuspend:
     @pytest.mark.asyncio
     async def test_e_key_fires_edit_from_list(self, monkeypatch):
@@ -801,3 +834,14 @@ class TestBuiltinTemplatesNoticeIntegration:
             await pilot.pause()
             assert not flag.exists()
             assert not isinstance(picker.app.screen, BuiltinTemplatesNotice)
+
+
+class TestTemplateItemMarkup:
+    def test_markup_like_display_name_renders_literally(self):
+        from textual.content import Content
+
+        item = tp_mod.TemplateItem('mine', 'en', 'Retro [/INST] notes', is_user=True)
+
+        rendered = Content.from_markup(item._label_text).plain
+        assert 'Retro [/INST] notes' in rendered
+        assert '[user]' in rendered

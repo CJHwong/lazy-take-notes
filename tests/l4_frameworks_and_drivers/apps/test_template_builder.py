@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from textual.widgets import Input
+from textual.widgets import Input, Static
 
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.template_builder_use_case import BuilderResult, TemplateBuildUseCase
@@ -314,6 +314,51 @@ class TestAnimateThinking:
 # ── _do_generate error paths ────────────────────────────────────────────────
 
 
+class TestThinkingIndicator:
+    @pytest.mark.asyncio
+    async def test_it_is_gone_once_the_reply_is_shown(self):
+        use_case, _ = _make_fake_use_case('What language?')
+        app = TemplateBuilderApp()
+        app._use_case = use_case
+        app._model = 'test-model'
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _send(app, pilot, 'hello')
+            log_text = str(app.query_one('#tb-chat-log', Static).render())
+            assert 'What language?' in log_text
+            assert 'Thinking' not in log_text
+
+
+class TestLlmTimeout:
+    """A stuck LLM call must end, so the user can send the message again."""
+
+    @pytest.mark.asyncio
+    async def test_a_call_without_an_answer_ends_with_a_retry_hint(self, monkeypatch):
+        import asyncio
+
+        from lazy_take_notes.l4_frameworks_and_drivers.apps import template_builder
+
+        class HungLLM(FakeLLMClient):
+            async def chat(self, model, messages):
+                await asyncio.sleep(30)
+
+        monkeypatch.setattr(template_builder, 'LLM_TIMEOUT_S', 0.05)
+        use_case, _ = _make_fake_use_case('unused')
+        use_case.llm_client = HungLLM()
+        app = TemplateBuilderApp()
+        app._use_case = use_case
+        app._model = 'test-model'
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _send(app, pilot, 'hello')
+            for _ in range(10):
+                await pilot.pause(0.02)
+            log_text = str(app.query_one('#tb-chat-log', Static).render())
+            assert 'did not answer' in log_text
+            assert not app.query_one('#tb-input', Input).disabled
+            assert app._history == []  # the retry starts clean
+
+
 class TestDoGenerateErrors:
     @pytest.mark.asyncio
     async def test_use_case_none_shows_error(self):
@@ -451,6 +496,7 @@ _INFRA_CONFIG_MOD = 'lazy_take_notes.l4_frameworks_and_drivers.config'
 _OLLAMA_MOD = 'lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client'
 _OPENAI_MOD = 'lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client'
 _USE_CASE_MOD = 'lazy_take_notes.l2_use_cases.template_builder_use_case'
+_RESOLVE_LLM = 'lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer.resolve_llm_client'
 
 
 def _patch_ensure_use_case_deps(
@@ -586,6 +632,100 @@ class TestEnsureUseCase:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert app._ensure_use_case() is sentinel
+
+
+def _editor(response: str) -> tuple[TemplateBuilderApp, FakeLLMClient]:
+    base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+    fake_llm = FakeLLMClient(response=response)
+    app = TemplateBuilderApp(base_template=base, base_key='standup')
+    app._use_case = TemplateBuildUseCase(llm_client=fake_llm, example_template=base, base_template=base)
+    app._model = 'test-model'
+    return app, fake_llm
+
+
+async def _send(app: TemplateBuilderApp, pilot, text: str = 'build me a template') -> None:
+    app.query_one('#tb-input', Input).value = text
+    await pilot.press('enter')
+    for _ in range(10):
+        await pilot.pause()
+
+
+class TestEditMode:
+    """[a] in the picker opens the builder on an existing template."""
+
+    @pytest.mark.asyncio
+    async def test_it_opens_on_the_template_with_nothing_to_save(self):
+        app, _llm = _editor('unused')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert 'Editing: Test Template' in str(app.query_one('#tb-header', Static).render())
+            assert app._current_template is not None
+            with patch.object(app, 'dismiss') as dismiss:
+                await pilot.press('escape')  # nothing changed, so no unsaved-changes prompt
+                await pilot.pause()
+            dismiss.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_a_new_version_lists_what_changed(self):
+        edited = {**_VALID_TEMPLATE_DICT, 'system_prompt': 'Be terse.'}
+        app, _llm = _editor(f'Done.\n\n```json\n{json.dumps(edited)}\n```')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _send(app, pilot, 'yes')
+            log_text = str(app.query_one('#tb-chat-log', Static).render())
+            assert 'Changed: system prompt' in log_text
+            assert log_text.index('Done.') < log_text.index('Changed: system prompt')  # the list comes last
+            assert app._current_template is not None
+            assert app._current_template.system_prompt == 'Be terse.'
+            assert not app._saved
+
+    @pytest.mark.asyncio
+    async def test_save_suggests_the_original_name(self):
+        app, _llm = _editor('unused')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            assert app.app.screen.query_one('#save-input', Input).value == 'standup'
+
+    def test_the_use_case_is_built_on_the_template(self):
+        base = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        app = TemplateBuilderApp(base_template=base, base_key='standup')
+        with (
+            patch(f'{_CONFIG_LOADER_MOD}.YamlConfigLoader') as loader,
+            patch(f'{_TEMPLATE_LOADER_MOD}.YamlTemplateLoader') as templates,
+            patch(_RESOLVE_LLM, MagicMock(return_value=FakeLLMClient())),
+        ):
+            loader.return_value.load.return_value = {}
+            templates.return_value.load.return_value = base
+            use_case = app._ensure_use_case()  # noqa: SLF001 -- unit under test
+        assert use_case.current_template is base
+
+
+class TestBuilderUsesTheSessionConfig:
+    """The builder talks to the same LLM the session would: same file, same provider."""
+
+    def _build(self, app, raw, resolve):
+        with (
+            patch(f'{_CONFIG_LOADER_MOD}.YamlConfigLoader') as loader,
+            patch(f'{_TEMPLATE_LOADER_MOD}.YamlTemplateLoader') as templates,
+            patch(_RESOLVE_LLM, resolve),
+        ):
+            loader.return_value.load.return_value = raw
+            templates.return_value.load.return_value = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+            use_case = app._ensure_use_case()  # noqa: SLF001 -- unit under test
+        return loader, use_case
+
+    def test_the_config_path_is_loaded(self):
+        loader, _use_case = self._build(TemplateBuilderApp(config_path='/custom/config.yaml'), {}, MagicMock())
+        loader.return_value.load.assert_called_once_with('/custom/config.yaml')
+
+    def test_a_plugin_provider_is_used(self):
+        plugin_client = FakeLLMClient()
+        resolve = MagicMock(return_value=plugin_client)
+        _loader, use_case = self._build(TemplateBuilderApp(), {'llm_provider': 'my-plugin'}, resolve)
+        assert resolve.call_args.args[0].llm_provider == 'my-plugin'
+        assert use_case.llm_client is plugin_client
 
 
 # ── _update_preview tests ───────────────────────────────────────────────────
@@ -752,3 +892,71 @@ class TestSlugifyEdgeCases:
 
     def test_whitespace_only(self):
         assert _slugify('   ') == 'custom_template'
+
+
+class _RaisingLLM(FakeLLMClient):
+    async def chat(self, model, messages):
+        raise ConnectionError('ollama is down')
+
+
+class TestTemplateBuilderFaults:
+    @pytest.mark.asyncio
+    async def test_llm_exception_shows_error_and_keeps_running(self):
+        example = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+        app = TemplateBuilderApp()
+        app._use_case = TemplateBuildUseCase(llm_client=_RaisingLLM(), example_template=example)
+        app._model = 'test-model'
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _send(app, pilot)
+
+            assert any('ollama is down' in line for line in app._chat_lines)
+            assert app._busy is False
+            assert app.query_one('#tb-input', Input).disabled is False
+
+    @pytest.mark.asyncio
+    async def test_config_load_failure_shows_error(self):
+        app = TemplateBuilderApp()
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch(
+                'lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader.YamlConfigLoader.load',
+                side_effect=ValueError('bad yaml'),
+            ):
+                await _send(app, pilot)
+
+            assert any('bad yaml' in line for line in app._chat_lines)
+
+    @pytest.mark.asyncio
+    async def test_markup_like_text_renders_literally(self):
+        use_case, _ = _make_fake_use_case('Sure [/INST] here [bold]x[/b]')
+        app = TemplateBuilderApp()
+        app._use_case = use_case
+        app._model = 'test-model'
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await _send(app, pilot, 'use [/x] tags')
+
+            rendered = str(app.query_one('#tb-chat-log').render())
+            assert 'use [/x] tags' in rendered
+            assert 'Sure [/INST] here' in rendered
+
+    @pytest.mark.asyncio
+    async def test_save_failure_notifies(self):
+        app = TemplateBuilderApp()
+        app._current_template = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch(
+                'lazy_take_notes.l3_interface_adapters.gateways.template_writer.save_user_template',
+                side_effect=PermissionError('read-only'),
+            ):
+                app._on_save_name('mine')
+                await pilot.pause()
+
+            assert app._saved is False
+            assert any('read-only' in str(n.message) for n in app.app._notifications)

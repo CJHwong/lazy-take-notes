@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -53,14 +54,23 @@ class RunDigestUseCase:
             state.prompt_tokens,
         )
 
-        prompt = build_digest_prompt(
-            template,
-            buffer_lines if buffer_lines is not None else state.buffer,
-            is_final=is_final,
-            full_transcript=full_transcript,
-            user_context=user_context,
-        )
-        state.messages.append(ChatMessage(role='user', content=prompt))
+        # A hand-edited user template is only validated by the template builder,
+        # so a bad placeholder must fail this digest, not the whole session.
+        try:
+            prompt = build_digest_prompt(
+                template,
+                buffer_lines if buffer_lines is not None else state.buffer,
+                is_final=is_final,
+                full_transcript=full_transcript,
+                user_context=user_context,
+            )
+        except (KeyError, IndexError, ValueError) as e:
+            state.consecutive_failures += 1
+            err = f'Template error: {type(e).__name__}: {e}'
+            log.error(err, exc_info=True)
+            return DigestResult(error=err)
+        prompt_message = ChatMessage(role='user', content=prompt)
+        state.messages.append(prompt_message)
 
         try:
             resp = await self._llm.chat(model=model, messages=state.messages)
@@ -69,14 +79,19 @@ class RunDigestUseCase:
 
             if not raw.strip():
                 state.consecutive_failures += 1
-                state.messages.pop()
+                _remove_prompt(state, prompt_message)
                 err = 'Empty response from LLM'
                 log.warning(err)
                 return DigestResult(error=err)
 
+        except asyncio.CancelledError:
+            # A newer digest replaced this one. Drop the unanswered prompt so the
+            # history keeps strict user/assistant pairs.
+            _remove_prompt(state, prompt_message)
+            raise
         except Exception as e:
             state.consecutive_failures += 1
-            state.messages.pop()
+            _remove_prompt(state, prompt_message)
             err = f'LLM error: {type(e).__name__}: {e}'
             log.error(err, exc_info=True)
             return DigestResult(error=err)
@@ -95,6 +110,18 @@ class RunDigestUseCase:
         )
 
         return DigestResult(data=raw.strip())
+
+
+def _remove_prompt(state: DigestState, prompt_message: ChatMessage) -> None:
+    """Remove this digest's own prompt by identity.
+
+    A replacing digest may have appended its prompt after this one, so the
+    last message is not necessarily ours.
+    """
+    for index in range(len(state.messages) - 1, -1, -1):
+        if state.messages[index] is prompt_message:
+            del state.messages[index]
+            return
 
 
 def should_trigger_digest(

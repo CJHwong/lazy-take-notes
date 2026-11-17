@@ -5,7 +5,7 @@ from __future__ import annotations
 import ollama as ollama_sync
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
-from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse
+from lazy_take_notes.l2_use_cases.ports.llm_client import LLM_REQUEST_TIMEOUT_S, ChatResponse
 
 
 class OllamaLLMClient:
@@ -15,7 +15,7 @@ class OllamaLLMClient:
         self._host = host
 
     async def chat(self, model: str, messages: list[ChatMessage]) -> ChatResponse:
-        client = ollama_sync.AsyncClient(host=self._host)
+        client = ollama_sync.AsyncClient(host=self._host, timeout=LLM_REQUEST_TIMEOUT_S)
         resp = await client.chat(model=model, messages=[m.model_dump() for m in messages])
         return ChatResponse(
             content=resp.message.content or '',
@@ -23,7 +23,7 @@ class OllamaLLMClient:
         )
 
     async def chat_single(self, model: str, prompt: str) -> str:
-        client = ollama_sync.AsyncClient(host=self._host)
+        client = ollama_sync.AsyncClient(host=self._host, timeout=LLM_REQUEST_TIMEOUT_S)
         resp = await client.chat(
             model=model,
             messages=[{'role': 'user', 'content': prompt}],
