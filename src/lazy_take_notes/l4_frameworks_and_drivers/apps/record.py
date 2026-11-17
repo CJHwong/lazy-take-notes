@@ -19,6 +19,7 @@ from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
+    AudioHealth,
     AudioLevel,
     AudioWorkerStatus,
     ModelDownloadProgress,
@@ -27,6 +28,9 @@ from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import Con
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 
 log = logging.getLogger('ltn.app')
+
+_MIC_ALERTS = {'lost': 'MIC LOST', 'silent': 'MIC SILENT'}
+_SYSTEM_ALERTS = {'lost': 'SYS LOST'}
 
 
 class RecordApp(BaseApp):
@@ -59,6 +63,10 @@ class RecordApp(BaseApp):
         self._audio_shutdown = threading.Event()
         self._audio_stopped = False
         self._pending_quit = False
+        self._audio_worker_done = False
+        self._shutdown_requested = False
+        self._audio_health = ('ok', 'ok', 'ok')
+        self._audio_notice = ''
 
     def _hints_for_state(self, state: str) -> str:
         if state == 'recording':
@@ -189,7 +197,54 @@ class RecordApp(BaseApp):
     def _cancel_audio_workers(self) -> None:
         self._audio_shutdown.set()
 
+    def stop_for_shutdown(self) -> bool:
+        """End the session for a shutdown signal. Returns True while audio still flushes."""
+        self._shutdown_requested = True
+        self._audio_stopped = True
+        self._cancel_audio_workers()
+        self._controller.save_context_now()
+        return not self._audio_worker_done
+
     # --- Message Handlers ---
+
+    def on_audio_health(self, message: AudioHealth) -> None:
+        previous = self._audio_health
+        self._audio_health = (message.mic, message.system, message.processing)
+        alerts = [
+            _MIC_ALERTS.get(message.mic, ''),
+            _SYSTEM_ALERTS.get(message.system, ''),
+            'AUDIO ERROR' if message.processing == 'error' else '',
+        ]
+        self.query_one('#status-bar', StatusBar).audio_alert = '  '.join(alert for alert in alerts if alert)
+        for name, before, after in (
+            ('Microphone', previous[0], message.mic),
+            ('System audio', previous[1], message.system),
+        ):
+            self._announce_health(name, before, after, message.detail)
+        if message.processing == 'error' and previous[2] != 'error':
+            self.notify(
+                f'Audio processing keeps failing ({message.detail}). Nothing is recorded until it recovers.',
+                severity='error',
+                timeout=20,
+            )
+        elif message.processing == 'ok' and previous[2] == 'error':
+            self.notify('Audio processing recovered.', severity='information', timeout=8)
+        if message.notice and message.notice != self._audio_notice:
+            self.notify(message.notice, severity='warning', timeout=15)
+        self._audio_notice = message.notice
+
+    def _announce_health(self, name: str, before: str, after: str, detail: str) -> None:
+        if after == before:
+            return
+        if after == 'lost':
+            reason = f' ({detail})' if detail else ''
+            self.notify(f'{name} lost{reason}. Reconnecting; recording continues.', severity='error', timeout=20)
+        elif after == 'silent':
+            self.notify(
+                f'{name} sends no signal at all. Check its input volume or mute switch.', severity='warning', timeout=20
+            )
+        elif before in ('lost', 'silent'):
+            self.notify(f'{name} is back.', severity='information', timeout=8)
 
     def on_audio_worker_status(self, message: AudioWorkerStatus) -> None:
         bar = self.query_one('#status-bar', StatusBar)
@@ -208,6 +263,10 @@ class RecordApp(BaseApp):
             self.app.screen.refresh(layout=True)
             self._update_hints('recording')
         elif message.status == 'stopped':
+            self._audio_worker_done = True
+            if self._shutdown_requested:
+                self.app.exit()
+                return
             bar.recording = False
             bar.stopped = True
             bar.mic_muted = False

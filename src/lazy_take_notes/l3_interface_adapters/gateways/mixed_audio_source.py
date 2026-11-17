@@ -7,6 +7,7 @@ import math
 import queue
 import threading
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -22,10 +23,24 @@ log = logging.getLogger('ltn.audio.mixed')
 class MixedAudioSource:
     """Mix both sources while keeping a failed source from blocking its peer.
 
-    Silence remains valid audio. Only delivery failures trigger recovery.
+    Silence remains valid audio. Only delivery failures trigger recovery, and a
+    lost source is retried with backoff for as long as the stream is open: a
+    headset that reconnects after a minute rejoins the same recording.
     Excess queued audio is discarded with a warning to bound capture delay.
     Gain, microphone mute, and the peak limiter apply after source selection.
+
+    Health (``health``): ``lost`` while a source is being recovered. ``silent``
+    when the raw microphone sends exact zeros, which a real microphone never
+    does; a restart cannot fix that (input volume 0, a virtual device), so it
+    is reported only. The system tap also sends exact zeros when nothing plays,
+    so after a silent stretch ``test_tone`` plays an inaudible tone; a tap that
+    does not return it is treated as stalled and restarted.
     """
+
+    _restart_delays: tuple[float, ...] = (0.3, 1.0, 2.0, 5.0)
+    _zero_alarm_seconds = 3.0
+    _tone_after_seconds = 30.0
+    _tone_wait_seconds = 1.5
 
     def __init__(
         self,
@@ -34,7 +49,8 @@ class MixedAudioSource:
         *,
         silence_threshold: float = 0.01,
         max_mic_gain: float = 10.0,
-        dead_audio_seconds: float = 20.0,
+        dead_audio_seconds: float = 3.0,
+        test_tone: Callable[[], bool] | None = None,
     ) -> None:
         self._mic = mic
         self._system = system_audio
@@ -50,9 +66,12 @@ class MixedAudioSource:
         self._state_lock = threading.Lock()
         self._source_locks = (threading.Lock(), threading.Lock())
         self._errors: dict[bool, str] = {}
-        self._failed: set[bool] = set()
-        self._restart_delay = 0.3
-        self._max_restarts = 3
+        self._silent_mic = False
+        # Set when the tap swallowed the test tone; cleared only by a real sample,
+        # because a restarted tap delivers zeros that look healthy.
+        self._deaf_system = False
+        self._last_delivery = {True: 0.0, False: 0.0}
+        self._test_tone = test_tone
         self._system_generation = 0
         self._seen_system_generation = 0
         self._dropped_system_frames = 0
@@ -98,9 +117,29 @@ class MixedAudioSource:
 
     @property
     def exhausted(self) -> bool:
-        """Both sources stopped after their recovery attempts."""
+        """Never true: a lost source is retried until close()."""
+        return False
+
+    @property
+    def mic_notice(self) -> str:
+        """Set when the configured microphone is missing and another input is used."""
+        return getattr(self._mic, 'device_notice', '')
+
+    @property
+    def health(self) -> dict[str, str]:
         with self._state_lock:
-            return len(self._failed) == 2
+            mic_lost = True in self._errors or self._stalled(self._mic, True)
+            system_lost = False in self._errors or self._deaf_system or self._stalled(self._system, False)
+            mic = 'lost' if mic_lost else 'silent' if self._silent_mic else 'ok'
+        return {'mic': mic, 'system': 'lost' if system_lost else 'ok'}
+
+    def _stalled(self, source: AudioSource, is_mic: bool) -> bool:
+        """A reader stuck inside the source reports nothing, so judge it by delivery time."""
+        if not self._threads or not getattr(source, 'continuous_capture', False):
+            return False
+        if getattr(source, 'awaiting_permission', False):
+            return False
+        return time.monotonic() - self._last_delivery[is_mic] > self._dead_audio_seconds
 
     def open(self, sample_rate: int, channels: int) -> None:
         if self._threads:
@@ -114,7 +153,9 @@ class MixedAudioSource:
         self._dropped_system_frames = 0
         self._last_system_drop_log = 0.0
         self._errors.clear()
-        self._failed.clear()
+        self._silent_mic = False
+        self._deaf_system = False
+        self._last_delivery = {True: time.monotonic(), False: time.monotonic()}
         self._clear_buffers()
         try:
             self._mic.open(sample_rate, channels)
@@ -138,10 +179,14 @@ class MixedAudioSource:
 
     def _reader(self, source: AudioSource, destination: AudioBuffer, is_mic: bool) -> None:
         last_delivery = time.monotonic()
+        watch = _ZeroWatch()
         while not self._stop.is_set():
             try:
                 chunk = self._read_source(source, last_delivery)
+                if chunk is not None and chunk.size:
+                    self._watch_signal(watch, chunk, is_mic)
             except Exception as error:
+                watch = _ZeroWatch()
                 chunk = self._recover(source, destination, is_mic, error)
                 if chunk is None:
                     return
@@ -151,8 +196,61 @@ class MixedAudioSource:
             if self._stop.is_set():
                 return
             last_delivery = time.monotonic()
+            self._last_delivery[is_mic] = last_delivery
             self._set_error(is_mic, None)
             destination.put(chunk)
+            self._ready.set()
+
+    def _watch_signal(self, watch: _ZeroWatch, chunk: np.ndarray, is_mic: bool) -> None:
+        """Track exact-zero stretches; raise when the system tap swallowed the test tone."""
+        now = time.monotonic()
+        if chunk.any():
+            if watch.tone_sent_at is not None:
+                log.info('system audio confirmed: signal after the test tone')
+            watch.reset()
+            if is_mic:
+                self._set_silent_mic(False)
+            else:
+                self._set_deaf_system(False)
+            return
+        if watch.zero_since is None:
+            watch.zero_since = now
+        silent_for = now - watch.zero_since
+        if is_mic:
+            if silent_for >= self._zero_alarm_seconds:
+                self._set_silent_mic(True)
+            return
+        if self._test_tone is None:
+            return
+        if watch.tone_sent_at is None:
+            if silent_for >= self._tone_after_seconds and self._play_tone():
+                log.info('system audio silent for %.0fs; test tone played', silent_for)
+                watch.tone_sent_at = time.monotonic()
+            return
+        if now - watch.tone_sent_at >= self._tone_wait_seconds:
+            self._set_deaf_system(True)
+            raise RuntimeError('system audio did not pick up the test tone')
+
+    def _set_deaf_system(self, deaf: bool) -> None:
+        with self._state_lock:
+            changed = self._deaf_system != deaf
+            self._deaf_system = deaf
+        if changed and not deaf:
+            log.info('system audio picked up signal again')
+
+    def _play_tone(self) -> bool:
+        try:
+            return bool(self._test_tone and self._test_tone())
+        except Exception:
+            log.warning('test tone failed to play; system audio check skipped', exc_info=True)
+            return False
+
+    def _set_silent_mic(self, silent: bool) -> None:
+        with self._state_lock:
+            changed = self._silent_mic != silent
+            self._silent_mic = silent
+        if changed:
+            log.warning('microphone sends exact zeros') if silent else log.info('microphone signal is back')
             self._ready.set()
 
     def _read_source(self, source: AudioSource, last_delivery: float) -> np.ndarray | None:
@@ -184,31 +282,24 @@ class MixedAudioSource:
     ) -> np.ndarray | None:
         label = 'mic' if is_mic else 'system'
         self._set_error(is_mic, error)
-        for attempt in range(self._max_restarts):
-            if self._stop.wait(self._restart_delay):
-                return None
-            log.warning('restarting %s audio source (attempt %d): %s', label, attempt + 1, error)
+        attempt = 0
+        while not self._stop.wait(self._restart_delay_for(attempt)):
+            attempt += 1
+            log.warning('restarting %s audio source (attempt %d): %s', label, attempt, error)
             try:
                 self._reopen(source, destination, is_mic)
                 chunk = self._wait_for_first_buffer(source)
                 if chunk is not None:
+                    log.info('%s audio source recovered after %d attempt(s)', label, attempt)
                     return chunk
                 error = RuntimeError('capture did not deliver a buffer after restart')
             except Exception as reopen_error:
                 error = reopen_error
             self._set_error(is_mic, error)
-        if self._stop.is_set():
-            return None
-        log.error('%s audio recovery failed: %s', label, error)
-        try:
-            with self._source_locks[int(is_mic)]:
-                source.close()
-        except Exception:
-            log.exception('failed to close %s audio source after recovery', label)
-        with self._state_lock:
-            self._failed.add(is_mic)
-        self._ready.set()
         return None
+
+    def _restart_delay_for(self, attempt: int) -> float:
+        return self._restart_delays[min(attempt, len(self._restart_delays) - 1)]
 
     def _reopen(self, source: AudioSource, destination: AudioBuffer, is_mic: bool) -> None:
         with self._source_locks[int(is_mic)]:
@@ -246,8 +337,6 @@ class MixedAudioSource:
             chunks = self._take_pending(self._mic_q)
             if chunks:
                 return np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
-            if self.exhausted:
-                return None
             with self._state_lock:
                 microphone_failed = True in self._errors
             system_pending = not self._sys_q.empty() or self._sys_buf.size
@@ -416,3 +505,15 @@ class MixedAudioSource:
         self._sys_buf = np.array([], dtype=np.float32)
         if errors:
             raise errors[0]
+
+
+class _ZeroWatch:
+    """Per-reader state for an exact-zero stretch and a pending test tone."""
+
+    def __init__(self) -> None:
+        self.zero_since: float | None = None
+        self.tone_sent_at: float | None = None
+
+    def reset(self) -> None:
+        self.zero_since = None
+        self.tone_sent_at = None

@@ -8,15 +8,160 @@ minimal host App.
 
 from __future__ import annotations
 
+import logging
+import os
+import signal
+import threading
+import time
+from collections import deque
 from typing import TypeVar
 
 from textual.app import App
 from textual.screen import Screen
+from textual.worker import WorkerFailed
 
 T = TypeVar('T')
 
+log = logging.getLogger('ltn.app')
 
-class _HostApp(App):
+# How long a shutdown signal waits for the audio worker to flush its last chunk.
+SHUTDOWN_GRACE_S = 3.0
+# Extra time for Textual's own shutdown before the watchdog ends the process.
+FORCE_EXIT_AFTER_S = 5.0
+# More unexpected errors than this inside the window means an error loop.
+ERROR_BURST_LIMIT = 5
+ERROR_BURST_WINDOW_S = 10.0
+
+
+def shutdown_signals() -> tuple[signal.Signals, ...]:
+    """SIGTERM and SIGHUP where the platform has them. Windows has no SIGHUP."""
+    names = ('SIGTERM', 'SIGHUP')
+    return tuple(getattr(signal, name) for name in names if hasattr(signal, name))
+
+
+def arm_exit_watchdog(signum: int) -> None:
+    """End the process if the clean shutdown hangs.
+
+    When the window closes, the terminal is gone and Textual's writer thread
+    dies; Textual's shutdown then blocks forever on its full write queue. By
+    the time this fires, the audio flush and context save have had their grace
+    period, so a hard exit loses nothing that was going to be saved.
+    """
+    watchdog = threading.Timer(SHUTDOWN_GRACE_S + FORCE_EXIT_AFTER_S, _force_exit, (signum,))
+    watchdog.daemon = True
+    watchdog.start()
+
+
+def _force_exit(signum: int) -> None:
+    log.error('Shutdown after %s did not finish; forcing exit', signal.Signals(signum).name)
+    for handler in logging.getLogger('ltn').handlers:
+        handler.flush()
+    os._exit(128 + signum)
+
+
+class SessionHostApp(App):
+    """Behaviour every host of a session screen needs, kiosk or standalone.
+
+    1. An unexpected exception goes to the session debug log with its full
+       traceback, the user sees an error toast, and the app keeps running: a
+       meeting recording must not end because of one bug. More than
+       ERROR_BURST_LIMIT errors within ERROR_BURST_WINDOW_S means something fails
+       on every redraw; then the session is ended cleanly instead.
+    2. SIGTERM and SIGHUP (window closed) end the session cleanly: the audio
+       worker flushes, the context is saved, and the app exits. The final LLM
+       digest is skipped because it can take minutes.
+    """
+
+    _error_times: deque[float]
+    _ending_for_errors = False
+
+    def _handle_exception(self, error: Exception) -> None:
+        # Textual wraps a worker exception in WorkerFailed without raising it,
+        # so the wrapper has no traceback. Log the original one.
+        cause = error.error if isinstance(error, WorkerFailed) else error
+        log.critical('Unexpected error; the session continues', exc_info=cause)
+        if not hasattr(self, '_error_times'):
+            self._error_times = deque(maxlen=ERROR_BURST_LIMIT + 1)
+        now = time.monotonic()
+        self._error_times.append(now)
+        storm = len(self._error_times) > ERROR_BURST_LIMIT and now - self._error_times[0] <= ERROR_BURST_WINDOW_S
+        if not storm:
+            self.notify(
+                f'Unexpected error: {type(cause).__name__}: {cause} (see debug.log). The session continues.',
+                severity='error',
+                timeout=15,
+            )
+            return
+        if self._ending_for_errors:
+            return
+        self._ending_for_errors = True
+        log.critical(
+            'Errors repeat %d times in %.0fs; ending the session cleanly',
+            len(self._error_times),
+            now - self._error_times[0],
+        )
+        self.end_sessions()
+
+    _previous_handlers: dict[int, object]
+    _watchdog_armed = False
+
+    def on_mount(self) -> None:
+        # signal.signal, not loop.add_signal_handler: an asyncio handler runs only
+        # when the loop turns, so a hung loop would ignore the closed window and
+        # keep the tap and whisper processes alive. This handler runs on the main
+        # thread even while it waits on a lock, and arms the exit watchdog first.
+        self._previous_handlers = {}
+        for signum in shutdown_signals():
+            try:
+                self._previous_handlers[signum] = signal.signal(signum, self._on_os_signal)
+            except (ValueError, OSError, RuntimeError) as e:
+                # Only the main thread can install handlers (tests, embedded hosts).
+                log.debug('No handler for %s: %s', signum, e)
+
+    def on_unmount(self) -> None:
+        for signum, previous in getattr(self, '_previous_handlers', {}).items():
+            try:
+                signal.signal(signum, previous)
+            except (ValueError, OSError, RuntimeError, TypeError) as e:
+                log.debug('Could not restore the handler for %s: %s', signum, e)
+        self._previous_handlers = {}
+
+    def _on_os_signal(self, signum: int, _frame) -> None:
+        self._arm_watchdog_once(signum)
+        loop = self._loop
+        if loop is None:
+            log.error('No event loop after %s; the watchdog will end the process', signal.Signals(signum).name)
+            return
+        try:
+            loop.call_soon_threadsafe(self.handle_shutdown_signal, signum)
+        except RuntimeError as e:
+            log.error('Event loop closed after %s: %s', signal.Signals(signum).name, e)
+
+    def _arm_watchdog_once(self, signum: int) -> None:
+        if self._watchdog_armed:
+            return
+        self._watchdog_armed = True
+        arm_exit_watchdog(signum)
+
+    def handle_shutdown_signal(self, signum: int) -> None:
+        log.warning('Received %s; ending the session without a final digest', signal.Signals(signum).name)
+        self._arm_watchdog_once(signum)
+        self.end_sessions()
+
+    def end_sessions(self) -> None:
+        """Stop every recording (audio flush, context save), then exit."""
+        waiting = False
+        for screen in self.screen_stack:
+            stop = getattr(screen, 'stop_for_shutdown', None)
+            if callable(stop) and stop():
+                waiting = True
+        if waiting:
+            self.set_timer(SHUTDOWN_GRACE_S, self.exit)
+        else:
+            self.exit()
+
+
+class _HostApp(SessionHostApp):
     """Minimal one-screen host for a standalone Screen."""
 
     def __init__(self, screen: Screen) -> None:
@@ -45,3 +190,13 @@ class ShellScreen(Screen[T]):
     def run_test(self, *args, **kwargs):
         self._host = _HostApp(self)
         return self._host.run_test(*args, **kwargs)
+
+    async def _dispatch_message(self, message):
+        # Textual ends a node's message loop after a handler raises. For a
+        # recording screen that would freeze transcript and audio updates, so
+        # report the error and keep the loop alive.
+        try:
+            return await super()._dispatch_message(message)
+        except Exception as error:
+            self.app._handle_exception(error)  # noqa: SLF001 -- route to the host's logging safety net
+            return None

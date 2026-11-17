@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import subprocess  # noqa: S404 -- used for fire-and-forget OS file manager launch
 import sys
 from pathlib import Path
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -17,6 +19,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.digest_panel import DigestPanel
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
+
+log = logging.getLogger('ltn.view')
 
 # ViewApp does NOT inherit from BaseApp — it doesn't need a controller,
 # template, digest workers, or quick actions. It's a standalone read-only shell.
@@ -56,25 +60,30 @@ class ViewApp(ShellScreen):
         # Load transcript — write raw lines directly; the saved file already
         # contains timestamps so we must NOT go through append_segments()
         # which would prepend a second [00:00:00] timestamp.
-        transcript_path = TRANSCRIPT.resolve(self._session_dir)
-        if transcript_path:
-            text = transcript_path.read_text(encoding='utf-8').strip()
-            if text:
-                panel = self.query_one('#transcript-panel', TranscriptPanel)
-                for line in text.splitlines():
-                    if line.strip():
-                        panel._all_text.append(line)
-                        panel.write(line)
+        text = self._read_saved(TRANSCRIPT.resolve(self._session_dir))
+        transcript_panel = self.query_one('#transcript-panel', TranscriptPanel)
+        for line in text.splitlines():
+            if line.strip():
+                transcript_panel._all_text.append(line)
+                # Saved lines hold raw whisper text, which can look like markup.
+                transcript_panel.write(escape(line))
 
-        # Load digest
-        digest_path = NOTES.resolve(self._session_dir)
-        if digest_path:
-            digest_text = digest_path.read_text(encoding='utf-8').strip()
-            if digest_text:
-                panel = self.query_one('#digest-panel', DigestPanel)
-                panel.update_digest(digest_text)
+        digest_text = self._read_saved(NOTES.resolve(self._session_dir))
+        if digest_text:
+            self.query_one('#digest-panel', DigestPanel).update_digest(digest_text)
 
         bar.stopped = True
+
+    def _read_saved(self, path: Path | None) -> str:
+        """Return the stripped file text, or '' after a toast when it cannot be read."""
+        if path is None:
+            return ''
+        try:
+            return path.read_text(encoding='utf-8').strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            log.error('Cannot read %s: %s', path, exc, exc_info=True)
+            self.notify(f'Cannot read {path.name}: {exc}', severity='error', markup=False, timeout=8)
+            return ''
 
     def action_open_session_dir(self) -> None:
         if sys.platform == 'darwin':
@@ -83,7 +92,11 @@ class ViewApp(ShellScreen):
             opener = 'explorer'
         else:
             opener = 'xdg-open'
-        subprocess.Popen([opener, str(self._session_dir)])  # noqa: S603 -- fixed arg list, not shell=True
+        try:
+            subprocess.Popen([opener, str(self._session_dir)])  # noqa: S603 -- fixed arg list, not shell=True
+        except OSError as exc:
+            log.error('Cannot open %s with %s: %s', self._session_dir, opener, exc, exc_info=True)
+            self.notify(f'Cannot open the session folder: {exc}', severity='error', markup=False)
 
     def action_quit_app(self) -> None:
         self.dismiss()

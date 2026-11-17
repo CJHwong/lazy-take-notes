@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.message import Message
@@ -41,6 +42,9 @@ def _count_dir_items(path: Path) -> str:
         return f'{_DIR_COUNT_CAP}+' if count > _DIR_COUNT_CAP else str(count)
     except PermissionError:
         return 'Permission denied'
+    except OSError as exc:
+        # The directory can vanish or turn into a file between listing and counting.
+        return f'Cannot read: {exc.strerror or exc}'
 
 
 class ParentItem(ListItem):
@@ -71,7 +75,7 @@ class FileItem(ListItem):
             self._stat = stat_result
             size_str = human_size(stat_result.st_size)
         self._size_str = size_str
-        self._label = f'{path.name}  [dim]{self._size_str}[/dim]'
+        self._label = f'{escape(path.name)}  [dim]{self._size_str}[/dim]'
 
     def compose(self) -> ComposeResult:
         yield Static(self._label, markup=True)
@@ -124,7 +128,7 @@ class FilePicker(SearchablePicker[Path]):
         yield Static('', id='sp-preview-info', markup=True)
 
     def _header_text(self) -> str:
-        return f'  Select Audio File  {self._current_dir}'
+        return f'  Select Audio File  {escape(str(self._current_dir))}'
 
     def _footer_text(self) -> str:
         return (
@@ -144,6 +148,9 @@ class FilePicker(SearchablePicker[Path]):
             children = list(self._current_dir.iterdir())
         except PermissionError:
             self._set_info('Permission denied')
+            return
+        except OSError as exc:
+            self._set_info(f'Cannot open {escape(str(self._current_dir))}: {escape(exc.strerror or str(exc))}')
             return
 
         dirs = sorted(
@@ -207,10 +214,10 @@ class FilePicker(SearchablePicker[Path]):
             # No directory being counted; invalidate any in-flight DirCountReady.
             self._highlighted_dir = None
             parent = self._current_dir.parent
-            self._set_info(f'[bold]..[/bold]\nParent directory\n{parent}')
+            self._set_info(f'[bold]..[/bold]\nParent directory\n{escape(str(parent))}')
         elif isinstance(item, DirItem):
             self._highlighted_dir = item.path
-            self._set_info(f'[bold]{item.path.name}/[/bold]\n(counting…)')
+            self._set_info(f'[bold]{escape(item.path.name)}/[/bold]\n(counting…)')
             self._start_dir_count(item.path)
         elif isinstance(item, FileItem):
             # File highlighted; any outstanding dir count is now stale.
@@ -225,7 +232,7 @@ class FilePicker(SearchablePicker[Path]):
             else:
                 modified = datetime.fromtimestamp(stat_result.st_mtime).strftime('%Y-%m-%d %H:%M')
                 size = human_size(stat_result.st_size)
-            self._set_info(f'[bold]{item.path.name}[/bold]\nSize: {size}\nModified: {modified}')
+            self._set_info(f'[bold]{escape(item.path.name)}[/bold]\nSize: {size}\nModified: {modified}')
 
     def _start_dir_count(self, path: Path) -> None:
         def _count() -> None:
@@ -237,11 +244,10 @@ class FilePicker(SearchablePicker[Path]):
     def on_file_picker_dir_count_ready(self, msg: DirCountReady) -> None:
         if msg.path != self._highlighted_dir:
             return  # stale result — user has moved on
-        item_name = msg.path.name
-        if msg.label == 'Permission denied':
-            self._set_info(f'[bold]{item_name}/[/bold]\nPermission denied')
-        else:
-            self._set_info(f'[bold]{item_name}/[/bold]\n{msg.label} items')
+        item_name = escape(msg.path.name)
+        # A count label starts with a digit; anything else is a read failure.
+        detail = f'{msg.label} items' if msg.label[:1].isdigit() else escape(msg.label)
+        self._set_info(f'[bold]{item_name}/[/bold]\n{detail}')
 
     def _set_info(self, text: str) -> None:
         self.query_one('#sp-preview-info', Static).update(text)

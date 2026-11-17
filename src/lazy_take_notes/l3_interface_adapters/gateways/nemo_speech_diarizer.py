@@ -42,6 +42,10 @@ class NemoSpeechDiarizer:
         self._preset = preset
         self._store = store
 
+    def resolve_paths(self) -> tuple[Path, Path]:
+        """Return the binary and model paths, or raise with the fix. Used by preflight."""
+        return self._resolve()
+
     def _resolve(self) -> tuple[Path, Path]:
         binary = self._resolve_one(str(self._binary), model_catalog.RUNTIME_ID, 'nemo-speech binary', 'LTN_NEMO_BINARY')
         model = self._resolve_one(

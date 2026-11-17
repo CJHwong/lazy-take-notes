@@ -10,6 +10,7 @@ import queue
 import struct
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -19,6 +20,7 @@ from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.transcribe_audio_use_case import TranscribeAudioUseCase
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
+    AudioHealth,
     AudioLevel,
     AudioWorkerStatus,
     TranscriptChunk,
@@ -78,33 +80,119 @@ class _StreamingWavWriter:
 def _start_processed_recorder(
     output_dir: Path,
     sample_rate: int,
+    on_error: Callable[[str], None] | None = None,
 ) -> tuple[queue.Queue, threading.Thread]:
     """Write processed float32 chunks (system/mixed audio) to a WAV file.
 
     Used for non-mic sources where _start_raw_recorder is not applicable.
     Send None into the returned queue to signal the writer to flush and close.
+
+    A failed open or write (full disk, removed folder) stops the WAV but not
+    the writer: it keeps draining the queue, so the unbounded queue cannot grow
+    for the rest of the session. *on_error* hears about the first failure.
     """
     wav_path = output_dir / 'recording.wav'
     rec_q: queue.Queue[np.ndarray | None] = queue.Queue()
 
+    def _fail(wav: _StreamingWavWriter | None, exc: OSError) -> None:
+        log.error('Recording to %s stopped: %s', wav_path, exc, exc_info=True)
+        if on_error is not None:
+            on_error(f'Audio recording stopped: {exc}. Transcription continues.')
+        if wav is not None:
+            try:
+                wav.close()
+            except OSError:
+                log.debug('closing a failed WAV file', exc_info=True)
+
     def _writer() -> None:
-        wav = _StreamingWavWriter(wav_path, sample_rate)
+        wav: _StreamingWavWriter | None = None
         try:
-            while True:
-                try:
-                    data = rec_q.get(timeout=0.5)
-                    if data is None:
-                        break
-                    pcm = np.clip(data, -1.0, 1.0)
-                    wav.write((pcm * 32767).astype(np.int16).tobytes())
-                except queue.Empty:  # pragma: no cover -- timing-dependent; queue.get timeout retry
-                    pass
-        finally:
+            wav = _StreamingWavWriter(wav_path, sample_rate)
+        except OSError as exc:
+            _fail(None, exc)
+        while True:
+            try:
+                data = rec_q.get(timeout=0.5)
+            except queue.Empty:  # pragma: no cover -- timing-dependent; queue.get timeout retry
+                continue
+            if data is None:
+                break
+            if wav is None:
+                continue
+            pcm = np.clip(data, -1.0, 1.0)
+            try:
+                wav.write((pcm * 32767).astype(np.int16).tobytes())
+            except OSError as exc:
+                _fail(wav, exc)
+                wav = None
+        if wav is not None:
             wav.close()
 
     writer = threading.Thread(target=_writer, daemon=True)
     writer.start()
     return rec_q, writer
+
+
+# Consecutive loop failures for this long mean nothing is being recorded.
+_LOOP_ALERT_AFTER_S = 1.0
+
+
+class _LoopHealth:
+    """Turns consecutive audio-loop failures into one persistent alert, and clears it."""
+
+    def __init__(self, post_message: Callable) -> None:
+        self._post = post_message
+        self._failing_since: float | None = None
+        self._failures = 0
+        self._alerted = False
+
+    def failed(self, error: Exception, health: tuple[str, str, str] | None) -> None:
+        now = time.monotonic()
+        self._failures += 1
+        if self._failing_since is None:
+            self._failing_since = now
+            log.error('Audio loop error; recording continues', exc_info=error)
+            self._post(
+                AudioWorkerStatus(status='warning', error=f'Audio processing error: {error}. Recording continues.')
+            )
+        elif self._failures % 100 == 0:
+            log.error('Audio loop still failing (%d in a row)', self._failures, exc_info=error)
+        if not self._alerted and now - self._failing_since >= _LOOP_ALERT_AFTER_S:
+            self._alerted = True
+            self._post(_health_message(health, processing='error', detail=str(error)))
+
+    def succeeded(self, health: tuple[str, str, str] | None) -> None:
+        if self._failing_since is None:
+            return
+        log.info('Audio loop recovered after %d failure(s)', self._failures)
+        self._failing_since = None
+        self._failures = 0
+        if self._alerted:
+            self._alerted = False
+            self._post(_health_message(health, processing='ok'))
+
+
+def _health_message(health: tuple[str, str, str] | None, *, processing: str, detail: str = '') -> AudioHealth:
+    mic, system, notice = health or ('ok', 'ok', '')
+    return AudioHealth(mic=mic, system=system, detail=detail, notice=notice, processing=processing)
+
+
+def _report_health(
+    audio_source: AudioSource,
+    source_errors: set[str],
+    reported: tuple[str, str, str] | None,
+    post_message: Callable,
+) -> tuple[str, str, str] | None:
+    """Post AudioHealth when a source's state changes. Retries alone post nothing."""
+    health = getattr(audio_source, 'health', None)
+    if health is None:
+        return reported
+    current = (health['mic'], health['system'], getattr(audio_source, 'mic_notice', ''))
+    if current != reported:
+        log.info('audio health: mic=%s system=%s %s', *current)
+        detail = '; '.join(sorted(source_errors))
+        post_message(AudioHealth(mic=current[0], system=current[1], detail=detail, notice=current[2]))
+    return current
 
 
 def run_audio_worker(
@@ -165,6 +253,7 @@ def run_audio_worker(
 
     all_segments: list[TranscriptSegment] = []
     reported_source_errors: set[str] = set()
+    reported_health: tuple[str, str, str] | None = None
     total_samples_fed: int = 0
     _last_level_post: float = 0.0
     _level_accum: list[np.ndarray] = []
@@ -185,11 +274,11 @@ def run_audio_worker(
 
     def _collect_future() -> None:
         nonlocal _transcript_future, _pending_meta
-        if _transcript_future is None or not _transcript_future.done():
+        if _transcript_future is None or _pending_meta is None or not _transcript_future.done():
             return
         try:
             raw_segs = _transcript_future.result()
-            buf_start, was_first = _pending_meta  # type: ignore[misc]
+            buf_start, was_first = _pending_meta
             new_segs = use_case.apply_result(raw_segs, buf_start, was_first)
             log.debug('transcription complete: %d segments', len(new_segs))
             if new_segs:
@@ -207,7 +296,11 @@ def run_audio_worker(
     proc_rec_writer: threading.Thread | None = None
     if save_audio and output_dir:
         try:
-            proc_rec_q, proc_rec_writer = _start_processed_recorder(output_dir, SAMPLE_RATE)
+            proc_rec_q, proc_rec_writer = _start_processed_recorder(
+                output_dir,
+                SAMPLE_RATE,
+                on_error=lambda error: post_message(AudioWorkerStatus(status='warning', error=error)),
+            )
         except Exception:  # noqa: S110 -- best-effort; recording continues without save  # pragma: no cover
             pass
 
@@ -224,190 +317,203 @@ def run_audio_worker(
         _was_paused = False
         _no_signal_warned = False
         try:
+            loop_health = _LoopHealth(post_message)
             while not is_cancelled():
-                if pause_event is not None and pause_event.is_set():
-                    if not _was_paused:
-                        # Pause-entry: commit buffered audio so the user's last
-                        # sentence isn't silently lost by reset_buffer().
+                iteration_failed = False
+                try:
+                    if pause_event is not None and pause_event.is_set():
+                        if not _was_paused:
+                            # Pause-entry: commit buffered audio so the user's last
+                            # sentence isn't silently lost by reset_buffer().
 
-                        # Wait for in-flight transcription (single-use subprocess).
-                        if _transcript_future is not None:
-                            try:
-                                _transcript_future.result(timeout=120)
-                                _collect_future()
-                            except Exception as e:
-                                log.error(
-                                    'Flushing in-flight transcription on pause failed: %s',
-                                    e,
-                                    exc_info=True,
+                            # Wait for in-flight transcription (single-use subprocess).
+                            if _transcript_future is not None:
+                                try:
+                                    _transcript_future.result(timeout=120)
+                                    _collect_future()
+                                except Exception as e:
+                                    log.error(
+                                        'Flushing in-flight transcription on pause failed: %s',
+                                        e,
+                                        exc_info=True,
+                                    )
+
+                            # Flush remaining buffer through the transcriber.
+                            prepared = use_case.prepare_buffer()
+                            if prepared is not None and len(prepared[0]) > 0:
+                                flush_buf, flush_hints, flush_wall_start, flush_is_first = prepared
+                                log.debug(
+                                    'pause-flush transcribing %d samples',
+                                    len(flush_buf),
                                 )
+                                post_message(TranscriptionStatus(active=True))
+                                try:
+                                    flush_segs = transcriber.transcribe(flush_buf, language, flush_hints)
+                                    new_segs = use_case.apply_result(flush_segs, flush_wall_start, flush_is_first)
+                                    if new_segs:
+                                        all_segments.extend(new_segs)
+                                        post_message(TranscriptChunk(segments=new_segs))
+                                except Exception as e:
+                                    log.error('Pause flush transcription failed: %s', e, exc_info=True)
+                                finally:
+                                    post_message(TranscriptionStatus(active=False))
 
-                        # Flush remaining buffer through the transcriber.
-                        prepared = use_case.prepare_buffer()
-                        if prepared is not None and len(prepared[0]) > 0:
-                            flush_buf, flush_hints, flush_wall_start, flush_is_first = prepared
-                            log.debug(
-                                'pause-flush transcribing %d samples',
-                                len(flush_buf),
-                            )
-                            post_message(TranscriptionStatus(active=True))
-                            try:
-                                flush_segs = transcriber.transcribe(flush_buf, language, flush_hints)
-                                new_segs = use_case.apply_result(flush_segs, flush_wall_start, flush_is_first)
-                                if new_segs:
-                                    all_segments.extend(new_segs)
-                                    post_message(TranscriptChunk(segments=new_segs))
-                            except Exception as e:
-                                log.error('Pause flush transcription failed: %s', e, exc_info=True)
-                            finally:
-                                post_message(TranscriptionStatus(active=False))
+                            # Discard audio that arrived during the flush.
+                            audio_source.drain()
+                            use_case.reset_buffer()
+                            _was_paused = True
 
-                        # Discard audio that arrived during the flush.
+                        # During pause: keep draining so producer queues don't grow.
                         audio_source.drain()
-                        use_case.reset_buffer()
-                        _was_paused = True
+                        _collect_future()
+                        time.sleep(0.1)
+                        _last_data_time = time.monotonic()  # don't count pause as silence
+                        continue
 
-                    # During pause: keep draining so producer queues don't grow.
-                    audio_source.drain()
+                    _was_paused = False
                     _collect_future()
-                    time.sleep(0.1)
-                    _last_data_time = time.monotonic()  # don't count pause as silence
-                    continue
 
-                _was_paused = False
-                _collect_future()
-
-                data = audio_source.read(timeout=0.1)
-                source_errors: set[str] = set(getattr(audio_source, 'source_errors', ()))
-                for source_error in sorted(source_errors - reported_source_errors):
-                    log.warning('%s', source_error)
-                    post_message(AudioWorkerStatus(status='warning', error=source_error))
-                reported_source_errors = source_errors
-                if data is None:
-                    gap = time.monotonic() - _last_data_time
-                    # Check if the audio source signals permanent exhaustion
-                    source_exhausted = getattr(audio_source, 'exhausted', False)
-                    if source_exhausted:
-                        elapsed = time.monotonic() - _worker_start
-                        log.error(
-                            'Audio stream exhausted after %.1fs (%d samples captured, %d segments transcribed)',
-                            elapsed,
-                            total_samples_fed,
-                            len(all_segments),
-                        )
-                        post_message(
-                            AudioWorkerStatus(
-                                status='error',
-                                error=f'Audio stream stopped unexpectedly after {elapsed:.0f}s',
+                    data = audio_source.read(timeout=0.1)
+                    source_errors: set[str] = set(getattr(audio_source, 'source_errors', ()))
+                    for source_error in sorted(source_errors - reported_source_errors):
+                        log.warning('%s', source_error)
+                        if not hasattr(audio_source, 'health'):
+                            post_message(AudioWorkerStatus(status='warning', error=source_error))
+                    reported_source_errors = source_errors
+                    reported_health = _report_health(audio_source, source_errors, reported_health, post_message)
+                    if data is None:
+                        gap = time.monotonic() - _last_data_time
+                        # Check if the audio source signals permanent exhaustion
+                        source_exhausted = getattr(audio_source, 'exhausted', False)
+                        if source_exhausted:
+                            elapsed = time.monotonic() - _worker_start
+                            log.error(
+                                'Audio stream exhausted after %.1fs (%d samples captured, %d segments transcribed)',
+                                elapsed,
+                                total_samples_fed,
+                                len(all_segments),
                             )
-                        )
-                        break
-                    if gap >= 5.0 and time.monotonic() - _silence_logged_at >= 5.0:
-                        log.warning(
-                            'No audio data for %.1fs (total_samples=%d, segments=%d)',
-                            gap,
+                            post_message(
+                                AudioWorkerStatus(
+                                    status='error',
+                                    error=f'Audio stream stopped unexpectedly after {elapsed:.0f}s',
+                                )
+                            )
+                            break
+                        if gap >= 5.0 and time.monotonic() - _silence_logged_at >= 5.0:
+                            log.warning(
+                                'No audio data for %.1fs (total_samples=%d, segments=%d)',
+                                gap,
+                                total_samples_fed,
+                                len(all_segments),
+                            )
+                            _silence_logged_at = time.monotonic()
+                        continue
+
+                    _last_data_time = time.monotonic()
+
+                    if proc_rec_q is not None:
+                        proc_rec_q.put(data)
+
+                    total_samples_fed += len(data)
+                    use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
+                    use_case.feed_audio(data)
+
+                    # np.dot avoids a temp data**2 allocation on the ~31 Hz hot path.
+                    chunk_rms = math.sqrt(float(np.dot(data, data)) / len(data))
+                    _stats_rms_sum += chunk_rms
+                    _stats_rms_count += 1
+                    _stats_zero_samples += int(np.count_nonzero(data == 0.0))
+                    _stats_total_samples += len(data)
+
+                    # An all-zero chunk is silence, not a fault. The Core Audio tap
+                    # delivers silence at the full rate, so zeros no longer mean the
+                    # capture died. Capture failures surface as the source reporting
+                    # `exhausted` after the subprocess exits.
+
+                    _level_accum.append(data)
+                    now_abs = time.monotonic()
+                    if now_abs - _last_level_post >= 0.1:
+                        window = np.concatenate(_level_accum)
+                        rms = float(np.sqrt(np.mean(window**2)))
+                        if not np.isfinite(rms):
+                            rms = 0.0
+                        _level_accum.clear()
+                        post_message(AudioLevel(rms=rms))
+                        _last_level_post = now_abs
+
+                    if not _no_signal_warned and now_abs - _worker_start >= _NO_SIGNAL_WARN_SECONDS:
+                        # Hold the warning while the permission dialog is open: the
+                        # user is already being asked to grant it.
+                        if not getattr(audio_source, 'awaiting_permission', False):
+                            _no_signal_warned = True
+                            if not getattr(audio_source, 'system_signal_seen', True):
+                                message = _no_signal_message()
+                                log.warning(message)
+                                post_message(AudioWorkerStatus(status='warning', error=message))
+
+                    # Periodic stats every 30s
+                    if now_abs - _stats_last_time >= _stats_interval:
+                        elapsed = now_abs - _worker_start
+                        rms_avg = _stats_rms_sum / _stats_rms_count if _stats_rms_count else 0.0
+                        zero_pct = (_stats_zero_samples / _stats_total_samples * 100) if _stats_total_samples else 0.0
+                        minutes, secs = divmod(int(elapsed), 60)
+                        # Consumer drift: samples the worker has consumed vs samples
+                        # that should have been produced if real-time were the only
+                        # constraint. Positive drift => the audio_worker is behind
+                        # real time (queues somewhere have backlog); zero drift =>
+                        # consumer keeping up and any perceived lag is downstream
+                        # of the worker (UI, rendering, terminal).
+                        expected_samples = int(elapsed * SAMPLE_RATE)
+                        drift_samples = expected_samples - total_samples_fed
+                        drift_s = drift_samples / SAMPLE_RATE
+                        # Queue sizes — only meaningful for MixedAudioSource; gracefully
+                        # ignore for any source that doesn't expose these.
+                        mic_q = getattr(audio_source, '_mic_q', None)
+                        sys_q = getattr(audio_source, '_sys_q', None)
+                        sys_buf = getattr(audio_source, '_sys_buf', None)
+                        qmic = mic_q.qsize() if mic_q is not None else -1
+                        qsys = sys_q.qsize() if sys_q is not None else -1
+                        qbuf = len(sys_buf) if sys_buf is not None else -1
+                        log.info(
+                            'Audio stats [%d:%02d]: %d samples, rms=%.3f, zero=%.1f%%, '
+                            'transcriptions=%d, drift=%+.2fs, mic_q=%d, sys_q=%d, sys_buf=%d',
+                            minutes,
+                            secs,
                             total_samples_fed,
-                            len(all_segments),
+                            rms_avg,
+                            zero_pct,
+                            _stats_transcriptions,
+                            drift_s,
+                            qmic,
+                            qsys,
+                            qbuf,
                         )
-                        _silence_logged_at = time.monotonic()
-                    continue
 
-                _last_data_time = time.monotonic()
+                        _stats_last_time = now_abs
 
-                if proc_rec_q is not None:
-                    proc_rec_q.put(data)
-
-                total_samples_fed += len(data)
-                use_case.set_session_offset(total_samples_fed / SAMPLE_RATE)
-                use_case.feed_audio(data)
-
-                # np.dot avoids a temp data**2 allocation on the ~31 Hz hot path.
-                chunk_rms = math.sqrt(float(np.dot(data, data)) / len(data))
-                _stats_rms_sum += chunk_rms
-                _stats_rms_count += 1
-                _stats_zero_samples += int(np.count_nonzero(data == 0.0))
-                _stats_total_samples += len(data)
-
-                # An all-zero chunk is silence, not a fault. The Core Audio tap
-                # delivers silence at the full rate, so zeros no longer mean the
-                # capture died. Capture failures surface as the source reporting
-                # `exhausted` after the subprocess exits.
-
-                _level_accum.append(data)
-                now_abs = time.monotonic()
-                if now_abs - _last_level_post >= 0.1:
-                    window = np.concatenate(_level_accum)
-                    rms = float(np.sqrt(np.mean(window**2)))
-                    if not np.isfinite(rms):
-                        rms = 0.0
-                    _level_accum.clear()
-                    post_message(AudioLevel(rms=rms))
-                    _last_level_post = now_abs
-
-                if not _no_signal_warned and now_abs - _worker_start >= _NO_SIGNAL_WARN_SECONDS:
-                    # Hold the warning while the permission dialog is open: the
-                    # user is already being asked to grant it.
-                    if not getattr(audio_source, 'awaiting_permission', False):
-                        _no_signal_warned = True
-                        if not getattr(audio_source, 'system_signal_seen', True):
-                            message = _no_signal_message()
-                            log.warning(message)
-                            post_message(AudioWorkerStatus(status='warning', error=message))
-
-                # Periodic stats every 30s
-                if now_abs - _stats_last_time >= _stats_interval:
-                    elapsed = now_abs - _worker_start
-                    rms_avg = _stats_rms_sum / _stats_rms_count if _stats_rms_count else 0.0
-                    zero_pct = (_stats_zero_samples / _stats_total_samples * 100) if _stats_total_samples else 0.0
-                    minutes, secs = divmod(int(elapsed), 60)
-                    # Consumer drift: samples the worker has consumed vs samples
-                    # that should have been produced if real-time were the only
-                    # constraint. Positive drift => the audio_worker is behind
-                    # real time (queues somewhere have backlog); zero drift =>
-                    # consumer keeping up and any perceived lag is downstream
-                    # of the worker (UI, rendering, terminal).
-                    expected_samples = int(elapsed * SAMPLE_RATE)
-                    drift_samples = expected_samples - total_samples_fed
-                    drift_s = drift_samples / SAMPLE_RATE
-                    # Queue sizes — only meaningful for MixedAudioSource; gracefully
-                    # ignore for any source that doesn't expose these.
-                    mic_q = getattr(audio_source, '_mic_q', None)
-                    sys_q = getattr(audio_source, '_sys_q', None)
-                    sys_buf = getattr(audio_source, '_sys_buf', None)
-                    qmic = mic_q.qsize() if mic_q is not None else -1
-                    qsys = sys_q.qsize() if sys_q is not None else -1
-                    qbuf = len(sys_buf) if sys_buf is not None else -1
-                    log.info(
-                        'Audio stats [%d:%02d]: %d samples, rms=%.3f, zero=%.1f%%, '
-                        'transcriptions=%d, drift=%+.2fs, mic_q=%d, sys_q=%d, sys_buf=%d',
-                        minutes,
-                        secs,
-                        total_samples_fed,
-                        rms_avg,
-                        zero_pct,
-                        _stats_transcriptions,
-                        drift_s,
-                        qmic,
-                        qsys,
-                        qbuf,
-                    )
-
-                    _stats_last_time = now_abs
-
-                if use_case.should_trigger() and _transcript_future is None:
-                    prepared = use_case.prepare_buffer()
-                    if prepared is not None:
-                        buf, hints, buf_wall_start, is_first = prepared
-                        log.debug('transcription triggered: buffer=%d samples, first_chunk=%s', len(buf), is_first)
-                        _stats_transcriptions += 1
-                        _pending_meta = (buf_wall_start, is_first)
-                        post_message(TranscriptionStatus(active=True))
-                        _transcript_future = _executor.submit(
-                            transcriber.transcribe,
-                            buf,
-                            language,
-                            hints,
-                        )
+                    if use_case.should_trigger() and _transcript_future is None:
+                        prepared = use_case.prepare_buffer()
+                        if prepared is not None:
+                            buf, hints, buf_wall_start, is_first = prepared
+                            log.debug('transcription triggered: buffer=%d samples, first_chunk=%s', len(buf), is_first)
+                            _stats_transcriptions += 1
+                            _pending_meta = (buf_wall_start, is_first)
+                            post_message(TranscriptionStatus(active=True))
+                            _transcript_future = _executor.submit(
+                                transcriber.transcribe,
+                                buf,
+                                language,
+                                hints,
+                            )
+                except Exception as loop_error:
+                    # One bad chunk must not end the meeting recording.
+                    iteration_failed = True
+                    loop_health.failed(loop_error, reported_health)
+                    time.sleep(0.05)
+                finally:
+                    if not iteration_failed:
+                        loop_health.succeeded(reported_health)
 
             # Wait for any in-flight transcription before draining
             if _transcript_future is not None:

@@ -148,3 +148,19 @@ class TestModelsTab:
             label = row.query_one('.choice-label').render().plain
             assert 'Tiny model' in label
             assert row.query_one('.choice-size').render().plain == '0 MB'
+
+
+class TestModelsTabFaults:
+    async def test_state_load_failure_notifies(self, app_factory):
+        app, store = app_factory(AssetStatus.READY)
+
+        def _boom() -> list[AssetState]:
+            raise OSError('cache unreadable')
+
+        store.list_assets = _boom
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert any('Cannot read the model cache' in str(n.message) for n in app.app._notifications)

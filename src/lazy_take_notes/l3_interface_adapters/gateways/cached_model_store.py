@@ -137,7 +137,10 @@ class CachedModelStore:
             if path.is_file():
                 return str(path)
             raise ModelResolutionError(f'Model file not found: {name}')
-        return name
+        if path.is_file() or _is_pywhispercpp_name(name):
+            return name
+        # pywhispercpp loads any other name as no model; the child then dies on the first chunk.
+        raise ModelResolutionError(f"Unknown speech model '{name}'")
 
     # --- Install --------------------------------------------------------
 
@@ -286,7 +289,7 @@ class CachedModelStore:
             payload = json.loads(self._state_path.read_text(encoding='utf-8'))
         except (OSError, ValueError):
             return {}
-        if payload.get('schema') != _SCHEMA:
+        if not isinstance(payload, dict) or payload.get('schema') != _SCHEMA:
             return {}
         assets = payload.get('assets')
         return assets if isinstance(assets, dict) else {}
@@ -342,6 +345,13 @@ class CachedModelStore:
             if isinstance(value, str) and value:
                 candidates.append(Path(value).expanduser())
         return candidates
+
+
+def _is_pywhispercpp_name(name: str) -> bool:
+    """pywhispercpp downloads these names itself."""
+    from pywhispercpp.constants import AVAILABLE_MODELS  # noqa: PLC0415 -- deferred: rare path
+
+    return name in AVAILABLE_MODELS
 
 
 def _read_runtime_record() -> dict | None:

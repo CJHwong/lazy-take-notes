@@ -7,13 +7,15 @@ does not tear down and rebuild the Textual app.
 
 from __future__ import annotations
 
+import functools
+import logging
+from collections.abc import Callable
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from textual.app import App
-
 from lazy_take_notes.l1_entities.session_files import NOTES, SessionArtifacts
+from lazy_take_notes.l4_frameworks_and_drivers.screen_base import SessionHostApp
 
 if TYPE_CHECKING:
     from lazy_take_notes.l1_entities.config import AppConfig
@@ -23,8 +25,34 @@ if TYPE_CHECKING:
     RecordContext = tuple[AppConfig, InfraConfig, YamlTemplateLoader]
     TranscribeContext = tuple[AppConfig, InfraConfig, YamlTemplateLoader]
 
+log = logging.getLogger('ltn.app')
 
-class ShellApp(App):
+
+def _back_to_welcome_on_error(step: Callable) -> Callable:
+    """Run a routing step; on failure show the error and return to the welcome screen.
+
+    These steps read config.yaml and templates the user edits by hand. A Textual
+    callback that raises ends the whole kiosk, and load_config() calls
+    sys.exit() on a missing file, so SystemExit is caught here too.
+    """
+
+    step_name = getattr(step, '__name__', repr(step))
+
+    @functools.wraps(step)
+    def guarded(self: ShellApp, *args, **kwargs):
+        try:
+            return step(self, *args, **kwargs)
+        except (Exception, SystemExit) as e:
+            log.error('%s failed: %s', step_name, e, exc_info=True)
+            detail = f'{type(e).__name__}: {e}' if str(e) else type(e).__name__
+            self.notify(f'Could not start: {detail}', severity='error', timeout=12)
+            self._finished()
+            return None
+
+    return guarded
+
+
+class ShellApp(SessionHostApp):
     """Kiosk shell: Welcome, pickers, and modes are screens on one App."""
 
     def __init__(
@@ -106,6 +134,7 @@ class ShellApp(App):
 
     # --- Record ----------------------------------------------------------
 
+    @_back_to_welcome_on_error
     def _open_record(self) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             load_config,
@@ -136,6 +165,7 @@ class ShellApp(App):
             self._on_record_template,
         )
 
+    @_back_to_welcome_on_error
     def _on_record_template(self, name: str | None) -> None:
         if name is None:
             self._finished()
@@ -143,27 +173,63 @@ class ShellApp(App):
         if name == '__create_template__':
             self._open_template_builder(after=self._open_record)
             return
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred
+            EditTemplateRequest,
+        )
+
         _config, _infra, template_loader = self._record_context()
+        if isinstance(name, EditTemplateRequest):
+            self._open_template_editor(template_loader, name.name, after=self._open_record)
+            return
         self._start_record(template_loader.load(name))
 
     def _start_record(self, template) -> None:
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.preflight_screen import (  # noqa: PLC0415 -- deferred
+            PreflightScreen,
+        )
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
+            build_preflight_plan,
+        )
+
+        config, infra, _template_loader = self._record_context()
+        opts = self._record_options
+        plan = build_preflight_plan(
+            config,
+            infra,
+            template,
+            self._output_dir,
+            llm_client=opts.get('llm_client'),
+            transcriber=opts.get('transcriber'),
+            audio_source=opts.get('audio_source'),
+            mute_mic=opts.get('mute_mic', False),
+        )
+        self.push_screen(PreflightScreen(plan), functools.partial(self._after_preflight, template, plan))
+
+    @_back_to_welcome_on_error
+    def _after_preflight(self, template, plan, report) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             build_record_session,
         )
         from lazy_take_notes.l4_frameworks_and_drivers.keep_awake import keep_awake  # noqa: PLC0415 -- deferred
 
-        config, infra, _template_loader = self._record_context()
         opts = self._record_options
+        if report is None:
+            if plan.owns_transcriber:
+                plan.transcriber.close()
+            self._finished()
+            return
+        config, infra, _template_loader = self._record_context()
         screen, out_dir = build_record_session(
             config,
             infra,
             template,
             self._output_dir,
             opts.get('label'),
-            llm_client=opts.get('llm_client'),
-            transcriber=opts.get('transcriber'),
+            llm_client=plan.llm_client,
+            transcriber=plan.transcriber,
             audio_source=opts.get('audio_source'),
             mute_mic=opts.get('mute_mic', False),
+            preflight=report,
         )
         self.session_artifacts = SessionArtifacts(session_dir=out_dir, notes_path=NOTES.resolve(out_dir))
         stack = ExitStack()
@@ -184,6 +250,7 @@ class ShellApp(App):
         else:
             self._on_transcribe_file(True)
 
+    @_back_to_welcome_on_error
     def _on_transcribe_file(self, selected) -> None:
         if selected is None:
             self._finished()
@@ -220,6 +287,7 @@ class ShellApp(App):
             self._on_transcribe_template,
         )
 
+    @_back_to_welcome_on_error
     def _on_transcribe_template(self, name: str | None) -> None:
         if name is None:
             self._finished()
@@ -227,7 +295,14 @@ class ShellApp(App):
         if name == '__create_template__':
             self._open_template_builder(after=self._open_transcribe)
             return
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (  # noqa: PLC0415 -- deferred
+            EditTemplateRequest,
+        )
+
         _config, _infra, template_loader = self._transcribe_context()
+        if isinstance(name, EditTemplateRequest):
+            self._open_template_editor(template_loader, name.name, after=self._open_transcribe)
+            return
         self._start_transcribe(template_loader.load(name))
 
     def _start_transcribe(self, template) -> None:
@@ -253,6 +328,7 @@ class ShellApp(App):
 
     # --- View, settings, template builder --------------------------------
 
+    @_back_to_welcome_on_error
     def _open_session_picker(self) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             load_config,
@@ -284,7 +360,17 @@ class ShellApp(App):
             TemplateBuilderApp,
         )
 
-        self.push_screen(TemplateBuilderApp(), after or self._finished)
+        self.push_screen(TemplateBuilderApp(config_path=self._config_path), after or self._finished)
+
+    def _open_template_editor(self, template_loader, name: str, after) -> None:
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import (  # noqa: PLC0415 -- deferred
+            TemplateBuilderApp,
+        )
+
+        builder = TemplateBuilderApp(
+            config_path=self._config_path, base_template=template_loader.load(name), base_key=name
+        )
+        self.push_screen(builder, after)
 
 
 def run_shell(config_path=None, output_dir: str | None = None, **kwargs) -> ShellApp:

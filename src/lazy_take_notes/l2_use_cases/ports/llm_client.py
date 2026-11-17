@@ -7,6 +7,11 @@ from typing import Protocol
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
 
+# Upper bound for one LLM request. Without it a stalled server never answers,
+# the digest flag never clears, and the session cannot quit. A final digest of a
+# long session on a local model can legitimately take minutes.
+LLM_REQUEST_TIMEOUT_S = 600.0
+
 
 @dataclass(frozen=True)
 class ChatResponse:

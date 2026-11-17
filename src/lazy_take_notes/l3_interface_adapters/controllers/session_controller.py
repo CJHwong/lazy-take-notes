@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from lazy_take_notes.l1_entities.config import AppConfig
 from lazy_take_notes.l1_entities.digest_state import DigestState
@@ -51,6 +52,25 @@ class SessionController:
         self.user_context: str = ''
         self.speaker_turns: list[SpeakerTurn] = []
         self.speaker_names: dict[int, str] = {}
+        self._persist_error: str | None = None
+
+    def _persist(self, what: str, write: Callable[[], object]) -> None:
+        """Run one disk write. A full or vanished disk must not end the recording."""
+        try:
+            write()
+        except (OSError, UnicodeError) as e:
+            log.error('Could not save %s: %s', what, e, exc_info=True)
+            self._persist_error = f'Could not save {what}: {e}'
+
+    def take_persist_error(self) -> str | None:
+        """Return the newest unreported write failure, then clear it."""
+        error, self._persist_error = self._persist_error, None
+        return error
+
+    def save_context_now(self) -> None:
+        """Write the session context outside a final digest, e.g. on a shutdown signal."""
+        if self.user_context.strip() and self._config.output.save_context:
+            self._persist('session context', lambda: self._persistence.save_session_context(self.user_context))
 
     def set_speaker_turns(self, turns: list[SpeakerTurn]) -> None:
         """Replace the acoustic speaker turns used for labels and prompts."""
@@ -81,7 +101,7 @@ class SessionController:
             self.digest_state.buffer.append(seg.text)
             self.digest_state.all_lines.append(seg.text)
 
-        self._persistence.save_transcript_lines(segments, append=True)
+        self._persist('transcript', lambda: self._persistence.save_transcript_lines(segments, append=True))
 
         dc = self._config.digest
         return should_trigger_digest(self.digest_state, dc.min_lines, dc.min_interval, dc.max_lines)
@@ -113,15 +133,15 @@ class SessionController:
 
         if result.data is not None:
             self.latest_digest = result.data
-            self._persistence.save_digest_md(result.data, self.digest_state.digest_count)
+            markdown, number = result.data, self.digest_state.digest_count
+            self._persist('notes', lambda: self._persistence.save_digest_md(markdown, number))
             if self._config.output.save_notes_history:
-                self._persistence.save_history(
-                    result.data,
-                    self.digest_state.digest_count,
-                    is_final=is_final,
+                self._persist(
+                    'notes history',
+                    lambda: self._persistence.save_history(markdown, number, is_final=is_final),
                 )
-            if is_final and self.user_context.strip() and self._config.output.save_context:
-                self._persistence.save_session_context(self.user_context)
+            if is_final:
+                self.save_context_now()
 
             # Compact if needed
             if self.digest_state.prompt_tokens > self._config.digest.compact_token_threshold:

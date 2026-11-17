@@ -13,6 +13,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import (
     FileItem,
     FilePicker,
     ParentItem,
+    _count_dir_items,  # noqa: PLC2701 -- testing the thread-worker helper directly
     human_size,
 )
 
@@ -355,3 +356,38 @@ class TestFilePickerEdgeCases:
             # Enter on ParentItem should navigate up without crashing
             await pilot.press('enter')
             await pilot.pause()
+
+
+# ── Faults ────────────────────────────────────────────────────────────────────
+
+
+class TestFilePickerFaults:
+    @pytest.mark.asyncio
+    async def test_markup_like_path_and_names_do_not_crash(self, tmp_path: Path) -> None:
+        # '[' then 'x]' makes the path contain '[/x]', a stray closing tag.
+        weird = tmp_path / '[' / 'x]'
+        weird.mkdir(parents=True)
+        (weird / 'talk\\').mkdir()
+        (weird / 'a\\.wav').write_bytes(b'RIFF' + b'\x00' * 60)
+        picker = FilePicker(start_dir=weird)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert '[/x]' in str(picker.query_one('#sp-header', Static).content)
+            await pilot.press('down')
+            await pilot.pause()
+            await pilot.press('down')
+            await pilot.pause()
+            assert 'a\\.wav' in _preview_text(picker)
+
+    @pytest.mark.asyncio
+    async def test_vanished_directory_shows_message(self, audio_dir: Path) -> None:
+        picker = FilePicker(start_dir=audio_dir)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            with patch('pathlib.Path.iterdir', side_effect=FileNotFoundError('gone')):
+                picker._navigate_to(audio_dir / 'music')
+                await pilot.pause()
+            assert 'Cannot open' in _preview_text(picker)
+
+    def test_count_dir_items_reports_vanished_dir(self, tmp_path: Path) -> None:
+        assert _count_dir_items(tmp_path / 'missing').startswith('Cannot read')

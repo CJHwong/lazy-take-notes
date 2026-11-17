@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rich.markup import escape
 from textual.containers import Horizontal
 from textual.widgets import Static
 
@@ -48,7 +49,8 @@ class SpeakerBar(Horizontal):
                 child.remove()
         for speaker, name, seconds in speakers:
             widget_id = f'speaker-{speaker}'
-            text = f'{name or f"S{speaker}"} {format_spoken_time(seconds)}'
+            # Names are typed by the user; escape them so '[/x]' is not markup.
+            text = f'{escape(name or f"S{speaker}")} {format_spoken_time(seconds)}'
             existing = next((child for child in self.children if child.id == widget_id), None)
             if isinstance(existing, Static):
                 existing.update(text)

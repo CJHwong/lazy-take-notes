@@ -918,3 +918,177 @@ class TestSourceFailureWarnings:
             if isinstance(message, AudioWorkerStatus) and message.status == 'warning'
         ]
         assert warnings == ['System audio stopped', 'System audio stopped']
+
+
+class TestProcessedRecorderFaults:
+    def test_a_failed_write_reports_once_and_keeps_draining_the_queue(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        def _full_disk(self, pcm):
+            raise OSError(28, 'No space left on device')
+
+        monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
+        errors: list[str] = []
+        rec_q, writer = module._start_processed_recorder(tmp_path, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
+
+        for _ in range(50):
+            rec_q.put(np.zeros(160, dtype=np.float32))
+        rec_q.put(None)
+        writer.join(timeout=5)
+
+        assert not writer.is_alive()
+        assert rec_q.empty()
+        assert len(errors) == 1
+        assert 'No space left' in errors[0]
+
+    def test_a_failed_open_reports_and_keeps_draining_the_queue(self, tmp_path):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        errors: list[str] = []
+        missing_dir = tmp_path / 'gone'
+        rec_q, writer = module._start_processed_recorder(missing_dir, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
+
+        for _ in range(10):
+            rec_q.put(np.zeros(160, dtype=np.float32))
+        rec_q.put(None)
+        writer.join(timeout=5)
+
+        assert not writer.is_alive()
+        assert rec_q.empty()
+        assert len(errors) == 1
+
+
+def test_a_wav_that_fails_to_close_after_a_failed_write_keeps_draining(tmp_path, monkeypatch):
+    from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+    def _full_disk(self, pcm):
+        raise OSError(28, 'No space left on device')
+
+    def _bad_close(self):
+        raise OSError(5, 'Input/output error')
+
+    monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
+    monkeypatch.setattr(module._StreamingWavWriter, 'close', _bad_close)  # noqa: SLF001 -- fault injection
+    errors: list[str] = []
+    rec_q, writer = module._start_processed_recorder(tmp_path, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
+
+    for _ in range(5):
+        rec_q.put(np.zeros(160, dtype=np.float32))
+    rec_q.put(None)
+    writer.join(timeout=5)
+
+    assert not writer.is_alive()
+    assert rec_q.empty()
+    assert len(errors) == 1
+
+
+class TestAudioHealth:
+    """A source that reports health gets one message per change, not one toast per retry."""
+
+    def _run(self, source, reads):
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import AudioHealth
+
+        messages = []
+        remaining = iter([False] * reads + [True])
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: next(remaining, True),
+            model_path='test-model',
+            language='en',
+            transcriber=FakeTranscriber(),
+            audio_source=source,
+        )
+        return [m for m in messages if isinstance(m, AudioHealth)], messages
+
+    def test_posts_each_health_change_once(self):
+        states = iter(
+            [
+                {'mic': 'ok', 'system': 'ok'},
+                {'mic': 'lost', 'system': 'ok'},
+                {'mic': 'lost', 'system': 'ok'},
+                {'mic': 'lost', 'system': 'ok'},
+                {'mic': 'ok', 'system': 'ok'},
+            ]
+        )
+
+        class HealthSource(FakeAudioSource):
+            health = {'mic': 'ok', 'system': 'ok'}
+            source_errors = ()
+
+            def read(self, timeout=0.1):
+                self.health = next(states, self.health)
+                self.source_errors = ('Microphone: unplugged',) if self.health['mic'] == 'lost' else ()
+                return super().read(timeout)
+
+        health, messages = self._run(HealthSource(chunks=[np.zeros(1600, dtype=np.float32)] * 5), reads=5)
+
+        assert [(h.mic, h.system) for h in health] == [('ok', 'ok'), ('lost', 'ok'), ('ok', 'ok')]
+        assert 'unplugged' in health[1].detail
+        warnings = [m for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+        assert warnings == []  # the health message replaces the per-error toast
+
+    def test_a_device_fallback_notice_is_posted(self):
+        class FallbackSource(FakeAudioSource):
+            health = {'mic': 'ok', 'system': 'ok'}
+            mic_notice = "Microphone 'USB' is unavailable; using Built-in"
+
+        health, _ = self._run(FallbackSource(chunks=[np.zeros(1600, dtype=np.float32)]), reads=1)
+        assert health[0].notice == "Microphone 'USB' is unavailable; using Built-in"
+
+
+class TestLoopErrorsDoNotEndRecording:
+    def test_an_unexpected_error_in_one_iteration_keeps_the_recording_going(self):
+        class GlitchSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                if self._idx == 1 and not getattr(self, '_glitched', False):
+                    self._glitched = True
+                    raise ValueError('bad chunk shape')
+                return super().read(timeout)
+
+        source = GlitchSource(chunks=[np.full(1600, 0.1, dtype=np.float32)] * 4)
+        messages = []
+        remaining = iter([False] * 7 + [True])
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=lambda: next(remaining, True),
+            model_path='test-model',
+            language='en',
+            transcriber=FakeTranscriber(),
+            audio_source=source,
+        )
+
+        statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
+        assert not any(m.status == 'error' for m in statuses)
+        assert any(m.status == 'warning' and 'bad chunk shape' in m.error for m in statuses)
+        assert source._idx == 4  # every chunk after the glitch was still read
+        assert statuses[-1].status == 'stopped'
+
+
+class TestRepeatedLoopErrors:
+    def test_a_loop_that_keeps_failing_raises_a_persistent_alert_and_clears_it(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import AudioHealth
+
+        class BrokenThenFine(FakeAudioSource):
+            failures = 30
+
+            def read(self, timeout=0.1):
+                if self.failures:
+                    self.failures -= 1
+                    raise ValueError('bad chunk')
+                return super().read(timeout)
+
+        source = BrokenThenFine(chunks=[np.full(1600, 0.1, dtype=np.float32)] * 2)
+        messages = []
+        remaining = iter([False] * 33 + [True])
+        with patch('lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker._LOOP_ALERT_AFTER_S', 0.2):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=lambda: next(remaining, True),
+                model_path='test-model',
+                language='en',
+                transcriber=FakeTranscriber(),
+                audio_source=source,
+            )
+
+        processing = [m.processing for m in messages if isinstance(m, AudioHealth)]
+        assert processing == ['error', 'ok']

@@ -8,7 +8,7 @@ from __future__ import annotations
 import openai
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
-from lazy_take_notes.l2_use_cases.ports.llm_client import ChatResponse
+from lazy_take_notes.l2_use_cases.ports.llm_client import LLM_REQUEST_TIMEOUT_S, ChatResponse
 
 
 class OpenAICompatLLMClient:
@@ -19,7 +19,7 @@ class OpenAICompatLLMClient:
         self._base_url = base_url
 
     async def chat(self, model: str, messages: list[ChatMessage]) -> ChatResponse:
-        client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+        client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, timeout=LLM_REQUEST_TIMEOUT_S)
         resp = await client.chat.completions.create(
             model=model,
             messages=[{'role': m.role, 'content': m.content} for m in messages],  # ty: ignore[invalid-argument-type] -- dict satisfies ChatCompletionMessageParam at runtime
@@ -29,7 +29,7 @@ class OpenAICompatLLMClient:
         return ChatResponse(content=content, prompt_tokens=prompt_tokens)
 
     async def chat_single(self, model: str, prompt: str) -> str:
-        client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url)
+        client = openai.AsyncOpenAI(api_key=self._api_key, base_url=self._base_url, timeout=LLM_REQUEST_TIMEOUT_S)
         resp = await client.chat.completions.create(
             model=model,
             messages=[{'role': 'user', 'content': prompt}],

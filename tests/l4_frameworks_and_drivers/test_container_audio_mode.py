@@ -38,6 +38,10 @@ class TestContainerAudioSource:
         assert isinstance(container.audio_source, MixedAudioSource)
         assert isinstance(container.audio_source._system, CoreAudioTapSource)
 
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import play_test_tone
+
+        assert container.audio_source._test_tone is play_test_tone
+
     def test_mixed_source_uses_soundcard_on_linux(self, monkeypatch, basic_container_args):
         import lazy_take_notes.l4_frameworks_and_drivers.container as container_mod
 
@@ -49,6 +53,7 @@ class TestContainerAudioSource:
         from lazy_take_notes.l3_interface_adapters.gateways.soundcard_loopback_source import SoundCardLoopbackSource
 
         assert isinstance(container.audio_source._system, SoundCardLoopbackSource)
+        assert container.audio_source._test_tone is None  # tone pickup is measured on the macOS tap only
 
     def test_no_audio_source_when_build_audio_false(self, basic_container_args):
         config, template, out_dir = basic_container_args

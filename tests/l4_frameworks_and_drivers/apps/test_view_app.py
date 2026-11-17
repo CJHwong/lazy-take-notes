@@ -172,3 +172,50 @@ class TestViewAppTheme:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 assert app.app.theme == 'nord'
+
+
+class TestViewAppFaults:
+    @pytest.mark.asyncio
+    async def test_markup_like_transcript_lines_do_not_crash(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='[00:00:01] say [/INST] now\n[bold]x[/b]\n')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            panel = app.query_one('#transcript-panel', TranscriptPanel)
+            assert panel._all_text == ['[00:00:01] say [/INST] now', '[bold]x[/b]']
+
+    @pytest.mark.asyncio
+    async def test_undecodable_transcript_shows_error(self, tmp_path):
+        session_dir = _make_session(tmp_path, digest='# ok')
+        (session_dir / 'transcript.txt').write_bytes(b'\xff\xfe\xfa bad')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert any('transcript' in str(n.message).lower() for n in app.app._notifications)
+            assert 'ok' in app.query_one('#digest-panel', DigestPanel)._current_markdown
+
+    @pytest.mark.asyncio
+    async def test_unreadable_digest_shows_error(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='hi\n', digest='# ok')
+        app = ViewApp(session_dir=session_dir)
+        real_read = Path.read_text
+
+        def _read(path, *args, **kwargs):
+            if path.name == 'notes.md':
+                raise PermissionError('denied')
+            return real_read(path, *args, **kwargs)
+
+        with patch.object(Path, 'read_text', _read):
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                assert any('notes' in str(n.message).lower() for n in app.app._notifications)
+
+    @pytest.mark.asyncio
+    async def test_open_failure_notifies(self, tmp_path):
+        session_dir = _make_session(tmp_path)
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test() as pilot:
+            with patch('subprocess.Popen', side_effect=FileNotFoundError('xdg-open')):
+                await pilot.press('o')
+                await pilot.pause()
+            assert any('open' in str(n.message).lower() for n in app.app._notifications)

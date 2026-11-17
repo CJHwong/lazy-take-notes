@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import multiprocessing as mp
 import os
 from multiprocessing.connection import Connection
@@ -10,6 +11,12 @@ from typing import Any
 import numpy as np
 
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
+
+log = logging.getLogger('ltn.whisper')
+
+
+class _ChildDiedError(RuntimeError):
+    """The whisper child exited or its pipe broke before it answered."""
 
 
 def _subprocess_entry(model_path: str, conn: Any) -> None:
@@ -78,8 +85,14 @@ class SubprocessWhisperTranscriber:
     def __init__(self) -> None:
         self._process: Any = None  # SpawnProcess; typed as Any — context returns a subclass
         self._conn: Connection | None = None
+        self._model_path: str | None = None
 
     def load_model(self, model_path: str) -> None:
+        if self._model_ready(model_path):
+            log.info('whisper model already loaded: %s', model_path)
+            return
+        self._kill()
+        self._model_path = model_path
         ctx = mp.get_context('spawn')
         parent_conn, child_conn = ctx.Pipe(duplex=True)
         self._process = ctx.Process(
@@ -107,19 +120,74 @@ class SubprocessWhisperTranscriber:
         language: str,
         hints: list[str] | None = None,
     ) -> list[TranscriptSegment]:
-        if self._conn is None:
-            raise RuntimeError('Model not loaded. Call load_model() first.')
-        self._conn.send({'audio': audio, 'language': language, 'hints': hints or []})
         try:
-            if not self._conn.poll(timeout=120):
+            return self._transcribe_once(audio, language, hints)
+        except _ChildDiedError as e:
+            # The child was gone before it answered, so no late reply can exist.
+            # Retry the same chunk once on a fresh child instead of losing it.
+            log.warning('%s; retrying the chunk on a fresh subprocess', e)
+            return self._transcribe_once(audio, language, hints)
+
+    def _transcribe_once(
+        self,
+        audio: np.ndarray,
+        language: str,
+        hints: list[str] | None,
+    ) -> list[TranscriptSegment]:
+        if self._conn is None:
+            if self._model_path is None:
+                raise RuntimeError('Model not loaded. Call load_model() first.')
+            self._respawn()
+        conn = self._conn
+        assert conn is not None  # noqa: S101 -- narrowed for the type checker; _respawn sets it or raises
+        # Any failure leaves the pipe in an unknown state: a late reply would be
+        # read as the answer to the next chunk. Kill the child; the next call
+        # starts a fresh one.
+        try:
+            conn.send({'audio': audio, 'language': language, 'hints': hints or []})
+            if not conn.poll(timeout=120):
+                self._kill()
                 raise RuntimeError('Timeout waiting for transcription result')
-            result = self._conn.recv()
+            result = conn.recv()
         except EOFError as e:
-            raise RuntimeError('Whisper subprocess exited unexpectedly during transcription') from e
+            self._kill()
+            raise _ChildDiedError('Whisper subprocess exited unexpectedly during transcription') from e
+        except OSError as e:
+            self._kill()
+            raise _ChildDiedError(f'Whisper subprocess pipe failed: {e}') from e
 
         if result.get('status') == 'error':
             raise RuntimeError(result['error'])
         return result.get('segments', [])
+
+    def _model_ready(self, model_path: str) -> bool:
+        """Preflight loads the model first; the session reuses that child."""
+        return (
+            model_path == self._model_path
+            and self._conn is not None
+            and self._process is not None
+            and self._process.is_alive()
+        )
+
+    def _respawn(self) -> None:
+        log.warning('Restarting the whisper subprocess')
+        try:
+            self.load_model(self._model_path or '')
+        except Exception:
+            self._kill()
+            raise
+
+    def _kill(self) -> None:
+        conn, self._conn = self._conn, None
+        process, self._process = self._process, None
+        if conn is not None:
+            try:
+                conn.close()
+            except OSError:
+                log.debug('closing a failed whisper pipe', exc_info=True)
+        if process is not None:
+            process.terminate()
+            process.join(timeout=1)
 
     def close(self) -> None:
         if self._conn is not None:

@@ -6,6 +6,7 @@ import subprocess  # noqa: S404 -- opens the system privacy pane, not a shell co
 import sys
 import threading
 
+from rich.markup import escape
 from textual import on
 from textual.app import ComposeResult
 from textual.containers import Horizontal
@@ -107,7 +108,7 @@ class AudioTab(SettingsSection):
         yield Rule(classes='section-rule')
         current = transcription.get('input_device') or _DEFAULT_DEVICE
         yield Select(
-            [('System default', _DEFAULT_DEVICE), (str(current), str(current))],
+            [('System default', _DEFAULT_DEVICE), (escape(str(current)), str(current))],
             value=str(current),
             id='cfg-audio-device',
             allow_blank=False,
@@ -177,9 +178,10 @@ class AudioTab(SettingsSection):
             devices = SounddeviceAudioSource.list_input_devices()
         except Exception:  # noqa: BLE001 -- a missing PortAudio is not fatal to Settings
             devices = []
-        choices = [('System default', _DEFAULT_DEVICE), *[(name, name) for name in devices]]
+        # Select prompts are markup, and a device name can contain '[/x]'.
+        choices = [('System default', _DEFAULT_DEVICE), *[(escape(name), name) for name in devices]]
         if current and current not in devices:
-            choices.append((current, current))
+            choices.append((escape(current), current))
         select = self.query_one('#cfg-audio-device', Select)
         select.set_options(choices)
         select.value = current or _DEFAULT_DEVICE
@@ -201,7 +203,11 @@ class AudioTab(SettingsSection):
         if self._probe_running:
             return
         self._stop = threading.Event()
-        mic, system = DependencyContainer.build_audio_sources(self.device_value(), ensure_permission=True)
+        try:
+            mic, system = DependencyContainer.build_audio_sources(self.device_value(), ensure_permission=True)
+        except Exception as exc:  # noqa: BLE001 -- a missing audio backend is a UI error, not a crash
+            self.notify(f'Audio test failed: {exc}', severity='error', markup=False, timeout=10)
+            return
         self._probe_running = True
         self._set_running(True)
         self.run_worker(

@@ -193,6 +193,7 @@ class TestHeadlessEntryPoints:
         loader.load.return_value = template
         monkeypatch.setattr(hl, 'load_config', lambda *a, **k: (config, MagicMock(), loader))
         monkeypatch.setattr(hl, 'preflight_llm', lambda *a, **k: ([], []))
+        monkeypatch.setattr(hl, '_run_headless_preflight', lambda *a, **k: MagicMock())
         monkeypatch.setattr(hl, '_build_container', lambda *a, **k: MagicMock())
         captured: dict = {}
         monkeypatch.setattr(hl, '_run', lambda out_dir, cfg, session: captured.update(out_dir=out_dir, session=session))
@@ -237,6 +238,35 @@ class TestHeadlessEntryPoints:
 
         with pytest.raises(click.ClickException, match='Unknown template'):
             hl.run_record_headless(self._ctx(), template_name='bogus')
+
+
+class TestHeadlessPreflight:
+    def _report(self, **statuses):
+        from lazy_take_notes.l4_frameworks_and_drivers.preflight import PASS, PreflightReport, new_checks
+
+        checks = new_checks()
+        for check in checks:
+            check.set(statuses.get(check.key, PASS), 'detail', 'the fix')
+        return PreflightReport(checks)
+
+    def _run(self, monkeypatch, report):
+        from lazy_take_notes.l4_frameworks_and_drivers import cli_helpers, preflight
+        from lazy_take_notes.l4_frameworks_and_drivers import headless as hl
+
+        plan = MagicMock()
+        monkeypatch.setattr(cli_helpers, 'build_preflight_plan', lambda *a, **k: plan)
+        monkeypatch.setattr(preflight, 'run_preflight', lambda _plan: report)
+        return hl._run_headless_preflight(build_app_config({}), MagicMock(), MagicMock(), None), plan  # noqa: SLF001 -- unit under test
+
+    def test_a_hard_failure_stops_before_the_session(self, monkeypatch, capsys):
+        with pytest.raises(click.ClickException, match='Preflight failed'):
+            self._run(monkeypatch, self._report(mic='fail'))
+        assert 'the fix' in capsys.readouterr().err
+
+    def test_an_unavailable_ai_model_still_records_the_transcript(self, monkeypatch, capsys):
+        plan, _ = self._run(monkeypatch, self._report(llm='fail'))
+        assert plan is not None
+        assert 'continuing despite' in capsys.readouterr().err
 
 
 class TestHeadlessHelpers:

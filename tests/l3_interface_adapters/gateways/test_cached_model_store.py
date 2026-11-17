@@ -174,9 +174,20 @@ class TestResolve:
         with pytest.raises(ModelResolutionError, match='not found'):
             store.resolve(str(tmp_path / 'nope.bin'))
 
-    def test_passthrough_name(self, tmp_path: Path):
+    def test_a_pywhispercpp_name_passes_through_for_its_own_download(self, tmp_path: Path):
         store = make_store(tmp_path)
-        assert store.resolve('some-custom-model') == 'some-custom-model'
+        assert store.resolve('base.en') == 'base.en'
+
+    def test_a_relative_model_file_passes_through(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / 'my-model.bin').write_bytes(b'x')
+        assert make_store(tmp_path).resolve('my-model.bin') == 'my-model.bin'
+
+    def test_an_unknown_name_raises_instead_of_loading_nothing(self, tmp_path: Path):
+        # pywhispercpp loads an unknown name as no model, and the child dies on the first chunk.
+        store = make_store(tmp_path)
+        with pytest.raises(ModelResolutionError, match="Unknown speech model 'not-a-real-model'"):
+            store.resolve('not-a-real-model')
 
     def test_malformed_hf_uri_raises(self, tmp_path: Path):
         store = make_store(tmp_path)
@@ -257,6 +268,15 @@ class TestState:
         cache = tmp_path / 'cache'
         cache.mkdir()
         (cache / 'state.json').write_text('{not json', encoding='utf-8')
+
+        store = make_store(tmp_path)
+
+        assert store.status(ASSET.id).status is AssetStatus.MISSING
+
+    def test_non_mapping_state_file_is_ignored(self, tmp_path: Path):
+        cache = tmp_path / 'cache'
+        cache.mkdir()
+        (cache / 'state.json').write_text('[1, 2]', encoding='utf-8')
 
         store = make_store(tmp_path)
 

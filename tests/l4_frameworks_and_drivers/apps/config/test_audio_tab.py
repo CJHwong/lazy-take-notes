@@ -71,3 +71,33 @@ class TestAudioTab:
             app.query_one(AudioTab).post_message(AudioProbeDone())
             await pilot.pause()
             assert start.disabled is False
+
+
+class TestAudioTabFaults:
+    async def test_markup_like_device_name_does_not_crash(self, monkeypatch):
+        weird = 'USB Mic [/x] (2)'
+        monkeypatch.setattr(
+            'lazy_take_notes.l4_frameworks_and_drivers.apps.config.audio_tab.SounddeviceAudioSource.list_input_devices',
+            staticmethod(lambda: [weird]),
+        )
+        raw = {**RAW, 'transcription': {'silence_threshold': 0.01, 'input_device': weird}}
+        app = Host(raw)
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            assert app.query_one(AudioTab).device_value() == weird
+
+    async def test_source_build_failure_notifies(self, monkeypatch):
+        def _boom(*_args, **_kwargs):
+            raise ImportError('soundcard missing')
+
+        monkeypatch.setattr(
+            'lazy_take_notes.l4_frameworks_and_drivers.apps.config.audio_tab.DependencyContainer.build_audio_sources',
+            _boom,
+        )
+        app = Host(RAW)
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            app.query_one(AudioTab)._start_probe()
+            await pilot.pause()
+            assert app.query_one('#audio-start', Button).disabled is False
+            assert any('soundcard missing' in str(n.message) for n in app._notifications)

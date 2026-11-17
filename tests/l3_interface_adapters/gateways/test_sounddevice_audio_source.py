@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
+from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import SounddeviceAudioSource
+
 MODULE = 'lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source'
 
 
@@ -266,3 +268,64 @@ def test_reopen_discards_previous_microphone_samples(mock_stream_cls, _mock_qd):
     source.open(16000, 1)
     assert source.read(0.01) is None
     source.close()
+
+
+class TestDeviceRecovery:
+    """A reopen after a dropout must see devices that changed since startup."""
+
+    @patch(f'{MODULE}.sd._initialize')
+    @patch(f'{MODULE}.sd._terminate')
+    @patch(f'{MODULE}.sd.query_devices', return_value=_FAKE_DEVICE_INFO)
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_only_a_reopen_refreshes_the_device_list(self, _stream, _query, terminate, initialize):
+        source = SounddeviceAudioSource()
+        source.open(16000, 1)
+        assert terminate.call_count == 0
+        source.close()
+        source.open(16000, 1)
+        assert terminate.call_count == 1
+        assert initialize.call_count == 1
+        source.close()
+
+    @patch(f'{MODULE}.sd._initialize')
+    @patch(f'{MODULE}.sd._terminate')
+    @patch(f'{MODULE}.sd.InputStream')
+    def test_a_missing_configured_device_falls_back_then_returns(self, stream_cls, _terminate, _initialize):
+        available = {'value': False}
+
+        def query(kind=None, device=None):
+            if device is not None and not available['value']:
+                raise ValueError('No input device matching')
+            return {**_FAKE_DEVICE_INFO, 'name': device or 'Built-in'}
+
+        with patch(f'{MODULE}.sd.query_devices', side_effect=query):
+            source = SounddeviceAudioSource('USB Headset')
+            source.open(16000, 1)
+            assert stream_cls.call_args.kwargs['device'] is None
+            assert 'USB Headset' in source.device_notice
+            source.close()
+
+            available['value'] = True
+            source.open(16000, 1)
+            assert stream_cls.call_args.kwargs['device'] == 'USB Headset'
+            assert not source.device_notice
+            source.close()
+
+
+class TestTestTone:
+    @patch(f'{MODULE}.sd.stop')
+    @patch(f'{MODULE}.sd.play')
+    def test_plays_a_short_tone_far_below_hearing(self, play, stop):
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import play_test_tone
+
+        assert play_test_tone() is True
+        samples, rate = play.call_args.args
+        assert 0 < float(np.max(np.abs(samples))) <= 0.0005 * 1.001
+        assert len(samples) / rate <= 0.3
+        stop.assert_called_once()  # bounded: never waits on a dead output device
+
+    @patch(f'{MODULE}.sd.play', side_effect=__import__('sounddevice').PortAudioError('no output device'))
+    def test_reports_false_when_no_output_can_play(self, _play):
+        from lazy_take_notes.l3_interface_adapters.gateways.sounddevice_audio_source import play_test_tone
+
+        assert play_test_tone() is False

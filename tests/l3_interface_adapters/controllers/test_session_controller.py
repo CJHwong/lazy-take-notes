@@ -255,3 +255,90 @@ class TestSpeakerLabels:
         prompt = fake_llm.chat_calls[-1][1][-1].content
         assert 'S1: Hello there' in prompt
         assert 'Bob: Hi back' in prompt
+
+
+_DISK_ERRORS = [
+    OSError(28, 'No space left on device'),
+    PermissionError(13, 'Permission denied'),
+    FileNotFoundError(2, 'No such file or directory'),
+    UnicodeEncodeError('utf-8', '\ud800', 0, 1, 'surrogates not allowed'),
+]
+_DISK_ERROR_IDS = ['enospc', 'eacces', 'enoent', 'unicode']
+
+
+def _failing_controller(error: BaseException, failing: set[str], **config_overrides) -> SessionController:
+    from tests.conftest import FailingPersistence
+
+    return SessionController(
+        config=build_app_config({'output': {'save_context': True, 'save_notes_history': True}, **config_overrides}),
+        template=YamlTemplateLoader().load('default_en'),
+        llm_client=FakeLLMClient(response=VALID_DIGEST, prompt_tokens=50),
+        persistence=FailingPersistence(error, failing),
+    )
+
+
+class TestPersistenceFaults:
+    @pytest.mark.parametrize('error', _DISK_ERRORS, ids=_DISK_ERROR_IDS)
+    def test_a_failed_transcript_write_keeps_the_segments_and_reports(self, error):
+        ctrl = _failing_controller(error, {'save_transcript_lines'})
+        segs = [TranscriptSegment(text='Hello', wall_start=0.0, wall_end=1.0)]
+
+        ctrl.on_transcript_segments(segs)
+
+        assert ctrl.all_segments == segs
+        assert ctrl.digest_state.buffer == ['Hello']
+        assert 'transcript' in (ctrl.take_persist_error() or '')
+        assert ctrl.take_persist_error() is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('error', _DISK_ERRORS, ids=_DISK_ERROR_IDS)
+    @pytest.mark.parametrize('method', ['save_digest_md', 'save_history', 'save_session_context'])
+    @pytest.mark.parametrize('is_final', [False, True], ids=['periodic', 'final'])
+    async def test_a_failed_digest_write_still_returns_the_digest(self, error, method, is_final):
+        ctrl = _failing_controller(error, {method})
+        ctrl.user_context = 'context'
+        ctrl.on_transcript_segments([TranscriptSegment(text='Hello', wall_start=0.0, wall_end=1.0)])
+
+        result = await ctrl.run_digest(is_final=is_final)
+
+        assert result.data == VALID_DIGEST
+        assert ctrl.latest_digest == VALID_DIGEST
+        reaches_method = method != 'save_session_context' or is_final
+        assert (ctrl.take_persist_error() is not None) is reaches_method
+
+    def test_save_context_now_writes_the_context(self):
+        ctrl, _, persist = _plain_controller()
+        ctrl.user_context = 'agenda'
+
+        ctrl.save_context_now()
+
+        assert persist.context_calls == ['agenda']
+
+    def test_save_context_now_skips_empty_context(self):
+        ctrl, _, persist = _plain_controller()
+        ctrl.user_context = '   '
+
+        ctrl.save_context_now()
+
+        assert persist.context_calls == []
+
+    @pytest.mark.parametrize('error', _DISK_ERRORS, ids=_DISK_ERROR_IDS)
+    def test_save_context_now_reports_a_failed_write(self, error):
+        ctrl = _failing_controller(error, {'save_session_context'})
+        ctrl.user_context = 'agenda'
+
+        ctrl.save_context_now()
+
+        assert 'context' in (ctrl.take_persist_error() or '')
+
+
+def _plain_controller():
+    fake_llm = FakeLLMClient(response=VALID_DIGEST)
+    persist = FakePersistence()
+    ctrl = SessionController(
+        config=build_app_config({'output': {'save_context': True}}),
+        template=YamlTemplateLoader().load('default_en'),
+        llm_client=fake_llm,
+        persistence=persist,
+    )
+    return ctrl, fake_llm, persist

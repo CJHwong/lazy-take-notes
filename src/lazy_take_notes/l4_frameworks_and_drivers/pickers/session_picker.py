@@ -18,6 +18,14 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
 )
 
 
+def _read_or_note(path: Path) -> str:
+    """Return the file text, or a Markdown note when the file cannot be read."""
+    try:
+        return path.read_text(encoding='utf-8')
+    except (OSError, UnicodeDecodeError) as exc:
+        return f'*Cannot read {path.name}: {exc}*'
+
+
 class SessionItem(ListItem):
     """Selectable row representing a saved session."""
 
@@ -96,7 +104,7 @@ class SessionPicker(SearchablePicker[Path]):
 
         transcript_path = TRANSCRIPT.resolve(session_dir)
         if transcript_path:
-            text = transcript_path.read_text(encoding='utf-8')
+            text = _read_or_note(transcript_path)
             preview_lines = text.strip().splitlines()[:10]
             if preview_lines:
                 lines.append('### Transcript (first 10 lines)')
@@ -112,7 +120,7 @@ class SessionPicker(SearchablePicker[Path]):
         digest_path = NOTES.resolve(session_dir)
         if digest_path:
             lines.extend(['', '---', '', '### Digest'])
-            digest_text = digest_path.read_text(encoding='utf-8').strip()
+            digest_text = _read_or_note(digest_path).strip()
             if digest_text:
                 lines.append(digest_text)
             else:

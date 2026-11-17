@@ -849,3 +849,94 @@ class TestNewSettingsShape:
             await pilot.pause()
             assert app.query_one('#cfg-digest-compact', Input)
             assert len(app.query('#cfg-digest-advanced')) == 0
+
+
+def _toasts(app: ConfigApp) -> list[str]:
+    return [str(n.message) for n in app.app._notifications]
+
+
+class TestConfigAppFaults:
+    @pytest.mark.asyncio
+    async def test_save_write_failure_notifies(self, tmp_path, monkeypatch):
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch(f'{_CONFIG_MOD}.write_config', side_effect=PermissionError('read-only')):
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+            assert app._saved is False
+            assert any('Cannot save' in t and 'read-only' in t for t in _toasts(app))
+
+    @pytest.mark.asyncio
+    async def test_editor_binary_missing_notifies(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'digest': {'model': 'test'}})
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-nav').focus()
+            await pilot.pause()
+            with (
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['no-such-editor']),
+                patch(f'{_CONFIG_MOD}.config_file_path', return_value=config_path),
+                patch(f'{_CONFIG_MOD}.subprocess.run', side_effect=FileNotFoundError('no-such-editor')),
+                patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
+            ):
+                await pilot.press('e')
+                await pilot.pause()
+            assert any('Cannot open editor' in t and 'no-such-editor' in t for t in _toasts(app))
+
+    @pytest.mark.asyncio
+    async def test_editor_leaves_broken_yaml_notifies(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'digest': {'model': 'test'}})
+
+        def _break_file(*_args, **_kwargs):
+            config_path.write_text('digest: [unclosed\n', encoding='utf-8')
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-nav').focus()
+            await pilot.pause()
+            with (
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['vim']),
+                patch(f'{_CONFIG_MOD}.config_file_path', return_value=config_path),
+                patch(f'{_CONFIG_MOD}.subprocess.run', side_effect=_break_file),
+                patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
+            ):
+                await pilot.press('e')
+                await pilot.pause()
+            assert any('Cannot reload' in t for t in _toasts(app))
+
+    @pytest.mark.asyncio
+    async def test_editor_cannot_create_config_notifies(self, tmp_path, monkeypatch):
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        monkeypatch.setattr('lazy_take_notes.l3_interface_adapters.gateways.paths.CONFIG_DIR', config_path.parent)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-nav').focus()
+            await pilot.pause()
+            with (
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['vim']),
+                patch(f'{_CONFIG_MOD}.config_file_path', return_value=config_path),
+                patch.object(Path, 'write_text', side_effect=PermissionError('read-only')),
+                patch(f'{_CONFIG_MOD}.subprocess.run') as mock_run,
+            ):
+                await pilot.press('e')
+                await pilot.pause()
+            mock_run.assert_not_called()
+            assert any('Cannot create' in t and 'read-only' in t for t in _toasts(app))
+
+
+class TestBrokenConfigOnOpen:
+    @pytest.mark.asyncio
+    async def test_settings_open_with_defaults_and_say_why(self, tmp_path, monkeypatch):
+        config_dir = tmp_path / 'cfg'
+        config_dir.mkdir()
+        config_path = config_dir / 'config.yaml'
+        config_path.write_text('digest: [unclosed\n', encoding='utf-8')
+        _patch_config_paths(monkeypatch, config_dir, config_path)
+
+        app = ConfigApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert any('cannot be read' in toast and '[e]' in toast for toast in _toasts(app))
+            assert app.app.is_running
+        assert config_path.read_text(encoding='utf-8') == 'digest: [unclosed\n'  # never overwritten on open

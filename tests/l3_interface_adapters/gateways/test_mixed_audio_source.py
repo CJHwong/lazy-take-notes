@@ -83,7 +83,7 @@ class TestMixedAudioSource:
 
         system = RecoveringSource()
         source = MixedAudioSource(FakeAudioSource(), system)
-        source._restart_delay = 0.001
+        source._restart_delays = (0.001,)
         source.open(16000, 1)
         source._sys_buf = np.full(160, 0.1, dtype=np.float32)
         fail_now.set()
@@ -107,13 +107,15 @@ class TestMixedAudioSource:
 
         microphone = SilentAfterReopen()
         source = MixedAudioSource(microphone, FakeAudioSource(), dead_audio_seconds=0.01)
-        source._restart_delay = 0.001
+        source._restart_delays = (0.001,)
         source.open(16000, 1)
         deadline = time.monotonic() + 1
         try:
-            while len(microphone.open_calls) < 4 and time.monotonic() < deadline:
+            while (
+                len(microphone.open_calls) < 4 and time.monotonic() < deadline
+            ):  # keeps retrying past the old limit of 3
                 time.sleep(0.005)
-            assert len(microphone.open_calls) == 4
+            assert len(microphone.open_calls) >= 4
             assert any('did not deliver a buffer' in error for error in source.source_errors)
             assert not source.exhausted
         finally:
@@ -160,26 +162,6 @@ class TestMixedAudioSource:
             timer.join()
             source.close()
 
-    def test_retry_count_is_bounded_and_both_failed_sources_exhaust(self):
-        class BrokenSource(FakeAudioSource):
-            def read(self, timeout=0.1):
-                raise RuntimeError('disconnected')
-
-        microphone, system = BrokenSource(), BrokenSource()
-        source = MixedAudioSource(microphone, system)
-        source._restart_delay = 0.001
-        source.open(16000, 1)
-        deadline = time.monotonic() + 1
-        try:
-            while not source.exhausted and time.monotonic() < deadline:
-                time.sleep(0.005)
-            assert source.exhausted
-            assert len(source.source_errors) == 2
-            assert len(microphone.open_calls) == 4
-            assert len(system.open_calls) == 4
-        finally:
-            source.close()
-
     def test_recovery_confirms_a_fresh_buffer_before_clearing_the_error(self):
         release_buffer = threading.Event()
 
@@ -193,7 +175,7 @@ class TestMixedAudioSource:
 
         microphone = RecoveringSource()
         source = MixedAudioSource(microphone, FakeAudioSource())
-        source._restart_delay = 0.001
+        source._restart_delays = (0.001,)
         source.open(16000, 1)
         deadline = time.monotonic() + 1
         try:
@@ -229,7 +211,7 @@ class TestMixedAudioSource:
 
         microphone = StalledSource([[], [np.full(160, 0.1, dtype=np.float32)] * 10])
         source = MixedAudioSource(microphone, FakeAudioSource(), dead_audio_seconds=0.03)
-        source._restart_delay = 0.001
+        source._restart_delays = (0.001,)
         source.open(16000, 1)
         try:
             result = source.read(timeout=0.5)
@@ -269,7 +251,7 @@ class TestMixedAudioSource:
                 raise RuntimeError('test device disconnected')
 
         source = MixedAudioSource(BrokenSource(), FakeAudioSource())
-        source._restart_delay = 0.001
+        source._restart_delays = (0.001,)
         source.open(16000, 1)
         deadline = time.monotonic() + 1
         while not source.source_errors and time.monotonic() < deadline:
@@ -781,3 +763,227 @@ class TestMixedAudioSource:
         src.close()
 
         assert len(sys_audio.open_calls) == 1
+
+
+def _wait_until(predicate, seconds=2.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return predicate()
+
+
+class FlakySource(FakeAudioSource):
+    """Raises on read until it has been reopened `fail_opens` times, then delivers `chunk` forever."""
+
+    def __init__(self, fail_opens: int, chunk: np.ndarray) -> None:
+        super().__init__()
+        self._fail_opens = fail_opens
+        self._chunk = chunk
+
+    def read(self, timeout=0.1):
+        if len(self.open_calls) <= self._fail_opens:
+            raise RuntimeError('device gone')
+        time.sleep(0.002)
+        return self._chunk.copy()
+
+
+class TestNoMidMeetingCut:
+    """A source that drops out is retried for as long as the session runs."""
+
+    def test_a_source_that_stays_away_is_retried_until_close_and_never_ends_the_stream(self):
+        class GoneSource(FakeAudioSource):
+            def read(self, timeout=0.1):
+                raise RuntimeError('unplugged')
+
+        microphone, system = GoneSource(), GoneSource()
+        source = MixedAudioSource(microphone, system)
+        source._restart_delays = (0.001,)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: len(microphone.open_calls) > 10 and len(system.open_calls) > 10)
+            assert not source.exhausted
+            assert source.health == {'mic': 'lost', 'system': 'lost'}
+        finally:
+            source.close()
+
+    def test_a_source_that_returns_after_many_failures_is_back_in_the_mix(self):
+        microphone = FlakySource(fail_opens=8, chunk=np.full(512, 0.1, dtype=np.float32))
+        system = FakeAudioSource()
+        source = MixedAudioSource(microphone, system)
+        source._restart_delays = (0.001,)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: source.health['mic'] == 'ok' and len(microphone.open_calls) > 8)
+            assert source.source_errors == ()
+            assert _wait_until(lambda: (chunk := source.read(timeout=0.05)) is not None and chunk.any())
+        finally:
+            source.close()
+
+    def test_retries_back_off_to_the_last_delay(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        delays = [source._restart_delay_for(attempt) for attempt in range(8)]
+        assert delays[:4] == [0.3, 1.0, 2.0, 5.0]
+        assert set(delays[4:]) == {5.0}
+
+    def test_a_stall_is_detected_within_three_seconds_by_default(self):
+        source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
+        assert source._dead_audio_seconds <= 3.0
+
+
+class TestDigitalSilence:
+    def test_a_mic_that_sends_exact_zeros_is_reported_silent(self):
+        microphone = FlakySource(fail_opens=0, chunk=np.zeros(512, dtype=np.float32))
+        source = MixedAudioSource(microphone, FakeAudioSource())
+        source._zero_alarm_seconds = 0.05
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: source.health['mic'] == 'silent')
+            assert len(microphone.open_calls) == 1  # warn only: zeros never trigger a restart
+        finally:
+            source.close()
+
+    def test_a_quiet_but_live_mic_is_not_silent(self):
+        microphone = FlakySource(fail_opens=0, chunk=np.full(512, 1e-6, dtype=np.float32))
+        source = MixedAudioSource(microphone, FakeAudioSource())
+        source._zero_alarm_seconds = 0.05
+        source.open(16000, 1)
+        try:
+            time.sleep(0.2)
+            assert source.health['mic'] == 'ok'
+        finally:
+            source.close()
+
+    def test_muting_the_mic_does_not_report_it_silent(self):
+        microphone = FlakySource(fail_opens=0, chunk=np.full(512, 0.1, dtype=np.float32))
+        source = MixedAudioSource(microphone, FakeAudioSource())
+        source._zero_alarm_seconds = 0.05
+        source.mic_muted = True
+        source.open(16000, 1)
+        try:
+            time.sleep(0.2)
+            assert source.health['mic'] == 'ok'
+        finally:
+            source.close()
+
+
+class ToneLoopSource(FakeAudioSource):
+    """System source that sends zeros, and returns the tone only when `alive`."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.alive = True
+        self.tone_pending = threading.Event()
+
+    def read(self, timeout=0.1):
+        time.sleep(0.002)
+        if self.alive and self.tone_pending.is_set():
+            self.tone_pending.clear()
+            return np.full(320, 0.0005, dtype=np.float32)
+        return np.zeros(320, dtype=np.float32)
+
+
+class TestSystemToneProbe:
+    def _source(self, system):
+        tones = []
+
+        def play_tone():
+            tones.append(time.monotonic())
+            system.tone_pending.set()
+            return True
+
+        source = MixedAudioSource(FakeAudioSource(), system, test_tone=play_tone)
+        source._tone_after_seconds = 0.05
+        source._tone_wait_seconds = 0.1
+        source._restart_delays = (0.001,)
+        return source, tones
+
+    def test_a_live_tap_returns_the_tone_and_stays_ok(self):
+        system = ToneLoopSource()
+        source, tones = self._source(system)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: len(tones) >= 2)
+            assert source.health['system'] == 'ok'
+            assert len(system.open_calls) == 1
+        finally:
+            source.close()
+
+    def test_a_dead_tap_that_swallows_the_tone_is_restarted(self):
+        system = ToneLoopSource()
+        system.alive = False
+        source, tones = self._source(system)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: len(system.open_calls) >= 2)
+            assert tones
+        finally:
+            source.close()
+
+    def test_a_tone_that_cannot_play_never_flags_the_tap(self):
+        system = ToneLoopSource()
+        system.alive = False
+        source = MixedAudioSource(FakeAudioSource(), system, test_tone=lambda: False)
+        source._tone_after_seconds = 0.05
+        source._tone_wait_seconds = 0.05
+        source.open(16000, 1)
+        try:
+            time.sleep(0.3)
+            assert len(system.open_calls) == 1
+            assert source.health['system'] == 'ok'
+        finally:
+            source.close()
+
+    def test_no_tone_without_a_player(self):
+        system = ToneLoopSource()
+        system.alive = False
+        source = MixedAudioSource(FakeAudioSource(), system)
+        source._tone_after_seconds = 0.01
+        source.open(16000, 1)
+        try:
+            time.sleep(0.2)
+            assert len(system.open_calls) == 1
+        finally:
+            source.close()
+
+
+class TestAlertsStayUntilFixed:
+    def test_a_deaf_tap_stays_lost_across_its_restart(self):
+        system = ToneLoopSource()
+        system.alive = False
+        source = MixedAudioSource(FakeAudioSource(), system, test_tone=lambda: system.tone_pending.set() or True)
+        source._tone_after_seconds = 0.05
+        source._tone_wait_seconds = 0.05
+        source._restart_delays = (0.001,)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: len(system.open_calls) >= 2)
+            time.sleep(0.03)  # the restarted tap now delivers zeros again
+            assert source.health['system'] == 'lost'
+            system.alive = True  # the tap hears again: the next tone comes back
+            assert _wait_until(lambda: source.health['system'] == 'ok')
+        finally:
+            source.close()
+
+    def test_a_hung_reader_is_reported_lost(self):
+        release = threading.Event()
+
+        class HangingMic(FakeAudioSource):
+            continuous_capture = True
+
+            def read(self, timeout=0.1):
+                if len(self.open_calls) == 1 and self._idx >= 2:
+                    release.wait(5)
+                    return None
+                self._idx += 1
+                time.sleep(0.002)
+                return np.full(320, 0.1, dtype=np.float32)
+
+        source = MixedAudioSource(HangingMic(), FakeAudioSource(), dead_audio_seconds=0.1)
+        source.open(16000, 1)
+        try:
+            assert _wait_until(lambda: source.health['mic'] == 'lost')
+        finally:
+            release.set()
+            source.close()

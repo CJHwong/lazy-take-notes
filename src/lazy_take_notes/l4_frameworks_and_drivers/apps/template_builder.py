@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
+from rich.markup import escape
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Vertical, VerticalScroll
@@ -10,12 +14,17 @@ from textual.widgets import Button, Input, Markdown, Static
 
 from lazy_take_notes.l1_entities.chat_message import ChatMessage
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l2_use_cases.utils.template_diff import diff_templates
 from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
+
+log = logging.getLogger('ltn.template_builder')
 
 # Standalone ShellScreen — no BaseApp inheritance (like ViewApp, ConfigApp).
 # Constructs its own LLM client from InfraConfig.
 
 _MAX_AUTO_FIX = 2
+# A full template takes a slow model a few minutes; past this the call is stuck.
+LLM_TIMEOUT_S = 300.0
 
 _WELCOME = """\
 Describe the template you want to create. For example:
@@ -24,6 +33,13 @@ Describe the template you want to create. For example:
 
 I'll guide you if I need more details, or generate right away if your \
 description is complete enough.
+"""
+
+_EDIT_WELCOME = """Describe the change you want. For example:
+- "Add a quick action that lists risks"
+- "Make the summary shorter and write it in Traditional Chinese"
+
+I'll restate the change and wait for your yes before I edit the template. The preview shows the current version.
 """
 
 
@@ -202,17 +218,27 @@ class TemplateBuilderApp(ShellScreen):
         Binding('ctrl+s', 'save_template', 'Save', priority=True),
     ]
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(
+        self,
+        config_path: str | None = None,
+        base_template: SessionTemplate | None = None,
+        base_key: str = '',
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
+        self._config_path = config_path
         self._history: list[ChatMessage] = []
-        self._current_template: SessionTemplate | None = None
+        # Edit mode: start from an existing template and save back under its name.
+        self._base_template = base_template
+        self._base_key = base_key
+        self._current_template: SessionTemplate | None = base_template
         self._use_case = None  # built lazily on first send
         self._model: str = ''
         self._busy = False
         self._chat_lines: list[str] = []
         self._thinking_timer = None
         self._thinking_tick = 0
-        self._saved = False
+        self._saved = base_template is not None  # nothing to save until it changes
 
     def compose(self) -> ComposeResult:
         yield Static('  Template Builder', id='tb-header')
@@ -236,7 +262,14 @@ class TemplateBuilderApp(ShellScreen):
         )
 
         self.app.theme = load_theme()
-        self._append_chat('assistant', _WELCOME)
+        if self._base_template is None:
+            self._append_chat('assistant', _WELCOME)
+        else:
+            name = self._base_template.metadata.name or self._base_key
+            self.query_one('#tb-header', Static).update(f'  Template Builder: Editing: {escape(name)}')
+            self.query_one('#tb-input', Input).placeholder = 'Describe the change...'
+            self._append_chat('assistant', _EDIT_WELCOME)
+            self._update_preview()
         self.query_one('#tb-input', Input).focus()
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -291,7 +324,7 @@ class TemplateBuilderApp(ShellScreen):
                 self._append_chat('assistant', 'Error: could not initialize LLM client. Check your config.')
                 return
 
-            result = await use_case.generate(user_message, self._model, self._history)
+            result = await asyncio.wait_for(use_case.generate(user_message, self._model, self._history), LLM_TIMEOUT_S)
 
             if result.error:
                 self._append_chat('assistant', f'{result.assistant_message}\n\n*(Error: {result.error})*')
@@ -300,7 +333,9 @@ class TemplateBuilderApp(ShellScreen):
             # Auto-fix loop for validation errors
             if result.validation_errors:
                 for _attempt in range(_MAX_AUTO_FIX):
-                    result = await use_case.auto_fix(result.validation_errors, self._model, self._history)
+                    result = await asyncio.wait_for(
+                        use_case.auto_fix(result.validation_errors, self._model, self._history), LLM_TIMEOUT_S
+                    )
                     if not result.validation_errors and not result.error:
                         break
                 if result.error:
@@ -308,13 +343,26 @@ class TemplateBuilderApp(ShellScreen):
                     return
 
             if result.template:
+                previous = self._current_template
                 self._current_template = result.template
                 self._saved = False
                 self._update_preview()
                 msg = result.assistant_message or 'Template generated.'
                 self._append_chat('assistant', msg)
+                if self._base_template is not None and previous is not None:
+                    self._report_changes(previous, result.template)
             else:
                 self._append_chat('assistant', result.assistant_message)
+        except TimeoutError:
+            log.error('Template builder LLM call got no answer within %.0fs', LLM_TIMEOUT_S)
+            minutes = round(LLM_TIMEOUT_S / 60)
+            self._append_chat(
+                'assistant', f'Error: the AI model did not answer within {minutes} minutes. Send it again.'
+            )
+        except Exception as exc:
+            # A bad config or a dead LLM must leave the builder usable for a retry.
+            log.error('Template generation failed: %s', exc, exc_info=True)
+            self._append_chat('assistant', f'Error: {type(exc).__name__}: {exc}')
         finally:
             self._set_busy(False)
 
@@ -333,9 +381,11 @@ class TemplateBuilderApp(ShellScreen):
             InfraConfig,
             build_app_config,
         )
+        from lazy_take_notes.l4_frameworks_and_drivers.container import (  # noqa: PLC0415 -- deferred
+            DependencyContainer,
+        )
 
-        loader = YamlConfigLoader()
-        raw = loader.load()
+        raw = YamlConfigLoader().load(self._config_path)
         config = build_app_config(raw)
         try:
             infra = InfraConfig.model_validate(raw)
@@ -344,19 +394,8 @@ class TemplateBuilderApp(ShellScreen):
 
         self._model = config.digest.model
 
-        # Build LLM client (same pattern as ConfigApp._test_connection)
-        if infra.llm_provider == 'openai':
-            from lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client import (  # noqa: PLC0415 -- deferred
-                OpenAICompatLLMClient,
-            )
-
-            client = OpenAICompatLLMClient(api_key=infra.openai.api_key, base_url=infra.openai.base_url)
-        else:
-            from lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client import (  # noqa: PLC0415 -- deferred
-                OllamaLLMClient,
-            )
-
-            client = OllamaLLMClient(host=infra.ollama.host)
+        # The session's resolver: built-in providers and llm_provider plugins alike.
+        client = DependencyContainer.resolve_llm_client(infra)
 
         # Load example template for the system prompt
         example = YamlTemplateLoader().load('default_en')
@@ -365,13 +404,25 @@ class TemplateBuilderApp(ShellScreen):
             TemplateBuildUseCase,
         )
 
-        self._use_case = TemplateBuildUseCase(llm_client=client, example_template=example)
+        self._use_case = TemplateBuildUseCase(
+            llm_client=client, example_template=example, base_template=self._base_template
+        )
         return self._use_case
+
+    def _report_changes(self, before: SessionTemplate, after: SessionTemplate) -> None:
+        changes = diff_templates(before, after)
+        self._append_chat('assistant', f'Changed: {", ".join(changes)}' if changes else 'No field changed.')
 
     def _append_chat(self, role: str, text: str) -> None:
         """Append a message to the chat log display."""
         prefix = '[bold cyan]You[/]' if role == 'user' else '[bold green]AI[/]'
-        self._chat_lines.append(f'{prefix}: {text}')
+        # User and LLM text can contain '[/x]', which is a markup error unescaped.
+        line = f'{prefix}: {escape(text)}'
+        if self._busy and self._chat_lines and 'Thinking' in self._chat_lines[-1]:
+            # Keep the indicator last: _set_busy(False) and the animation only touch the last line.
+            self._chat_lines.insert(len(self._chat_lines) - 1, line)
+        else:
+            self._chat_lines.append(line)
         self._refresh_chat_log()
 
     def _refresh_chat_log(self) -> None:
@@ -413,7 +464,9 @@ class TemplateBuilderApp(ShellScreen):
         if self._current_template is None:
             self.notify('No template to save — generate one first.', severity='warning')
             return
-        suggested = self._current_template.metadata.key or _slugify(self._current_template.metadata.name)
+        suggested = (
+            self._base_key or self._current_template.metadata.key or _slugify(self._current_template.metadata.name)
+        )
         self.app.push_screen(
             _SaveTemplateScreen(suggested_name=suggested),
             callback=self._on_save_name,
@@ -427,7 +480,12 @@ class TemplateBuilderApp(ShellScreen):
         )
 
         safe_name = _slugify(name)
-        path = save_user_template(self._current_template, safe_name)
+        try:
+            path = save_user_template(self._current_template, safe_name)
+        except OSError as exc:
+            log.error('Cannot save template %s: %s', safe_name, exc, exc_info=True)
+            self.notify(f'Cannot save template: {exc}', severity='error', markup=False)
+            return
         self._saved = True
         self.notify(f'Saved as {safe_name} → {path}', severity='information')
 

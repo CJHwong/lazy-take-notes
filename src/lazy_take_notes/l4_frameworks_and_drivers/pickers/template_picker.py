@@ -7,7 +7,9 @@ import platform
 import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell commands
 import sys
 from collections import defaultdict
+from dataclasses import dataclass
 
+from rich.markup import escape
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Center, Vertical
@@ -135,7 +137,7 @@ class TemplateItem(ListItem):
         super().__init__()
         self.template_name = name
         badge = '  [dim]\\[user][/dim]' if is_user else ''
-        label = display_name or name
+        label = escape(display_name or name)
         self._label_text = f'{label}  [dim]({locale})[/dim]{badge}'
 
     def compose(self) -> ComposeResult:
@@ -148,7 +150,14 @@ class _TemplateListView(PickerListView):
     _selectable_type = TemplateItem
 
 
-class TemplatePicker(SearchablePicker[str]):
+@dataclass(frozen=True)
+class EditTemplateRequest:
+    """Picker result: open the LLM builder on this template."""
+
+    name: str
+
+
+class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
     CSS = """
     #sp-list-pane { max-width: 40; }
     """
@@ -192,7 +201,7 @@ class TemplatePicker(SearchablePicker[str]):
         return f'  Select a template ({len(self._templates)} available)'
 
     def _footer_text(self) -> str:
-        return r'\[Enter] Select  \[↑/↓] Navigate  \[n] New  \[e] Edit  \[x] Delete  \[Esc] Cancel'
+        return r'\[Enter] Select  \[↑/↓] Navigate  \[n] New  \[e] Edit  \[a] Edit with AI  \[x] Delete  \[Esc] Cancel'
 
     def _search_placeholder(self) -> str:
         return 'Filter templates...'
@@ -206,11 +215,19 @@ class TemplatePicker(SearchablePicker[str]):
             self.action_new_template()
             event.prevent_default()
             return
+        if event.key == 'a' and not isinstance(self.focused, Input):
+            self.action_edit_with_ai()
+            event.prevent_default()
+            return
         if event.key == 'x' and not isinstance(self.focused, Input):
             self.action_delete_template()
             event.prevent_default()
             return
         super().on_key(event)
+
+    def action_edit_with_ai(self) -> None:
+        if self._current_name is not None:
+            self.dismiss(EditTemplateRequest(self._current_name))
 
     def action_new_template(self) -> None:
         """Dismiss with a sentinel value so the shell can launch the builder."""

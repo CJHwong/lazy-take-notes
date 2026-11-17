@@ -119,3 +119,20 @@ class TestOllamaModelListing:
         OllamaLLMClient().pull_model('gpt-oss:20b', on_progress=seen.append)
 
         assert seen == events
+
+
+@patch('lazy_take_notes.l3_interface_adapters.gateways.ollama_llm_client.ollama_sync.AsyncClient')
+@pytest.mark.asyncio
+async def test_every_async_call_has_a_timeout(mock_client_cls):
+    from lazy_take_notes.l2_use_cases.ports.llm_client import LLM_REQUEST_TIMEOUT_S
+
+    mock_client = AsyncMock()
+    mock_client_cls.return_value = mock_client
+    mock_client.chat.return_value = MagicMock()
+    client = OllamaLLMClient()
+
+    await client.chat('model', [ChatMessage(role='user', content='hi')])
+    await client.chat_single('model', 'hi')
+
+    for call in mock_client_cls.call_args_list:
+        assert call.kwargs['timeout'] == LLM_REQUEST_TIMEOUT_S
