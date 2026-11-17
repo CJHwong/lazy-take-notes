@@ -1,5 +1,7 @@
 """Tests for configuration Pydantic models — schema validation only."""
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
@@ -35,13 +37,13 @@ class TestTranscriptionConfig:
 
     def test_missing_field_raises(self):
         with pytest.raises(ValidationError):
-            TranscriptionConfig(model='m')  # type: ignore[call-arg]
+            TranscriptionConfig(model='m')  # ty: ignore[missing-argument] -- the missing field is the test
 
     def test_wrong_type_raises(self):
         with pytest.raises(ValidationError):
             TranscriptionConfig(
                 model='m',
-                chunk_duration='not_a_float',  # type: ignore[invalid-argument-type]
+                chunk_duration='not_a_float',
                 overlap=1.0,
                 silence_threshold=0.01,
                 pause_duration=1.5,
@@ -50,11 +52,11 @@ class TestTranscriptionConfig:
 
 class TestModelForLocale:
     def _cfg(self, **kwargs) -> TranscriptionConfig:
-        defaults = dict(
+        defaults: dict[str, Any] = dict(
             model='default-model', chunk_duration=10.0, overlap=1.0, silence_threshold=0.01, pause_duration=1.5
         )
         defaults.update(kwargs)
-        return TranscriptionConfig(**defaults)  # type: ignore[invalid-argument-type]
+        return TranscriptionConfig(**defaults)
 
     def test_exact_match(self):
         cfg = self._cfg(models={'zh-tw': 'breeze-q8'})
@@ -89,7 +91,7 @@ class TestDigestConfig:
 
     def test_missing_field_raises(self):
         with pytest.raises(ValidationError):
-            DigestConfig(model='m', min_lines=10)  # type: ignore[call-arg]
+            DigestConfig(model='m', min_lines=10)  # ty: ignore[missing-argument] -- the missing field is the test
 
 
 class TestInteractiveConfig:
@@ -99,7 +101,7 @@ class TestInteractiveConfig:
 
     def test_missing_field_raises(self):
         with pytest.raises(ValidationError):
-            InteractiveConfig()  # type: ignore[call-arg]
+            InteractiveConfig()  # ty: ignore[missing-argument] -- the missing field is the test
 
 
 class TestOutputConfig:
@@ -118,7 +120,7 @@ class TestOutputConfig:
 
     def test_missing_field_raises(self):
         with pytest.raises(ValidationError):
-            OutputConfig(directory='./out')  # type: ignore[call-arg]
+            OutputConfig(directory='./out')  # ty: ignore[missing-argument] -- the missing field is the test
 
 
 class TestAppConfig:
@@ -151,7 +153,7 @@ class TestAppConfig:
 
     def test_missing_top_level_field_raises(self):
         with pytest.raises(ValidationError):
-            AppConfig(
+            AppConfig(  # ty: ignore[missing-argument] -- the missing field is the test
                 output=OutputConfig(
                     directory='./out',
                     save_audio=True,
@@ -160,9 +162,9 @@ class TestAppConfig:
                     save_debug_log=False,
                     auto_label=True,
                 )
-            )  # type: ignore[call-arg]
+            )
 
     def test_no_defaults(self):
         """AppConfig has no defaults — bare construction must fail."""
         with pytest.raises(ValidationError):
-            AppConfig()  # type: ignore[call-arg]
+            AppConfig()  # ty: ignore[missing-argument] -- the missing field is the test

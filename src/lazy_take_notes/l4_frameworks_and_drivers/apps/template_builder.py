@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 from rich.markup import escape
 from textual.app import ComposeResult
@@ -43,7 +44,15 @@ I'll restate the change and wait for your yes before I edit the template. The pr
 """
 
 
-class _SaveTemplateScreen(ModalScreen[str | None]):
+@dataclass(frozen=True)
+class SaveRequest:
+    """What the save dialog returns: the file name, and the name shown in the picker."""
+
+    file_name: str
+    display_name: str
+
+
+class _SaveTemplateScreen(ModalScreen[SaveRequest | None]):
     """Modal to name the template before saving."""
 
     CSS = """
@@ -62,8 +71,11 @@ class _SaveTemplateScreen(ModalScreen[str | None]):
         text-align: center;
         margin-bottom: 1;
     }
-    #save-input {
+    #save-input, #save-display {
         margin-bottom: 1;
+    }
+    .save-field-label {
+        color: $text-muted;
     }
     #save-hint {
         color: $text-muted;
@@ -75,18 +87,22 @@ class _SaveTemplateScreen(ModalScreen[str | None]):
         Binding('escape', 'cancel', 'Cancel'),
     ]
 
-    def __init__(self, suggested_name: str = '') -> None:
+    def __init__(self, suggested_name: str = '', display_name: str = '') -> None:
         super().__init__()
         self._suggested = suggested_name
+        self._display_name = display_name
 
     def compose(self) -> ComposeResult:
         with Vertical(id='save-dialog'):
             yield Static('Save Template', id='save-label')
+            yield Static('File name', classes='save-field-label')
             yield Input(
                 value=self._suggested,
                 placeholder='template_name (no spaces)',
                 id='save-input',
             )
+            yield Static('Display name', classes='save-field-label')
+            yield Input(value=self._display_name, placeholder='Name shown in the picker', id='save-display')
             yield Static(
                 r'Enter to save, Esc to cancel',
                 id='save-hint',
@@ -95,10 +111,10 @@ class _SaveTemplateScreen(ModalScreen[str | None]):
     def on_mount(self) -> None:
         self.query_one('#save-input', Input).focus()
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        name = event.value.strip()
+    def on_input_submitted(self, _event: Input.Submitted) -> None:
+        name = self.query_one('#save-input', Input).value.strip()
         if name:
-            self.dismiss(name)
+            self.dismiss(SaveRequest(name, self.query_one('#save-display', Input).value.strip()))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
@@ -468,13 +484,18 @@ class TemplateBuilderApp(ShellScreen):
             self._base_key or self._current_template.metadata.key or _slugify(self._current_template.metadata.name)
         )
         self.app.push_screen(
-            _SaveTemplateScreen(suggested_name=suggested),
+            _SaveTemplateScreen(suggested_name=suggested, display_name=self._current_template.metadata.name),
             callback=self._on_save_name,
         )
 
-    def _on_save_name(self, name: str | None) -> None:
-        if not name or self._current_template is None:
+    def _on_save_name(self, request: SaveRequest | None) -> None:
+        if request is None or self._current_template is None:
             return
+        name = request.file_name
+        if request.display_name and request.display_name != self._current_template.metadata.name:
+            metadata = self._current_template.metadata.model_copy(update={'name': request.display_name})
+            self._current_template = self._current_template.model_copy(update={'metadata': metadata})
+            self._update_preview()
         from lazy_take_notes.l3_interface_adapters.gateways.template_writer import (  # noqa: PLC0415 -- deferred
             save_user_template,
         )

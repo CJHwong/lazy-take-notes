@@ -16,13 +16,13 @@ class TestRunQuery:
         assert result == "Here's your summary..."
 
     @pytest.mark.asyncio
-    async def test_llm_error_propagates(self):
+    async def test_llm_error_propagates(self, monkeypatch):
         fake_llm = FakeLLMClient()
 
         async def _raise(*a, **kw):
             raise ConnectionError('down')
 
-        fake_llm.chat_single = _raise  # type: ignore[invalid-assignment]
+        monkeypatch.setattr(fake_llm, 'chat_single', _raise)
         uc = RunQueryUseCase(fake_llm)
 
         with pytest.raises(ConnectionError, match='down'):

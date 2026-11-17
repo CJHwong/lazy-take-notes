@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import subprocess  # noqa: S404 -- launches caffeinate with a fixed arg list, not shell=True
 import sys
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 
 
@@ -37,7 +37,7 @@ def release_sleep(handle: subprocess.Popen | None) -> None:
 
 
 @contextmanager
-def keep_awake() -> Iterator[None]:
+def keep_awake() -> Generator[None]:
     """Keep the machine (and display) awake for the duration of the block."""
     handle = inhibit_sleep()
     try:

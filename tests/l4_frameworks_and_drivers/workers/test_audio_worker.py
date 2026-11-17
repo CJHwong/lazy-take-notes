@@ -25,12 +25,10 @@ from tests.conftest import FakeAudioSource, FakeTranscriber
 
 
 class TestAudioWorker:
-    def test_model_load_failure(self):
+    def test_model_load_failure(self, monkeypatch):
         """If model fails to load, worker should post error and return empty."""
         fake_transcriber = FakeTranscriber()
-        fake_transcriber.load_model = MagicMock(  # type: ignore[invalid-assignment]
-            side_effect=RuntimeError('model not found')
-        )
+        monkeypatch.setattr(fake_transcriber, 'load_model', MagicMock(side_effect=RuntimeError('model not found')))
         fake_source = FakeAudioSource()
 
         messages = []
@@ -436,11 +434,11 @@ class TestAudioWorkerTranscription:
         with wave.open(str(wav_path), 'rb') as wf:
             assert wf.getnframes() > 0
 
-    def test_audio_source_open_error(self):
+    def test_audio_source_open_error(self, monkeypatch):
         """If audio_source.open raises, worker should post error status."""
         fake_transcriber = FakeTranscriber()
         fake_source = FakeAudioSource()
-        fake_source.open = MagicMock(side_effect=RuntimeError('device not found'))  # type: ignore[method-assign]
+        monkeypatch.setattr(fake_source, 'open', MagicMock(side_effect=RuntimeError('device not found')))
 
         messages: list = []
         run_audio_worker(
@@ -490,13 +488,11 @@ class TestAudioWorkerTranscription:
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
         assert any(s.status == 'stopped' for s in statuses)
 
-    def test_transcription_error_posts_error_status(self):
+    def test_transcription_error_posts_error_status(self, monkeypatch):
         """If transcriber.transcribe raises, worker should post error status and continue."""
         fake_transcriber = FakeTranscriber()
         # After model load succeeds, make transcribe raise
-        fake_transcriber.transcribe = MagicMock(  # type: ignore[method-assign]
-            side_effect=RuntimeError('decode failed')
-        )
+        monkeypatch.setattr(fake_transcriber, 'transcribe', MagicMock(side_effect=RuntimeError('decode failed')))
 
         chunk = _make_nonsilent_chunk(1600)
         fake_source = FakeAudioSource(chunks=[chunk, chunk])
@@ -533,13 +529,15 @@ class TestAudioWorkerTranscription:
         class DelayedAudioSource:
             """Source that yields extra chunks during drain phase."""
 
+            mic_muted = False
+
             def __init__(self):
                 self._calls = 0
                 self.open_calls = []
                 self.close_calls = 0
 
-            def open(self, sr, ch):
-                self.open_calls.append((sr, ch))
+            def open(self, sample_rate, channels):
+                self.open_calls.append((sample_rate, channels))
 
             def read(self, timeout=0.1):
                 self._calls += 1
@@ -572,7 +570,7 @@ class TestAudioWorkerTranscription:
             save_audio=True,
             output_dir=tmp_path,
             transcriber=fake_transcriber,
-            audio_source=source,  # type: ignore[arg-type]  # DelayedAudioSource is a test-only duck type
+            audio_source=source,
         )
 
         # Recorder should have received at least the drain chunks
@@ -587,6 +585,8 @@ class TestAudioWorkerTranscription:
         class ExhaustibleSource:
             """Audio source that signals exhaustion after producing all chunks."""
 
+            mic_muted = False
+
             def __init__(self, chunks):
                 self._chunks = list(chunks)
                 self._idx = 0
@@ -598,8 +598,8 @@ class TestAudioWorkerTranscription:
             def exhausted(self):
                 return self._exhausted
 
-            def open(self, sr, ch):
-                self.open_calls.append((sr, ch))
+            def open(self, sample_rate, channels):
+                self.open_calls.append((sample_rate, channels))
 
             def read(self, timeout=0.1):
                 if self._idx >= len(self._chunks):
@@ -608,6 +608,9 @@ class TestAudioWorkerTranscription:
                 chunk = self._chunks[self._idx]
                 self._idx += 1
                 return chunk
+
+            def drain(self):
+                return None
 
             def close(self):
                 self.close_calls += 1
@@ -622,7 +625,7 @@ class TestAudioWorkerTranscription:
             model_path='test-model',
             language='zh',
             transcriber=fake_transcriber,
-            audio_source=source,  # type: ignore[arg-type]
+            audio_source=source,
         )
 
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
@@ -895,7 +898,7 @@ class TestSourceFailureWarnings:
 
     def test_reports_failure_again_after_source_recovers(self):
         class IntermittentSource(FakeAudioSource):
-            source_errors = ()
+            source_errors: tuple[str, ...] = ()
 
             def read(self, timeout=0.1):
                 chunk = super().read(timeout)
@@ -1013,7 +1016,7 @@ class TestAudioHealth:
 
         class HealthSource(FakeAudioSource):
             health = {'mic': 'ok', 'system': 'ok'}
-            source_errors = ()
+            source_errors: tuple[str, ...] = ()
 
             def read(self, timeout=0.1):
                 self.health = next(states, self.health)

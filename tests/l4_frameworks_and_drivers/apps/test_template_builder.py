@@ -12,6 +12,7 @@ from textual.widgets import Input, Static
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.template_builder_use_case import BuilderResult, TemplateBuildUseCase
 from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import (
+    SaveRequest,
     TemplateBuilderApp,
     _SaveTemplateScreen,  # noqa: PLC2701 -- testing internal modal
     _slugify,  # noqa: PLC2701 -- testing internal helper
@@ -199,7 +200,7 @@ class TestSaveTemplateScreen:
         """Submitting a non-empty name dismisses the modal."""
         app = TemplateBuilderApp()
         app._current_template = SessionTemplate.model_validate(_VALID_TEMPLATE_DICT)
-        dismissed_values: list[str | None] = []
+        dismissed_values: list[SaveRequest | None] = []
 
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -214,17 +215,17 @@ class TestSaveTemplateScreen:
             # to the wrong Input widget in CI timing
             screen = app.app.screen
             assert isinstance(screen, _SaveTemplateScreen)
-            screen.dismiss('my_template')
+            screen.dismiss(SaveRequest('my_template', 'Test Template'))
             for _ in range(3):
                 await pilot.pause()
 
-            assert dismissed_values == ['my_template']
+            assert dismissed_values == [SaveRequest('my_template', 'Test Template')]
 
     @pytest.mark.asyncio
     async def test_empty_name_not_submitted(self):
         """Pressing enter with an empty name does NOT dismiss the modal."""
         app = TemplateBuilderApp()
-        dismissed_values: list[str | None] = []
+        dismissed_values: list[SaveRequest | None] = []
 
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -250,7 +251,7 @@ class TestSaveTemplateScreen:
     async def test_escape_cancels(self):
         """Pressing escape dismisses with None."""
         app = TemplateBuilderApp()
-        dismissed_values: list[str | None] = []
+        dismissed_values: list[SaveRequest | None] = []
 
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -269,6 +270,58 @@ class TestSaveTemplateScreen:
                 await pilot.pause()
 
             assert dismissed_values == [None]
+
+
+class TestSaveWithDisplayName:
+    """Save as can also rename, so a copy does not show under the original name."""
+
+    @pytest.mark.asyncio
+    async def test_the_dialog_offers_the_current_display_name(self):
+        app, _llm = _editor('unused')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            assert app.app.screen.query_one('#save-display', Input).value == 'Test Template'
+
+    @pytest.mark.asyncio
+    async def test_a_new_display_name_is_saved_with_the_template(self, tmp_path):
+        app, _llm = _editor('unused')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch(
+                'lazy_take_notes.l3_interface_adapters.gateways.template_writer.save_user_template',
+                return_value=tmp_path / 'standup_short.yaml',
+            ) as save:
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                dialog = app.app.screen
+                dialog.query_one('#save-input', Input).value = 'standup_short'
+                dialog.query_one('#save-display', Input).value = 'Standup (short)'
+                dialog.query_one('#save-display', Input).focus()
+                await pilot.press('enter')
+                await pilot.pause()
+            saved, file_name = save.call_args.args
+            assert file_name == 'standup_short'
+            assert saved.metadata.name == 'Standup (short)'
+            assert app._current_template is not None
+            assert app._current_template.metadata.name == 'Standup (short)'
+
+    @pytest.mark.asyncio
+    async def test_an_empty_display_name_keeps_the_old_one(self, tmp_path):
+        app, _llm = _editor('unused')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            with patch(
+                'lazy_take_notes.l3_interface_adapters.gateways.template_writer.save_user_template',
+                return_value=tmp_path / 'standup.yaml',
+            ) as save:
+                await pilot.press('ctrl+s')
+                await pilot.pause()
+                app.app.screen.query_one('#save-display', Input).value = '  '
+                await pilot.press('enter')
+                await pilot.pause()
+            assert save.call_args.args[0].metadata.name == 'Test Template'
 
 
 # ── Animate thinking tests ───────────────────────────────────────────────────
@@ -361,11 +414,11 @@ class TestLlmTimeout:
 
 class TestDoGenerateErrors:
     @pytest.mark.asyncio
-    async def test_use_case_none_shows_error(self):
+    async def test_use_case_none_shows_error(self, monkeypatch):
         """When _ensure_use_case returns None, an error chat message appears."""
         app = TemplateBuilderApp()
         # Force _ensure_use_case to return None
-        app._ensure_use_case = lambda: None  # type: ignore[assignment]
+        monkeypatch.setattr(app, '_ensure_use_case', lambda: None)
 
         async with app.run_test() as pilot:
             await pilot.pause()
@@ -776,7 +829,7 @@ class TestOnSaveName:
                 'lazy_take_notes.l3_interface_adapters.gateways.template_writer.save_user_template',
                 return_value=tmp_path / 'my_template.yaml',
             ) as mock_save:
-                app._on_save_name('My Template!')
+                app._on_save_name(SaveRequest('My Template!', ''))
                 await pilot.pause()
 
                 mock_save.assert_called_once()
@@ -802,7 +855,7 @@ class TestOnSaveName:
 
         async with app.run_test() as pilot:
             await pilot.pause()
-            app._on_save_name('something')  # Should not raise
+            app._on_save_name(SaveRequest('something', ''))  # Should not raise
 
 
 # ── Input edge cases ────────────────────────────────────────────────────────
@@ -955,7 +1008,7 @@ class TestTemplateBuilderFaults:
                 'lazy_take_notes.l3_interface_adapters.gateways.template_writer.save_user_template',
                 side_effect=PermissionError('read-only'),
             ):
-                app._on_save_name('mine')
+                app._on_save_name(SaveRequest('mine', ''))
                 await pilot.pause()
 
             assert app._saved is False
