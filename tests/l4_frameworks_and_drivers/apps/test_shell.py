@@ -258,3 +258,32 @@ class TestShellFaults:
 
         welcome.assert_called_once()
         assert 'output folder' in notify.call_args.args[0]
+
+
+class TestBackFromTheBuilder:
+    """Closing the builder returns to the template picker it came from."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('opener', ['_open_record', '_open_transcribe'])
+    async def test_esc_returns_to_the_picker(self, opener, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import TemplateBuilderApp
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers import template_picker
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import TemplatePicker
+
+        # Without this flag file, the picker first shows the built-in templates notice.
+        noticed = tmp_path / 'noticed'
+        noticed.touch()
+        monkeypatch.setattr(template_picker, 'BUILTIN_TEMPLATES_NOTICED_PATH', noticed)
+        shell = ShellApp(kiosk=True, transcribe_options={'audio_path': str(tmp_path / 'a.wav')})
+        async with shell.run_test(size=(170, 50)) as pilot:
+            await pilot.pause()
+            getattr(shell, opener)()
+            await pilot.pause()
+            assert isinstance(shell.screen, TemplatePicker)
+            shell.screen.dismiss('__create_template__')
+            await pilot.pause()
+            assert isinstance(shell.screen, TemplateBuilderApp)
+            shell.screen.dismiss()
+            for _ in range(4):
+                await pilot.pause()
+            assert isinstance(shell.screen, TemplatePicker)

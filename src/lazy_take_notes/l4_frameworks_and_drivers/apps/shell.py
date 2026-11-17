@@ -135,7 +135,8 @@ class ShellApp(SessionHostApp):
     # --- Record ----------------------------------------------------------
 
     @_back_to_welcome_on_error
-    def _open_record(self) -> None:
+    def _open_record(self, _result=None) -> None:
+        # Also the callback when the builder closes; Textual passes the screen result.
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             load_config,
             select_template,
@@ -239,7 +240,8 @@ class ShellApp(SessionHostApp):
 
     # --- Transcribe ------------------------------------------------------
 
-    def _open_transcribe(self) -> None:
+    def _open_transcribe(self, _result=None) -> None:
+        # Also the callback when the builder closes; Textual passes the screen result.
         opts = self._transcribe_options
         if opts.get('audio_path') is None and opts.get('subtitle_segments') is None:
             from lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker import (  # noqa: PLC0415 -- deferred
