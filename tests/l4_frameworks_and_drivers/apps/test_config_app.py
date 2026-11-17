@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from textual.widgets import Static
 
 from lazy_take_notes.l4_frameworks_and_drivers.apps.config.app import (
     ConfigApp,
@@ -923,6 +924,49 @@ class TestConfigAppFaults:
                 await pilot.pause()
             mock_run.assert_not_called()
             assert any('Cannot create' in t and 'read-only' in t for t in _toasts(app))
+
+
+class TestCustomConfigPath:
+    """With --config, Settings reads, shows, saves and opens that file, not the default."""
+
+    def _setup(self, tmp_path, monkeypatch) -> tuple[ConfigApp, Path, Path]:
+        _app, default_path = _make_app(tmp_path, monkeypatch, config_data={'digest': {'model': 'default-model'}})
+        custom = tmp_path / 'team.yaml'
+        custom.write_text(yaml.dump({'digest': {'model': 'team-model'}}), encoding='utf-8')
+        return ConfigApp(config_path=str(custom)), custom, default_path
+
+    def test_it_loads_the_custom_file(self, tmp_path, monkeypatch):
+        app, _custom, _default = self._setup(tmp_path, monkeypatch)
+        assert app._raw['digest']['model'] == 'team-model'
+
+    @pytest.mark.asyncio
+    async def test_it_shows_and_saves_the_custom_file(self, tmp_path, monkeypatch):
+        app, custom, default_path = self._setup(tmp_path, monkeypatch)
+        default_before = default_path.read_text(encoding='utf-8')
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert str(app.query_one('#cfg-path', Static).render()) == str(custom)
+            app.action_save_config()
+            await pilot.pause()
+        assert yaml.safe_load(custom.read_text(encoding='utf-8'))['digest']['model'] == 'team-model'
+        assert 'output' in yaml.safe_load(custom.read_text(encoding='utf-8'))  # the save landed here
+        assert default_path.read_text(encoding='utf-8') == default_before
+
+    @pytest.mark.asyncio
+    async def test_the_raw_editor_opens_the_custom_file(self, tmp_path, monkeypatch):
+        app, custom, _default = self._setup(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-nav').focus()
+            await pilot.pause()
+            with (
+                patch(f'{_CONFIG_MOD}.resolve_editor', return_value=['cat']),
+                patch(f'{_CONFIG_MOD}.subprocess.run') as run,
+                patch.object(app.app, 'suspend', side_effect=lambda: _NullContext()),
+            ):
+                await pilot.press('e')
+                await pilot.pause()
+        assert run.call_args.args[0] == ['cat', str(custom)]
 
 
 class TestBrokenConfigOnOpen:

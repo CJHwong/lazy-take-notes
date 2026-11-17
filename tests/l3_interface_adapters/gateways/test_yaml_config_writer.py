@@ -81,3 +81,20 @@ class TestWriteConfig:
         write_config({'digest': {'model': 'x'}})
         written = yaml.safe_load(default_path.read_text(encoding='utf-8'))
         assert written['digest']['model'] == 'x'
+
+
+class TestExplicitPath:
+    def test_writes_the_given_file_and_leaves_the_default_alone(self, tmp_path: Path, monkeypatch):
+        default_path = tmp_path / 'cfg' / 'config.yaml'
+        monkeypatch.setattr(mod, 'CONFIG_DIR', default_path.parent)
+        monkeypatch.setattr(mod, 'DEFAULT_CONFIG_PATHS', [default_path])
+        custom = tmp_path / 'elsewhere' / 'team.yaml'
+        custom.parent.mkdir()
+        custom.write_text(yaml.dump({'llm_provider': 'openai', 'digest': {'model': 'a'}}), encoding='utf-8')
+
+        assert write_config({'digest': {'model': 'b'}}, path=custom) == custom
+        assert yaml.safe_load(custom.read_text(encoding='utf-8')) == {
+            'llm_provider': 'openai',
+            'digest': {'model': 'b'},
+        }
+        assert not default_path.exists()

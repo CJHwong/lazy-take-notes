@@ -147,7 +147,7 @@ Models and the diarization runtime download on demand and are verified before us
 
 `apps/config/` contains the settings screen.
 
-- `app.py`: `ConfigApp`, save, numeric validation, unsaved-changes prompt, AI model list.
+- `app.py`: `ConfigApp`, save, numeric validation, unsaved-changes prompt, AI model list. With `--config`, it reads, shows, saves and opens (`e`) that file instead of the default.
 - `models_tab.py`: asset rows, install, cancel, remove, cache use.
 - `audio_tab.py`: live input probe, microphone select, speaker labels, advanced audio settings.
 - `fields.py`: shared form widgets.

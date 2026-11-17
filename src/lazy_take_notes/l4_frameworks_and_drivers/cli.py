@@ -458,7 +458,7 @@ def config(ctx):
         ConfigApp,
     )
 
-    ConfigApp().run()
+    ConfigApp(config_path=ctx.obj['config_path']).run()
 
 
 def _launch_template_builder(config_path: str | None = None) -> None:

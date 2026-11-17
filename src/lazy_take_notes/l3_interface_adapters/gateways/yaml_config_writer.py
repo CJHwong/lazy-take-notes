@@ -15,15 +15,17 @@ def config_file_path() -> Path:
     return DEFAULT_CONFIG_PATHS[0]
 
 
-def write_config(data: dict) -> Path:
-    """Merge *data* into the existing config file (or create it) and write back.
+def write_config(data: dict, path: Path | None = None) -> Path:
+    """Merge *data* into the config file (or create it) and write back.
 
+    *path* is the file given with --config; without it, the default location is used.
     Returns the path that was written.
     """
-    path = _resolve_existing_or_default()
+    if path is None:
+        path = _resolve_existing_or_default()
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     existing = _read_existing(path)
     deep_merge(existing, data)
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.dump(existing, default_flow_style=False, allow_unicode=True, sort_keys=False),
         encoding='utf-8',
