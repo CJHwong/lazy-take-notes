@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import sys
 import threading
 import time
 from collections import deque
@@ -79,8 +80,12 @@ class SessionHostApp(App):
     _ending_for_errors = False
 
     def get_driver_class(self) -> type[Driver]:
+        driver_class = super().get_driver_class()
+        if sys.platform == 'win32':
+            # The console stream converts text for the console; raw os.write would not.
+            return driver_class
         # Textual's writer thread dies on the first failed terminal write.
-        return with_terminal_output(super().get_driver_class())
+        return with_terminal_output(driver_class)
 
     def _handle_exception(self, error: Exception) -> None:
         # Textual wraps a worker exception in WorkerFailed without raising it,

@@ -132,3 +132,12 @@ class TestDriver:
         driver_class = SessionHostApp().get_driver_class()
         driver = driver_class(app=None)  # ty: ignore[invalid-argument-type] -- the driver only stores the app
         assert isinstance(driver._file, TerminalOutput)  # ty: ignore[missing-attribute] -- Textual's private writer file
+
+    def test_windows_keeps_textual_s_driver(self, monkeypatch):
+        # The Windows console stream converts text for the console; raw os.write would not.
+        from textual.app import App
+
+        from lazy_take_notes.l4_frameworks_and_drivers import screen_base
+
+        monkeypatch.setattr(screen_base.sys, 'platform', 'win32')
+        assert SessionHostApp().get_driver_class() is App().get_driver_class()
