@@ -23,6 +23,11 @@ uv run pytest tests/ -v
 ```
 
 
+* **Type Check** (`ty` is pinned in the dev group; keep it at the version of the `ty` hook in `.pre-commit-config.yaml`):
+```bash
+uv run ty check src tests
+```
+
 * **Verify Architecture (Import Contracts)**:
 ```bash
 uv run lint-imports
