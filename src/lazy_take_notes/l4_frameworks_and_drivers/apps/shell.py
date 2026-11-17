@@ -353,7 +353,7 @@ class ShellApp(SessionHostApp):
     def _open_config(self) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.apps.config import ConfigApp  # noqa: PLC0415 -- deferred
 
-        self.push_screen(ConfigApp(), self._finished)
+        self.push_screen(ConfigApp(config_path=self._config_path), self._finished)
 
     def _open_template_builder(self, after=None) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.apps.template_builder import (  # noqa: PLC0415 -- deferred

@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import logging
 import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell commands
+from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
@@ -161,8 +162,10 @@ class ConfigApp(ShellScreen):
         Binding('ctrl+s', 'save_config', 'Save', priority=True),
     ]
 
-    def __init__(self, asset_store: ModelAdminStore | None = None, **kwargs) -> None:
+    def __init__(self, asset_store: ModelAdminStore | None = None, config_path: str | None = None, **kwargs) -> None:
         super().__init__(**kwargs)
+        # The --config file: Settings reads, shows, saves and opens it instead of the default.
+        self._config_path = Path(config_path) if config_path else None
         self._asset_store = asset_store or CachedModelStore()
         self._saved = False
         self._clear_api_key = False
@@ -183,7 +186,7 @@ class ConfigApp(ShellScreen):
         import copy  # noqa: PLC0415 -- one-shot use
 
         loader = YamlConfigLoader()
-        user_raw = loader.load()
+        user_raw = loader.load(str(self._config_path) if self._config_path else None)
         merged = copy.deepcopy(APP_CONFIG_DEFAULTS)
         deep_merge(merged, user_raw)
         self._raw = merged
@@ -202,7 +205,7 @@ class ConfigApp(ShellScreen):
 
     def compose(self) -> ComposeResult:
         yield Static('Settings', id='cfg-title')
-        yield Static(str(config_file_path()), id='cfg-path')
+        yield Static(str(self._config_file()), id='cfg-path')
         with Horizontal(id='cfg-shell'):
             yield ListView(
                 *[ListItem(Static(label), id=f'nav-{key}') for key, label in self.NAV],
@@ -465,7 +468,7 @@ class ConfigApp(ShellScreen):
             return
 
         try:
-            path = write_config(data)
+            path = write_config(data, self._config_path)
         except (OSError, yaml.YAMLError) as exc:
             log.error('Cannot save config: %s', exc, exc_info=True)
             self.notify(f'Cannot save config: {exc}', severity='error', markup=False, timeout=10)
@@ -529,18 +532,19 @@ class ConfigApp(ShellScreen):
         else:
             self.notify(f'Connection failed: {err}', severity='error', timeout=8)
 
+    def _config_file(self) -> Path:
+        return self._config_path or config_file_path()
+
     def _open_raw_editor(self) -> None:
         """Open config.yaml in $EDITOR."""
         editor_argv = resolve_editor()
         if editor_argv is None:
             self.notify('No editor found ($VISUAL / $EDITOR)', severity='error')
             return
-        path = config_file_path()
+        path = self._config_file()
         if not path.exists():
-            from lazy_take_notes.l3_interface_adapters.gateways.paths import CONFIG_DIR  # noqa: PLC0415 -- deferred
-
             try:
-                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(
                     yaml.dump(self._raw, default_flow_style=False, allow_unicode=True, sort_keys=False),
                     encoding='utf-8',

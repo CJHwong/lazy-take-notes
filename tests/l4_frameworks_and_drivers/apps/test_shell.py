@@ -148,6 +148,15 @@ class TestShellRouting:
         )
         assert push.call_args.args[1] == getattr(shell, back_to)  # back to the picker after
 
+    def test_settings_gets_the_config_path(self):
+        shell = ShellApp(kiosk=True, config_path='/custom/config.yaml')
+        with (
+            patch(f'{_APPS}.config.ConfigApp') as settings,
+            patch.object(shell, 'push_screen'),
+        ):
+            shell._open_config()  # noqa: SLF001 -- routing unit test
+        settings.assert_called_once_with(config_path='/custom/config.yaml')
+
     def test_finish_exits_in_single_shot(self):
         shell = ShellApp(kiosk=False, initial_mode='config')
         with patch.object(shell, 'exit') as mock_exit:
