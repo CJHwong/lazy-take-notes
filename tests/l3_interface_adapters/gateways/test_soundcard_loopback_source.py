@@ -301,7 +301,7 @@ class TestPatchSoundcardNumpy2Compat:
         # WASAPI capture buffers become dangling pointers after _capture_release().
         raw = b'\x00\x00\x80\x3f\x00\x00\x00\x40'  # [1.0, 2.0] as float32
         compat_fromstring = shim.fromstring
-        result = compat_fromstring(raw, dtype='float32')  # type: ignore[no-matching-overload]  -- shim, not real numpy
+        result = compat_fromstring(raw, dtype='float32')  # ty: ignore[no-matching-overload] -- shim, not real numpy
         np.testing.assert_array_equal(result, np.array([1.0, 2.0], dtype=np.float32))
         assert result.flags.owndata  # must own its data (copy, not view)
 

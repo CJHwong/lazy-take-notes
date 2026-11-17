@@ -72,14 +72,14 @@ class TestRunDigest:
         assert len(digest_state.buffer) == 20  # Buffer preserved
 
     @pytest.mark.asyncio
-    async def test_llm_exception(self, digest_state, template):
+    async def test_llm_exception(self, digest_state, template, monkeypatch):
         fake_llm = FakeLLMClient()
 
         # Make the chat method raise
         async def _raise(*a, **kw):
             raise ConnectionError('LLM down')
 
-        fake_llm.chat = _raise  # type: ignore[invalid-assignment]
+        monkeypatch.setattr(fake_llm, 'chat', _raise)
         uc = RunDigestUseCase(fake_llm)
 
         result = await uc.execute(state=digest_state, model='test-model', template=template)
@@ -128,7 +128,7 @@ class TestDigestFaults:
         assert fake_llm.chat_calls == []
 
     @pytest.mark.asyncio
-    async def test_a_cancelled_digest_removes_its_prompt_from_the_history(self, digest_state, template):
+    async def test_a_cancelled_digest_removes_its_prompt_from_the_history(self, digest_state, template, monkeypatch):
         import asyncio
 
         fake_llm = FakeLLMClient()
@@ -136,7 +136,7 @@ class TestDigestFaults:
         async def _hang(*a, **kw):
             await asyncio.Event().wait()
 
-        fake_llm.chat = _hang  # type: ignore[invalid-assignment]
+        monkeypatch.setattr(fake_llm, 'chat', _hang)
         messages_before = list(digest_state.messages)
         task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
         await asyncio.sleep(0)
@@ -151,7 +151,7 @@ class TestDigestPromptOwnership:
     """Each digest removes its own prompt, even after a newer digest appended one."""
 
     @pytest.mark.asyncio
-    async def test_a_cancelled_digest_keeps_a_newer_prompt(self, digest_state, template):
+    async def test_a_cancelled_digest_keeps_a_newer_prompt(self, digest_state, template, monkeypatch):
         import asyncio
 
         from lazy_take_notes.l1_entities.chat_message import ChatMessage
@@ -161,7 +161,7 @@ class TestDigestPromptOwnership:
         async def _hang(*a, **kw):
             await asyncio.Event().wait()
 
-        fake_llm.chat = _hang  # type: ignore[invalid-assignment]
+        monkeypatch.setattr(fake_llm, 'chat', _hang)
         before = list(digest_state.messages)
         task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
         await asyncio.sleep(0)
@@ -176,7 +176,7 @@ class TestDigestPromptOwnership:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('outcome', ['raises', 'empty'])
-    async def test_a_failed_digest_keeps_a_newer_prompt(self, digest_state, template, outcome):
+    async def test_a_failed_digest_keeps_a_newer_prompt(self, digest_state, template, outcome, monkeypatch):
         import asyncio
 
         from lazy_take_notes.l1_entities.chat_message import ChatMessage
@@ -192,7 +192,7 @@ class TestDigestPromptOwnership:
                 raise ConnectionError('dropped')
             return ChatResponse(content='   ')
 
-        fake_llm.chat = _late_failure  # type: ignore[invalid-assignment]
+        monkeypatch.setattr(fake_llm, 'chat', _late_failure)
         before = list(digest_state.messages)
         task = asyncio.create_task(RunDigestUseCase(fake_llm).execute(state=digest_state, model='m', template=template))
         await asyncio.sleep(0)

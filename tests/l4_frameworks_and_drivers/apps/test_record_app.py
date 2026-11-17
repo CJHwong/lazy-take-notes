@@ -1117,7 +1117,7 @@ class TestDigestWorkerAsync:
                 await pilot.pause()
 
                 # Make LLM return empty → triggers error path
-                app._controller._digest_uc._llm.set_response('')  # ty: ignore[unresolved-attribute]
+                app._controller._digest_uc._llm.set_response('')  # ty: ignore[missing-attribute]
                 app._run_digest_worker()
                 await pilot.pause()
                 await pilot.pause()
@@ -1206,7 +1206,7 @@ class TestFinalDigestWorkerAsync:
                 app.post_message(TranscriptChunk(segments=segments))
                 await pilot.pause()
 
-                app._controller._digest_uc._llm.set_response('')  # ty: ignore[unresolved-attribute]
+                app._controller._digest_uc._llm.set_response('')  # ty: ignore[missing-attribute]
                 app._run_final_digest()
                 await pilot.pause()
                 await pilot.pause()

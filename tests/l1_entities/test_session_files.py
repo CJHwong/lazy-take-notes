@@ -39,7 +39,7 @@ class TestSessionFile:
         import pytest
 
         with pytest.raises(AttributeError):
-            sf.name = 'c.txt'  # type: ignore[misc]
+            sf.name = 'c.txt'  # ty: ignore[invalid-assignment] -- the read-only error is the test
 
 
 class TestModuleConstants:
