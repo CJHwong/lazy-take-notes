@@ -17,8 +17,11 @@ from collections import deque
 from typing import TypeVar
 
 from textual.app import App
+from textual.driver import Driver
 from textual.screen import Screen
 from textual.worker import WorkerFailed
+
+from lazy_take_notes.l4_frameworks_and_drivers.drivers.terminal_output import with_terminal_output
 
 T = TypeVar('T')
 
@@ -74,6 +77,10 @@ class SessionHostApp(App):
 
     _error_times: deque[float]
     _ending_for_errors = False
+
+    def get_driver_class(self) -> type[Driver]:
+        # Textual's writer thread dies on the first failed terminal write.
+        return with_terminal_output(super().get_driver_class())
 
     def _handle_exception(self, error: Exception) -> None:
         # Textual wraps a worker exception in WorkerFailed without raising it,

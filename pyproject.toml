@@ -60,6 +60,7 @@ dev = [
     "pytest-cov==7.0.0",
     "textual-dev==1.8.0",
     "import-linter==2.10",
+    "ty==0.0.105",
 ]
 
 [tool.hatch.build.targets.wheel]

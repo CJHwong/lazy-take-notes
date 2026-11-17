@@ -23,6 +23,11 @@ uv run pytest tests/ -v
 ```
 
 
+* **Type Check** (`ty` is pinned in the dev group; keep it at the version of the `ty` hook in `.pre-commit-config.yaml`):
+```bash
+uv run ty check src tests
+```
+
 * **Verify Architecture (Import Contracts)**:
 ```bash
 uv run lint-imports
@@ -128,6 +133,7 @@ The audio worker posts `AudioHealth` on each change. `RecordApp` shows `MIC LOST
 - **Crash evidence and last-resort net**: `SessionHostApp` (base of `ShellApp` and the standalone host) logs any unexpected exception with its traceback to the session `debug.log`, shows a toast, and keeps running. `ShellScreen._dispatch_message` keeps a screen's message loop alive after a handler raises. More than `ERROR_BURST_LIMIT` errors in `ERROR_BURST_WINDOW_S` means an error loop, so the session ends cleanly instead. `faulthandler` writes native crashes into the same file
 - **Shutdown signals**: SIGTERM and SIGHUP stop audio, save the session context, and exit after the audio flush (at most `SHUTDOWN_GRACE_S`). The final LLM digest is skipped. The handler is a `signal.signal` handler, not an asyncio one: it arms the exit watchdog before the event loop runs, so a hung loop still exits
 - **Preflight**: Every record entry point (kiosk shell, `record`, `--headless`) runs `preflight.py` first. Checks use the objects the session then reuses: the same LLM client, and the same transcriber, so the model loaded by preflight carries into the session (`SubprocessWhisperTranscriber.load_model` is a no-op for a loaded path). The LLM check sends one tiny request, which catches auth errors and usage limits. A failed AI check or a mic sending exact zeros offers "Start anyway" (an AI failure starts transcript-only); every other failure blocks. Headless exits on a hard failure and keeps transcript-only for an AI failure
+- **Terminal output survives a brief EBADF**: sounddevice re-initializes PortAudio with `dup2()` onto fd 2. On macOS, a write to fd 2 from another thread during that `dup2()` fails with EBADF. Textual's writer thread dies on that error: the screen freezes, and exit blocks forever on the writer's full queue. `SessionHostApp.get_driver_class` wraps every driver with `drivers/terminal_output.py`, which owns the bytes, writes them with `os.write`, and retries EBADF for up to 1 s. Any other write error drops the bytes with a warning in `debug.log` and keeps the thread alive
 - **Threads never wait on the event loop**: Check threads update `PreflightScreen` with `post_message`, not `call_from_thread`. With `call_from_thread`, a real start hung with the loop thread waiting on a lock; a posted message never makes a worker wait for the loop
 - **Plugin system**: External packages register CLI subcommands via Python `entry_points` (group `lazy_take_notes.plugins`). Plugins import shared helpers from `lazy_take_notes.plugin_api` — this is the stable public surface
 
