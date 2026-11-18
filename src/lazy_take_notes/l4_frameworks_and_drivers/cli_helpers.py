@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -54,6 +55,15 @@ def make_session_dir(base_dir: Path, label: str | None) -> Path:
 
 def load_config(config_path, output_dir):
     """Load configuration and infra settings. Returns (config, infra, template_loader) or exits."""
+    try:
+        return read_config(config_path, output_dir)
+    except FileNotFoundError as e:
+        click.echo(f'Error: {e}', err=True)
+        sys.exit(1)
+
+
+def read_config(config_path, output_dir):
+    """Load configuration and infra settings. Raises instead of exiting, for a running TUI."""
     from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import (  # noqa: PLC0415 -- deferred: yaml stack not loaded on --help
         YamlConfigLoader,
     )
@@ -68,18 +78,11 @@ def load_config(config_path, output_dir):
     config_loader = YamlConfigLoader()
     template_loader = YamlTemplateLoader()
 
-    try:
-        overrides: dict = {}
-        if output_dir:
-            overrides['output'] = {'directory': output_dir}
-        raw = config_loader.load(config_path, overrides=overrides if overrides else None)
-        config = build_app_config(raw)
-        infra = InfraConfig.model_validate(raw)
-    except FileNotFoundError as e:
-        click.echo(f'Error: {e}', err=True)
-        sys.exit(1)
-
-    return config, infra, template_loader
+    overrides: dict = {}
+    if output_dir:
+        overrides['output'] = {'directory': output_dir}
+    raw = config_loader.load(config_path, overrides=overrides if overrides else None)
+    return build_app_config(raw), InfraConfig.model_validate(raw), template_loader
 
 
 def pick_template(template_loader, *, show_builtins: bool = True, config_path: str | None = None):
@@ -347,7 +350,18 @@ def build_preflight_plan(
         check_audio=audio_source is None,
         mic_muted=mute_mic,
         owns_transcriber=transcriber is None,
+        infra=infra,
     )
+
+
+def plan_reloader(config_path, output_dir: str | None, template, **options) -> Callable:
+    """Build the preflight plan again from config.yaml, for Retry."""
+
+    def reload():
+        config, infra, _template_loader = read_config(config_path, output_dir)
+        return build_preflight_plan(config, infra, template, output_dir, **options)
+
+    return reload
 
 
 def missing_models_after_preflight(config, report) -> tuple[list[str], list[str]]:
@@ -459,25 +473,21 @@ def run_record(
         PreflightScreen,
     )
 
-    plan = build_preflight_plan(
-        config,
-        infra,
-        template,
-        output_dir,
-        llm_client=llm_client,
-        transcriber=transcriber,
-        audio_source=audio_source,
-        mute_mic=mute_mic,
+    options = {'llm_client': llm_client, 'transcriber': transcriber, 'audio_source': audio_source, 'mute_mic': mute_mic}
+    screen = PreflightScreen(
+        build_preflight_plan(config, infra, template, output_dir, **options),
+        reload=plan_reloader(config_path, output_dir, template, **options),
     )
-    report = PreflightScreen(plan).run()
+    report = screen.run()
+    plan = screen.plan
     if report is None:
         if plan.owns_transcriber:
             plan.transcriber.close()
         return None
 
     app, out_dir = build_record_session(
-        config,
-        infra,
+        plan.config,
+        plan.infra,
         template,
         output_dir,
         label,

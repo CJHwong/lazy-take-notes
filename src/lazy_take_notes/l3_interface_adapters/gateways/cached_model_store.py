@@ -121,14 +121,14 @@ class CachedModelStore:
             self._save_state()
             return freed
 
-    def resolve(self, name: str) -> str:
+    def resolve(self, name: str, cancel: threading.Event | None = None) -> str:
         asset = self._assets.get(name) or model_catalog.asset_for_model(name, self._assets)
         if asset is not None:
-            return str(self.install(asset.id))
+            return str(self.install(asset.id, cancel=cancel))
 
         parsed = model_catalog.parse_hf_uri(model_catalog.expand_model_alias(name))
         if parsed is not None:
-            return str(self._install_custom(*parsed))
+            return str(self._install_custom(*parsed, cancel=cancel))
         if name.startswith('hf://'):
             raise ModelResolutionError(f'Malformed hf:// URI (expected hf://owner/repo/file): {name}')
 
@@ -198,7 +198,7 @@ class CachedModelStore:
         digest = asset.entry_sha256 or sha256_file(entry)
         self._record(asset, digest)
 
-    def _install_custom(self, repo: str, filename: str) -> Path:
+    def _install_custom(self, repo: str, filename: str, cancel: threading.Event | None = None) -> Path:
         asset = ModelAsset(
             id=f'custom:{repo}/{filename}',
             label=filename,
@@ -213,7 +213,7 @@ class CachedModelStore:
             hf_repo=repo,
         )
         with self._lock:
-            self._install_asset(asset, None, None)
+            self._install_asset(asset, None, cancel)
         return self._entry_path(asset)
 
     def _preflight(self, asset: ModelAsset) -> None:

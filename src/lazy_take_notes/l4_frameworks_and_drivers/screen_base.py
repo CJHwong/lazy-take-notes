@@ -188,6 +188,21 @@ class SessionHostApp(App):
         self._arm_watchdog_once(signum)
         self.end_sessions()
 
+    async def action_quit(self) -> None:
+        # Textual's ctrl+q only exits the app. The audio thread would then keep
+        # recording with no screen, and the process would never end.
+        log.info('ctrl+q; ending the session without a final digest')
+        self.end_sessions()
+
+    def action_help_quit(self) -> None:
+        # A modal can sit on the recording screen; its warning still applies.
+        hints = (getattr(screen, 'quit_hint', None) for screen in reversed(self.screen_stack))
+        message = next((text for hint in hints if callable(hint) and (text := hint())), '')
+        if not message:
+            super().action_help_quit()
+            return
+        self.notify(message, title='Do you want to quit?')
+
     def end_sessions(self) -> None:
         """Stop every recording (audio flush, context save), then exit."""
         waiting = False

@@ -67,7 +67,8 @@ take-note --output-dir ./my_session           # custom output dir
 | `c`     | Copy focused panel to clipboard |
 | `Tab`   | Switch panel focus              |
 | `h`     | Help                            |
-| `q`     | Quit                            |
+| `q`     | Quit after the final notes      |
+| `ctrl+q` | Save the audio and quit now, without the final notes |
 
 Templates can add more keys for quick actions (catch up, action items, etc). Press `h` in the app to see all available bindings.
 

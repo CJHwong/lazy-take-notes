@@ -34,6 +34,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 )
 from lazy_take_notes.l4_frameworks_and_drivers.screen_base import SessionHostApp
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.speaker_bar import SpeakerBar
+from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.transcript_panel import TranscriptPanel
 from tests.conftest import FailingPersistence, FakeLLMClient, FakePersistence
 
@@ -313,6 +314,19 @@ class TestRename:
                 assert len(app._output_dir.name.encode()) <= 255  # noqa: SLF001 -- renamed folder
 
     @pytest.mark.asyncio
+    async def test_the_rename_moves_the_folder_the_audio_writer_uses(self, tmp_path):
+        app = make_app(tmp_path, dir_name='2026-02-21_143052')
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app._on_label_result('standup')  # noqa: SLF001 -- the rename callback
+                await pilot.pause()
+
+                folder = app._session_folder  # noqa: SLF001 -- shared with the WAV writer
+                assert folder.path == tmp_path / '2026-02-21_143052_standup'
+                assert app._output_dir == folder.path  # noqa: SLF001 -- renamed folder
+                assert not (tmp_path / '2026-02-21_143052').exists()
+
+    @pytest.mark.asyncio
     async def test_an_existing_target_is_never_overwritten(self, tmp_path):
         app = make_app(tmp_path, dir_name='2026-02-21_143052')
         taken = tmp_path / '2026-02-21_143052_standup'
@@ -500,6 +514,208 @@ class TestShutdownSignals:
                 for signum in before:
                     assert signal.getsignal(signum) == _host(app)._on_os_signal  # noqa: SLF001 -- installed handler
         assert {signum: signal.getsignal(signum) for signum in before} == before
+
+
+class TestQuitKeys:
+    @pytest.mark.asyncio
+    async def test_ctrl_q_stops_the_recording_before_the_app_exits(self, tmp_path):
+        # Textual's ctrl+q only ends the app; the audio thread then records on with no screen.
+        persistence = FakePersistence(tmp_path / 'output')
+        app = make_app(tmp_path, persistence=persistence)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await _settle(pilot)
+                app._controller.user_context = 'agenda'  # noqa: SLF001 -- typed context
+
+                with patch.object(app.app, 'exit') as exit_app:
+                    await pilot.press('ctrl+q')
+                    await _settle(pilot)
+
+                    assert app._audio_shutdown.is_set()  # noqa: SLF001 -- audio worker told to stop
+                    assert persistence.context_calls == ['agenda']
+                    exit_app.assert_not_called()  # waits for the audio flush
+
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    await _settle(pilot, 6)
+
+                    exit_app.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_ctrl_c_during_a_recording_names_the_stop_key(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await _settle(pilot)
+                await pilot.press('ctrl+c')
+                await _settle(pilot)
+
+                notice = _notices(app)[-1]
+                assert 'Press s to stop and save' in notice
+                assert 'ctrl+q' in notice
+
+    @pytest.mark.asyncio
+    async def test_ctrl_c_when_not_recording_keeps_textual_s_hint(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='stopped'))
+                await _settle(pilot)
+                await pilot.press('ctrl+c')
+                await _settle(pilot)
+
+                assert 'to quit the app' in _notices(app)[-1]
+
+
+class TestQuitDuringADigest:
+    @pytest.mark.asyncio
+    async def test_q_during_the_final_digest_quits_when_it_ends(self, tmp_path):
+        llm = GatedLLM()
+        app = make_app(tmp_path, llm=llm)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                app.post_message(TranscriptChunk(segments=[_segment('hello')]))
+                await _settle(pilot)
+                await pilot.press('s')
+                app.post_message(AudioWorkerStatus(status='stopped'))
+                await _settle(pilot)
+                assert app._digest_running  # noqa: SLF001 -- the final digest waits on the gate
+
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    await _settle(pilot)
+                    dismiss.assert_not_called()
+                    assert any('Quitting when the digest finishes' in n for n in _notices(app))
+
+                    llm.gates[-1].set()
+                    await _settle(pilot, 6)
+                    dismiss.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_q_during_a_periodic_digest_still_writes_the_final_notes(self, tmp_path):
+        llm = GatedLLM()
+        app = make_app(tmp_path, llm=llm)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                app.post_message(TranscriptChunk(segments=[_segment('hello')]))
+                await _settle(pilot)
+                await pilot.press('d')  # a periodic digest
+                await _settle(pilot)
+                app._audio_stopped = True  # noqa: SLF001 -- stopped while the digest runs
+                app._audio_worker_done = True  # noqa: SLF001 -- and the flush finished
+                bar = app.query_one('#status-bar', StatusBar)
+                bar.recording = False
+                bar.stopped = True
+
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    llm.gates[0].set()
+                    await _settle(pilot, 6)
+                    assert len(llm.gates) == 2  # the final digest started after the periodic one
+                    dismiss.assert_not_called()
+                    llm.gates[1].set()
+                    await _settle(pilot, 6)
+                    dismiss.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_a_failed_final_digest_still_quits_once(self, tmp_path):
+        class Failing(GatedLLM):
+            async def chat(self, model, messages):
+                await super().chat(model, messages)
+                raise RuntimeError('model gone')
+
+        llm = Failing()
+        app = make_app(tmp_path, llm=llm)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                app.post_message(TranscriptChunk(segments=[_segment('hello')]))
+                await _settle(pilot)
+                await pilot.press('s')
+                app.post_message(AudioWorkerStatus(status='stopped'))
+                await _settle(pilot)
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    llm.gates[-1].set()
+                    await _settle(pilot, 8)
+                    assert len(llm.gates) == 1  # no retry loop
+                    dismiss.assert_called_once()
+
+
+class TestCloseSession:
+    @pytest.mark.asyncio
+    async def test_it_closes_once_even_when_called_again(self, tmp_path):
+        # A second q and the label worker's end both reach close_session.
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                with patch.object(app, 'dismiss') as dismiss:
+                    app.close_session()
+                    app.close_session()
+                    app._pending_quit = True  # noqa: SLF001 -- a late label worker end
+                    app._continue_pending_quit()  # noqa: SLF001
+                    await pilot.pause()
+                    dismiss.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_a_modal_on_top_is_closed_first(self, tmp_path):
+        from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.app.push_screen(HelpModal(body_md='help'))
+                await pilot.pause()
+                tops: list = []
+                with patch.object(app, 'dismiss', side_effect=lambda *_: tops.append(app.app.screen)):
+                    app.close_session()
+                    await pilot.pause()
+                assert tops == [app]  # dismiss pops the top screen; it must be this one
+
+    @pytest.mark.asyncio
+    async def test_q_waits_for_the_audio_flush_before_the_final_digest(self, tmp_path):
+        llm = GatedLLM()
+        app = make_app(tmp_path, llm=llm)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                app.post_message(TranscriptChunk(segments=[_segment('hello')]))
+                await _settle(pilot)
+                await pilot.press('d')
+                await pilot.press('s')
+                await _settle(pilot)
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    llm.gates[0].set()  # the periodic digest ends during the flush
+                    await _settle(pilot, 6)
+                    assert len(llm.gates) == 1  # no final digest before the last lines arrive
+
+                    app.post_message(TranscriptChunk(segments=[_segment('last words', 2.0)]))
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    await _settle(pilot, 6)
+                    assert len(llm.gates) == 2
+                    assert 'last words' in str(llm.chat_calls[-1][1])
+                    llm.gates[1].set()
+                    await _settle(pilot, 6)
+                    dismiss.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_ctrl_c_with_a_modal_open_still_warns_about_ctrl_q(self, tmp_path):
+        from lazy_take_notes.l4_frameworks_and_drivers.widgets.help_modal import HelpModal
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await _settle(pilot)
+                app.app.push_screen(HelpModal(body_md='help'))
+                await pilot.pause()
+                _host(app).action_help_quit()
+                await pilot.pause()
+                assert 'Press s to stop and save' in _notices(app)[-1]
 
 
 class TestSignalPortability:

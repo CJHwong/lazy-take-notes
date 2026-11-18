@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 from textual.binding import Binding
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from lazy_take_notes.l2_use_cases.ports.model_resolver import ModelResolver
 from textual.widgets import TextArea
 
@@ -26,6 +28,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 )
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.consent_notice import ConsentNotice
 from lazy_take_notes.l4_frameworks_and_drivers.widgets.status_bar import StatusBar
+from lazy_take_notes.l4_frameworks_and_drivers.workers.session_folder import SessionFolder
 
 log = logging.getLogger('ltn.app')
 
@@ -57,6 +60,7 @@ class RecordApp(BaseApp):
         self._transcriber = transcriber
         self._model_resolver_factory = model_resolver_factory
         self._asset_store = asset_store
+        self._session_folder = SessionFolder(self._output_dir)
 
         # Audio control state
         self._audio_paused = threading.Event()
@@ -143,7 +147,7 @@ class RecordApp(BaseApp):
         run_diarization_worker(
             post_message=self.post_message,
             is_cancelled=lambda: self._audio_shutdown.is_set(),
-            audio_path=self._output_dir / 'recording.wav',
+            audio_path=lambda: self._session_folder.path / 'recording.wav',
             diarizer=diarizer,
             interval_s=cfg.interval_s,
         )
@@ -188,7 +192,7 @@ class RecordApp(BaseApp):
                 )
             ),
             pause_event=self._audio_paused,
-            output_dir=self._output_dir,
+            output_dir=self._session_folder,
             save_audio=self._config.output.save_audio,
             transcriber=self._transcriber,
             audio_source=self._audio_source,
@@ -204,6 +208,16 @@ class RecordApp(BaseApp):
         self._cancel_audio_workers()
         self._controller.save_context_now()
         return not self._audio_worker_done
+
+    def _move_session_folder(self, new_path: Path) -> None:
+        self._session_folder.rename(new_path)
+
+    def quit_hint(self) -> str:
+        """What ctrl+c shows. Empty when Textual's own hint is right."""
+        bar = self.query_one('#status-bar', StatusBar)
+        if not (bar.recording or bar.paused):
+            return ''
+        return 'Press s to stop and save, then q for the final notes. ctrl+q saves and quits without them.'
 
     # --- Message Handlers ---
 
@@ -278,16 +292,9 @@ class RecordApp(BaseApp):
                 self._audio_stopped = True
                 self.query_one('#context-input', TextArea).read_only = True
             if self._pending_quit:
-                # Quit was triggered before recording started; flush is now complete.
-                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-                if has_content and not self._final_digest_done:
-                    self._run_final_digest()
-                else:
-                    self.dismiss()
-            elif self._audio_stopped:
-                has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-                if has_content and not self._final_digest_done:
-                    self._run_digest_worker(is_final=True)
+                self._continue_pending_quit()  # the flush is complete
+            elif self._audio_stopped and self.needs_final_digest():
+                self._run_final_digest()
         elif message.status == 'warning':
             if message.error:
                 self.notify(message.error, severity='warning', timeout=10)
@@ -373,20 +380,12 @@ class RecordApp(BaseApp):
         if bar.recording or bar.paused:
             return  # q is intentionally disabled while recording/paused; press s first
 
-        if self._pending_quit:
-            if self._digest_running:
-                self.notify('Final digest in progress \u2014 please wait', severity='warning', timeout=3)
-                return
-            self.dismiss()
-            return
-
-        if self._digest_running:
-            self.notify('Digest in progress \u2014 please wait', severity='warning', timeout=3)
+        if self._pending_quit and not self._digest_running and not self._worker_busy():
+            self.close_session()  # a second q does not wait for the AI label
             return
 
         self._cancel_audio_workers()
 
-        was_already_stopped = self._audio_stopped
         if not self._audio_stopped:
             self._audio_stopped = True
             bar = self.query_one('#status-bar', StatusBar)
@@ -395,16 +394,10 @@ class RecordApp(BaseApp):
             bar.stopped = True
             self._update_hints('stopped')
 
-        if not was_already_stopped:
-            # Audio worker is still flushing — defer final digest/exit until
-            # AudioWorkerStatus(stopped) confirms the flush is complete.
-            self._pending_quit = True
-            return
+        if self._digest_running:
+            self.notify('Quitting when the digest finishes.', timeout=4)
+        self._pending_quit = True
+        self._continue_pending_quit()  # waits for AudioWorkerStatus(stopped) if the flush still runs
 
-        # Audio was already stopped — flush already happened, buffer is up to date.
-        has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-        if has_content and not self._final_digest_done:
-            self._pending_quit = True
-            self._run_final_digest()
-        else:
-            self.dismiss()
+    def _worker_busy(self) -> bool:
+        return self._audio_stopped and not self._audio_worker_done

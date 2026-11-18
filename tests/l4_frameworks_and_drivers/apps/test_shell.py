@@ -92,7 +92,7 @@ class TestShellRouting:
             patch('lazy_take_notes.l4_frameworks_and_drivers.keep_awake.keep_awake') as awake,
             patch.object(shell, 'push_screen') as push,
         ):
-            shell._after_preflight(MagicMock(), plan, report)  # noqa: SLF001 -- routing unit test
+            shell._after_preflight(MagicMock(), MagicMock(plan=plan), report)  # noqa: SLF001 -- routing unit test
         kwargs = build.call_args.kwargs
         assert kwargs['preflight'] is report
         assert kwargs['transcriber'] is plan.transcriber  # the model loaded by preflight is reused
@@ -110,7 +110,7 @@ class TestShellRouting:
             patch(f'{_CLI}.build_record_session') as build,
             patch.object(shell, '_finished') as finished,
         ):
-            shell._after_preflight(MagicMock(), plan, None)  # noqa: SLF001 -- routing unit test
+            shell._after_preflight(MagicMock(), MagicMock(plan=plan), None)  # noqa: SLF001 -- routing unit test
         build.assert_not_called()
         plan.transcriber.close.assert_called_once()
         finished.assert_called_once()

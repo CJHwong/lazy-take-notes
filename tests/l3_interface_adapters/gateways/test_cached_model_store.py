@@ -163,6 +163,18 @@ class TestResolve:
         store = make_store(tmp_path)
         assert Path(store.resolve('hf://owner/repo/tiny.bin')).read_bytes() == BODY
 
+    @pytest.mark.parametrize('name', ['tiny', 'hf://owner/repo/tiny.bin'])
+    def test_a_set_cancel_event_stops_the_download_and_keeps_nothing_installed(self, tmp_path: Path, name):
+        import threading
+
+        from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError
+
+        store = make_store(tmp_path)
+        cancel = threading.Event()
+        cancel.set()
+        with pytest.raises(DownloadCancelledError):
+            store.resolve(name, cancel=cancel)
+
     def test_absolute_path_exists(self, tmp_path: Path):
         model = tmp_path / 'model.bin'
         model.touch()

@@ -167,6 +167,44 @@ class TestTranscribeAppActions:
                     mock_exit.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_the_status_bar_says_transcribing_not_rec(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                await pilot.pause()
+                rendered = str(app.query_one('#status-bar', StatusBar).render())
+                assert '● Transcribing' in rendered
+                assert '● Rec' not in rendered
+
+    @pytest.mark.asyncio
+    async def test_q_during_a_digest_also_stops_the_file(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app._digest_running = True
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    await pilot.pause()
+                    assert app._file_shutdown.is_set()
+                    dismiss.assert_not_called()  # the file and the digest still run
+
+    @pytest.mark.asyncio
+    async def test_q_during_the_file_quits_after_the_final_digest(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_file_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(TranscriptChunk(segments=[TranscriptSegment(text='Data', wall_start=0, wall_end=1)]))
+                await pilot.pause()
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    for _ in range(4):
+                        await pilot.pause()
+
+                    dismiss.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_quit_after_done_with_content_runs_final_digest(self, tmp_path):
         app = make_app(tmp_path)
         with patch.object(app, '_start_file_worker'):

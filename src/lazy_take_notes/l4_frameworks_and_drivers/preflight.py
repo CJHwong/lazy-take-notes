@@ -14,9 +14,9 @@ import logging
 import os
 import shutil
 import sys
+import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +30,7 @@ from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l2_use_cases.utils.template_validator import validate_template
+from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
 
 if TYPE_CHECKING:
     from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
@@ -117,6 +118,10 @@ class PreflightPlan:
     # False when a plugin supplied the transcriber; only an owned one is closed on Back.
     owns_transcriber: bool = True
     report: PreflightReport | None = field(default=None, repr=False)
+    # The InfraConfig the plan was built from; Retry rebuilds both from disk.
+    infra: object = field(default=None, repr=False)
+    # Set when the user leaves the checks; a running download stops and keeps its .part file.
+    cancel: threading.Event = field(default_factory=threading.Event, repr=False)
 
 
 def new_checks() -> list[Check]:
@@ -136,21 +141,26 @@ def run_preflight(plan: PreflightPlan, on_update: Callable[[Check], None] | None
     notify = on_update or (lambda _check: None)
     checks = {check.key: check for check in new_checks()}
     started = time.monotonic()
-    with ThreadPoolExecutor(max_workers=2, thread_name_prefix='ltn-preflight') as pool:
-        slow = [
-            pool.submit(_run, checks['whisper'], _check_whisper, plan, notify),
-            pool.submit(_run, checks['llm'], _check_llm, plan, notify),
-        ]
-        for key, check_fn in (
-            ('output', _check_output),
-            ('template', _check_template),
-            ('mic', _check_microphone),
-            ('system', _check_system_audio),
-            ('diarization', _check_diarization),
-        ):
-            _run(checks[key], check_fn, plan, notify)
-        for future in slow:
-            future.result()
+    # Daemon threads: Python joins any other thread at exit, so a user who leaves
+    # the checks would wait for a download or a 120 s model probe.
+    slow = [
+        threading.Thread(
+            target=_run, args=(checks[key], check_fn, plan, notify), daemon=True, name=f'ltn-preflight-{key}'
+        )
+        for key, check_fn in (('whisper', _check_whisper), ('llm', _check_llm))
+    ]
+    for thread in slow:
+        thread.start()
+    for key, check_fn in (
+        ('output', _check_output),
+        ('template', _check_template),
+        ('mic', _check_microphone),
+        ('system', _check_system_audio),
+        ('diarization', _check_diarization),
+    ):
+        _run(checks[key], check_fn, plan, notify)
+    for thread in slow:
+        thread.join()
     report = PreflightReport(list(checks.values()))
     log.info(
         'preflight finished in %.1fs: %s',
@@ -216,6 +226,9 @@ def _check_whisper(check: Check, plan: PreflightPlan, update: Callable[[str], No
     check.fix = 'Check the network for the first download, or install the model in Settings > Models.'
     update(f'Finding {name}')
     resolver = plan.model_resolver_factory(lambda percent: update(f'Downloading {name}: {percent}%'))
+    if isinstance(resolver, HfModelResolver):
+        # A plugin resolver has no cancel; its download ends with the daemon check thread.
+        resolver.cancel = plan.cancel
     try:
         path = resolver.resolve(name)
     except ModelResolutionError as error:

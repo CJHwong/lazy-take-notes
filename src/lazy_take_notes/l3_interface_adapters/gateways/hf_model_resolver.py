@@ -22,7 +22,7 @@ class ResolverStore(Protocol):
         cancel: threading.Event | None = None,
     ) -> Path: ...
 
-    def resolve(self, name: str) -> str: ...
+    def resolve(self, name: str, cancel: threading.Event | None = None) -> str: ...
 
 
 class HfModelResolver:
@@ -40,12 +40,14 @@ class HfModelResolver:
     ) -> None:
         self._on_progress = on_progress
         self._store = store or CachedModelStore()
+        # Set by the caller to stop a download; the partial file is kept for the next try.
+        self.cancel: threading.Event | None = None
 
     def resolve(self, model_name: str) -> str:
         asset = asset_for_model(model_name)
         if asset is not None:
-            return str(self._store.install(asset.id, self._report))
-        return self._store.resolve(model_name)
+            return str(self._store.install(asset.id, self._report, self.cancel))
+        return self._store.resolve(model_name, cancel=self.cancel)
 
     def _report(self, progress: AssetProgress) -> None:
         if self._on_progress is None or progress.total <= 0:

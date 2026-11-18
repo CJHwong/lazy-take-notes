@@ -72,6 +72,22 @@ class TestDiarizationWorker:
 
         assert diarizer.calls == 1
 
+    def test_follows_a_renamed_session_folder(self, tmp_path):
+        paths = [tmp_path / 'before' / 'recording.wav', tmp_path / 'after' / 'recording.wav']
+        paths[1].parent.mkdir()
+        paths[1].write_bytes(b'\0' * 4096)
+        seen: list[Path] = []
+
+        class Recorder(_FakeDiarizer):
+            def diarize(self, audio_path: Path, timeout: float = 300.0) -> list[SpeakerTurn]:
+                seen.append(audio_path)
+                return super().diarize(audio_path, timeout)
+
+        asked = iter(paths)
+        run_diarization_worker([].append, _canceller(4), lambda: next(asked, paths[1]), Recorder([]), interval_s=0.0)
+
+        assert seen == [paths[1]]
+
     def test_a_failed_pass_does_not_stop_the_worker(self, tmp_path):
         audio = tmp_path / 'recording.wav'
         audio.write_bytes(b'\0' * 4096)

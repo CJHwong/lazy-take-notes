@@ -155,7 +155,8 @@ You'll see:
 | `c`     | Copy focused panel to clipboard |
 | `Tab`   | Switch panel focus              |
 | `h`     | Help (shows all keys)           |
-| `q`     | Quit                            |
+| `q`     | Quit after the final notes      |
+| `ctrl+q` | Save the audio and quit now, without the final notes |
 
 When you quit, your session is saved to the `output/` directory.
 

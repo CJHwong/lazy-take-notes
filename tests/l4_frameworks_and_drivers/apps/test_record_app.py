@@ -337,10 +337,10 @@ class TestStopFlush:
                 app._audio_stopped = True
                 app._cancel_audio_workers()
 
-                with patch.object(app, '_run_digest_worker') as mock_digest:
+                with patch.object(app, '_run_final_digest') as mock_digest:
                     app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
-                    mock_digest.assert_called_once_with(is_final=True)
+                    mock_digest.assert_called_once_with()
 
 
 class TestTimerFreeze:
@@ -412,6 +412,76 @@ class TestMissingModels:
                 panel = app.query_one('#digest-panel', DigestPanel)
                 assert 'llama3.2' in panel._current_markdown
                 assert 'qwen2.5:0.5b' in panel._current_markdown
+
+
+class TestTranscriptOnly:
+    """After "Start anyway" with a failed AI check, the session records the transcript only."""
+
+    @pytest.mark.asyncio
+    async def test_no_digest_runs_by_itself_or_on_d(self, tmp_path):
+        app = make_app(tmp_path, missing_digest_models=['gpt-oss:20b'], missing_interactive_models=['gpt-oss:20b'])
+        with patch.object(app, '_start_audio_worker'), patch.object(app, '_run_digest_worker') as digest:
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                lines = [TranscriptSegment(text=f'line {n}', wall_start=float(n), wall_end=n + 1.0) for n in range(200)]
+                app.post_message(TranscriptChunk(segments=lines))
+                await pilot.pause()
+                await pilot.press('d')
+                await pilot.press('1')
+                await pilot.pause()
+
+                digest.assert_not_called()
+                bar = str(app.query_one('#status-bar', StatusBar).render())
+                assert 'AI notes off' in bar
+                assert 'buf ' not in bar
+                notices = [str(n.message) for n in app.app._notifications]
+                assert sum('AI notes are off' in n for n in notices) == 1
+                assert sum('Quick actions are off' in n for n in notices) == 1
+
+    @pytest.mark.asyncio
+    async def test_stop_then_q_quits_once_with_no_final_digest(self, tmp_path):
+        app = make_app(tmp_path, missing_digest_models=['gpt-oss:20b'])
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(AudioWorkerStatus(status='recording'))
+                app.post_message(TranscriptChunk(segments=[TranscriptSegment(text='x', wall_start=0, wall_end=1)]))
+                await pilot.pause()
+                with (
+                    patch.object(app, '_run_final_digest') as final,
+                    patch.object(app, '_run_digest_worker') as digest,
+                    patch.object(app, 'dismiss') as dismiss,
+                ):
+                    await pilot.press('s')
+                    app.post_message(AudioWorkerStatus(status='stopped'))
+                    await pilot.pause()
+                    await pilot.press('q')
+                    await pilot.pause()
+
+                    final.assert_not_called()
+                    digest.assert_not_called()
+                    dismiss.assert_called_once()
+
+
+class TestQuitAfterFinalDigest:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('response', ['## Notes', ''])
+    async def test_q_closes_the_app_when_the_final_digest_ends(self, tmp_path, response):
+        # q means quit: the final digest runs first, then the app closes, even if the digest failed.
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(TranscriptChunk(segments=[TranscriptSegment(text='x', wall_start=0, wall_end=1)]))
+                await pilot.pause()
+                app._controller._digest_uc._llm.set_response(response)  # ty: ignore[missing-attribute]
+                app._audio_stopped = True
+                app._audio_worker_done = True  # the flush already finished
+                app.query_one('#status-bar', StatusBar).stopped = True
+                with patch.object(app, 'dismiss') as dismiss:
+                    await pilot.press('q')
+                    for _ in range(4):
+                        await pilot.pause()
+
+                    dismiss.assert_called_once()
 
 
 class TestStatusBarHints:
@@ -522,7 +592,7 @@ class TestForceDigest:
                 with patch.object(app, '_run_digest_worker') as mock_digest:
                     await pilot.press('d')
                     await pilot.pause()
-                    mock_digest.assert_called_once_with(is_final=False)
+                    mock_digest.assert_called_once_with()
 
     @pytest.mark.asyncio
     async def test_force_digest_notifies_when_buffer_empty(self, tmp_path):
@@ -1232,6 +1302,7 @@ class TestQuitWhenAlreadyStopped:
 
                 # Pre-stop audio so quit takes the was_already_stopped path
                 app._audio_stopped = True
+                app._audio_worker_done = True  # the flush already finished
                 bar = app.query_one('#status-bar', StatusBar)
                 bar.stopped = True
 
@@ -1247,6 +1318,7 @@ class TestQuitWhenAlreadyStopped:
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
                 app._audio_stopped = True
+                app._audio_worker_done = True  # the flush already finished
                 bar = app.query_one('#status-bar', StatusBar)
                 bar.stopped = True
 
@@ -1265,6 +1337,7 @@ class TestQuitWhenAlreadyStopped:
                 await pilot.pause()
 
                 app._audio_stopped = True
+                app._audio_worker_done = True  # the flush already finished
                 app._final_digest_done = True
                 bar = app.query_one('#status-bar', StatusBar)
                 bar.stopped = True
@@ -1539,14 +1612,14 @@ class TestUnexpectedWorkerStop:
 
                 assert app._audio_stopped is False
 
-                with patch.object(app, '_run_digest_worker') as mock_digest:
+                with patch.object(app, '_run_final_digest') as mock_digest:
                     app.post_message(AudioWorkerStatus(status='stopped'))
                     await pilot.pause()
 
                     assert app._audio_stopped is True
                     bar = app.query_one('#status-bar', StatusBar)
                     assert bar.stopped is True
-                    mock_digest.assert_called_once_with(is_final=True)
+                    mock_digest.assert_called_once_with()
 
                     ctx = app.query_one('#context-input', TextArea)
                     assert ctx.read_only is True

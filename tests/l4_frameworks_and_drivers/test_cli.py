@@ -1177,3 +1177,21 @@ class TestRecordPreflight:
         ):
             assert run_record(ctx) is None
         build.assert_not_called()
+
+
+class TestPlanReloader:
+    def test_each_call_reads_config_yaml_again(self, _preflight_passes):
+        from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import plan_reloader
+
+        loaded = [(MagicMock(name='config1'), MagicMock(name='infra1'), None)]
+        loaded.append((MagicMock(name='config2'), MagicMock(name='infra2'), None))
+        template = MagicMock()
+        with patch(f'{_CLI_HELPERS}.read_config', side_effect=loaded) as load:
+            reload = plan_reloader('/cfg.yaml', '/out', template, mute_mic=True)
+            reload()
+            reload()
+
+        assert load.call_count == 2
+        last = _preflight_passes.call_args
+        assert last.args == (loaded[1][0], loaded[1][1], template, '/out')
+        assert last.kwargs == {'mute_mic': True}
