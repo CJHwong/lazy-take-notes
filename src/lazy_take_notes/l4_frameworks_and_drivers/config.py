@@ -52,8 +52,28 @@ def build_app_config(raw: dict) -> AppConfig:
     """
     merged = copy.deepcopy(APP_CONFIG_DEFAULTS)
     deep_merge(merged, raw)
+    drop_removed_language_models(merged)
     _expand_transcription_aliases(merged)
     return AppConfig.model_validate(merged)
+
+
+def drop_removed_language_models(merged: dict) -> None:
+    """Remove the language overrides set to null, in place.
+
+    The built-in overrides merge into every config, so a hand-written file with
+    only `ja:` keeps them. To remove a built-in one, the file sets it to null.
+    """
+    models = merged.get('transcription', {}).get('models')
+    if isinstance(models, dict):
+        for locale in [locale for locale, name in models.items() if name is None]:
+            del models[locale]
+
+
+def language_models_for_file(models: dict[str, str]) -> dict[str, str | None]:
+    """The language overrides to save: a removed built-in one is saved as null, so it stays removed."""
+    defaults = APP_CONFIG_DEFAULTS['transcription']['models']
+    removed: dict[str, str | None] = {locale: None for locale in defaults if locale not in models}
+    return {**models, **removed}
 
 
 def _expand_transcription_aliases(cfg: dict) -> None:

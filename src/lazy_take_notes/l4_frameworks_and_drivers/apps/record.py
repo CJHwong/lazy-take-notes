@@ -15,11 +15,11 @@ if TYPE_CHECKING:
     from lazy_take_notes.l2_use_cases.ports.model_resolver import ModelResolver
 from textual.widgets import TextArea
 
-from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l3_interface_adapters.gateways.paths import CONSENT_NOTICED_PATH
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import see_debug_log
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioHealth,
     AudioLevel,
@@ -303,7 +303,7 @@ class RecordApp(BaseApp):
             self._update_hints('error')
             if message.error:
                 self.notify(
-                    f'Audio error: {message.error}\n(see {DEBUG_LOG.name})',
+                    f'Audio error: {message.error}{see_debug_log()}',
                     severity='error',
                     timeout=12,
                 )

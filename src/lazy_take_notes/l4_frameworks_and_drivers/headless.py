@@ -114,7 +114,7 @@ def _clock(seconds: float) -> str:
 
 def _heartbeat_line(activity: str, elapsed: float, segments: int, digests: int) -> str:
     plural = '' if digests == 1 else 's'
-    return f'⏺ {activity} · {_clock(elapsed)} · {segments} seg · {digests} digest{plural}'
+    return f'⏺ {activity} | {_clock(elapsed)} | {segments} seg | {digests} digest{plural}'
 
 
 def _banner_lines(activity: str, out_dir: Path, pid: int, *, show_mute: bool = False) -> list[str]:
@@ -138,7 +138,7 @@ def _iso_elapsed(start_iso: str, end_iso: str) -> float:
 def _summary_lines(out_dir: Path, status: SessionStatus) -> list[str]:
     plural = '' if status.digest_count == 1 else 's'
     clock = _clock(_iso_elapsed(status.started_at, status.updated_at))
-    head = f'■ {status.state} · {clock} · {status.segment_count} seg · {status.digest_count} digest{plural}'
+    head = f'■ {status.state} | {clock} | {status.segment_count} seg | {status.digest_count} digest{plural}'
     lines = [head]
     if status.segment_count:
         lines.append(f'  transcript: {out_dir / TRANSCRIPT.name}')
@@ -165,8 +165,10 @@ class HeadlessSession:
         activity: str = 'recording',
         audio_source=None,
         status_sink: Callable[[str], None] | None = None,
+        ai_notes: bool = True,
     ) -> None:
         self._controller = controller
+        self._ai_notes = ai_notes  # False after a failed AI check: transcript only, as in the TUI
         self._output_dir = Path(output_dir)
         self._launch_worker = worker_launcher
         self._writer = _StatusWriter(sys.stderr)
@@ -192,7 +194,8 @@ class HeadlessSession:
     def request_stop(self) -> None:
         """Signal the worker to wind down (wired to SIGINT and SIGTERM)."""
         if not self._cancel.is_set():
-            self._report('⏹ stopping… finishing the current chunk, then the final digest')
+            then = ', then the final digest' if self._ai_notes else ''
+            self._report(f'⏹ stopping… finishing the current chunk{then}')
         self._cancel.set()
 
     def _elapsed_seconds(self) -> float:
@@ -345,7 +348,7 @@ class HeadlessSession:
     async def _on_chunk(self, message: TranscriptChunk) -> None:
         self._last_warning = None  # audio is flowing again — let a later loss warn afresh
         should_digest = self._controller.on_transcript_segments(message.segments)
-        if should_digest:
+        if should_digest and self._ai_notes:
             await self._digest(is_final=False)
         else:
             self._save(state=st.RECORDING)
@@ -365,7 +368,7 @@ class HeadlessSession:
         if self._status.state == st.ERROR:
             return
         state = self._controller.digest_state
-        if state.buffer or state.digest_count > 0:
+        if self._ai_notes and (state.buffer or state.digest_count > 0):
             await self._digest(is_final=True)
         self._save(state=st.STOPPED)
 
@@ -501,7 +504,8 @@ def _run_headless_preflight(config, infra, template, output_dir, *, mute_mic: bo
     """Check every requirement before the session folder exists. Exit on a hard failure.
 
     An unavailable AI model keeps the old headless contract: warn and record the
-    transcript only. Headless has no button to confirm anything else.
+    transcript only. Headless has no button to confirm anything else. Returns the
+    plan, and whether the AI check passed.
     """
     from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
         build_preflight_plan,
@@ -520,7 +524,9 @@ def _run_headless_preflight(config, infra, template, output_dir, *, mute_mic: bo
         raise click.ClickException('Preflight failed; fix the items marked FAIL and run again.')
     for check in report.failures:
         click.echo(f'⚠ continuing despite: {check.title}', err=True)
-    return plan
+    if not report.llm_ok:
+        click.echo('⚠ AI notes off: recording the transcript only', err=True)
+    return plan, report.llm_ok
 
 
 def run_record_headless(
@@ -537,7 +543,7 @@ def run_record_headless(
     config, infra, template_loader = load_config(ctx.obj['config_path'], ctx.obj['output_dir'])
     template = _select_headless_template(template_loader, template_name, language)
 
-    plan = _run_headless_preflight(config, infra, template, ctx.obj['output_dir'], mute_mic=mute_mic)
+    plan, ai_ok = _run_headless_preflight(config, infra, template, ctx.obj['output_dir'], mute_mic=mute_mic)
     out_dir = make_session_dir(resolve_base_dir(ctx.obj['output_dir'], config), label)
 
     container = _build_container(
@@ -549,7 +555,12 @@ def run_record_headless(
         config, template, out_dir, container.model_resolver_factory, container.transcriber, container.audio_source
     )
     session = HeadlessSession(
-        container.controller, out_dir, launcher, activity='recording', audio_source=container.audio_source
+        container.controller,
+        out_dir,
+        launcher,
+        activity='recording',
+        audio_source=container.audio_source,
+        ai_notes=ai_ok,
     )
     _emit_banner('recording', out_dir, session.status.pid, show_mute=True)
     with keep_awake():

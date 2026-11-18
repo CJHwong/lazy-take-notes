@@ -54,6 +54,14 @@ class TestBuildAppConfig:
         assert cfg.digest.min_lines == 5
         assert cfg.digest.model == 'gpt-oss:20b'  # default preserved
 
+    def test_a_null_language_override_removes_the_built_in_one(self):
+        cfg = build_app_config({'transcription': {'models': {'zh': None, 'ja': 'ja-model'}}})
+        assert cfg.transcription.models == {
+            'zh-min-nan': 'hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin',
+            'ja': 'ja-model',
+        }
+        assert cfg.transcription.model_for_locale('zh-TW') == cfg.transcription.model
+
     def test_old_alias_expanded_to_hf_uri(self):
         """Old short aliases in user config get auto-converted to hf:// URIs."""
         cfg = build_app_config({'transcription': {'model': 'large-v3-turbo-q8_0', 'models': {'zh': 'breeze-q8'}}})

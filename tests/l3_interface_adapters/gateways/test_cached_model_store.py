@@ -13,6 +13,7 @@ import pytest
 
 from lazy_take_notes.l1_entities.errors import ModelResolutionError
 from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetStatus, ModelAsset
+from lazy_take_notes.l3_interface_adapters.gateways import file_lock
 from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
 from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError, HttpSession
 from lazy_take_notes.l3_interface_adapters.gateways.model_catalog import RUNTIME_ID
@@ -274,6 +275,36 @@ class TestLegacyAdoption:
         assert state.legacy_bytes > len(RUNTIME_ENTRY)
         assert (legacy_tree / 'bin' / 'tool').exists()
 
+    def test_remove_deletes_the_whole_runtime_tree(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        legacy_tree = tmp_path / 'legacy-runtime'
+        (legacy_tree / 'bin').mkdir(parents=True)
+        (legacy_tree / 'bin' / 'tool').write_bytes(RUNTIME_ENTRY)
+        (legacy_tree / 'lib').mkdir()
+        (legacy_tree / 'lib' / 'extra').write_bytes(b'lib-data')
+        (legacy_tree / 'lib' / 'extra-link').symlink_to('extra')  # a library under a second name
+        legacy_store = tmp_path / 'legacy-store'
+        legacy_store.mkdir()
+        (legacy_store / 'runtime.json').write_text(
+            json.dumps({'binary': str(legacy_tree / 'bin' / 'tool')}),
+            encoding='utf-8',
+        )
+        monkeypatch.setattr(
+            'lazy_take_notes.l3_interface_adapters.gateways.cached_model_store.LEGACY_NEMOTRON_STORE',
+            legacy_store,
+        )
+        store = make_store(tmp_path, assets={RUNTIME.id: RUNTIME})
+        shown = store.status(RUNTIME.id).installed_bytes
+
+        freed = store.remove(RUNTIME.id)
+
+        assert shown == len(RUNTIME_ENTRY) + len(b'lib-data')
+        assert freed == shown
+        assert not (tmp_path / 'cache' / 'assets' / RUNTIME.subdir).exists()
+
 
 class TestState:
     def test_corrupt_state_file_is_ignored(self, tmp_path: Path):
@@ -342,6 +373,42 @@ class TestTwoDownloadsOfOneAsset:
         assert len(results) == 2 and results[0] == results[1]
         assert second.status('tiny').status is AssetStatus.READY
 
+    def test_another_store_sees_a_running_download_as_busy(self, tmp_path: Path):
+        first_session = HeldSession(BODY)
+        first = make_store(tmp_path, first_session)
+        second = make_store(tmp_path)
+        worker = threading.Thread(target=lambda: first.install('tiny'))
+        worker.start()
+        assert first_session.entered.wait(5)
+
+        busy = second.status('tiny').status
+
+        first_session.release.set()
+        worker.join(5)
+        assert busy is AssetStatus.BUSY
+        assert second.status('tiny').status is AssetStatus.READY
+
+    def test_a_finished_asset_reads_ready_while_its_lock_is_held(self, tmp_path: Path):
+        store = make_store(tmp_path)
+        store.install('tiny')
+
+        with file_lock.exclusive(tmp_path / 'cache' / 'locks' / 'tiny.lock'):
+            assert store.status('tiny').status is AssetStatus.READY
+
+    def test_a_legacy_copy_is_not_adopted_while_another_holds_the_lock(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        legacy_root = tmp_path / 'pywhispercpp'
+        legacy = legacy_root / 'legacy-dir' / ASSET.entry
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(BODY)
+        monkeypatch.setattr('pywhispercpp.constants.MODELS_DIR', str(legacy_root))
+        store = make_store(tmp_path)
+
+        with file_lock.exclusive(tmp_path / 'cache' / 'locks' / 'tiny.lock'):
+            assert store.status('tiny').status is AssetStatus.BUSY
+        assert not (tmp_path / 'cache' / 'assets' / ASSET.subdir / ASSET.entry).exists()
+
     def test_a_cancel_while_waiting_stops_the_wait(self, tmp_path: Path):
         first_session = HeldSession(BODY)
         first = make_store(tmp_path, first_session)
@@ -381,7 +448,7 @@ class TestTwoDownloadsOfOneAsset:
         probe.join(1)
         session.release.set()
         worker.join(5)
-        assert answer == [AssetStatus.MISSING]  # the UI thread did not wait for the download
+        assert answer == [AssetStatus.BUSY]  # the UI thread did not wait for the download
 
 
 class TestFirstDownloadOnANewAccount:

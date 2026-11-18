@@ -10,10 +10,10 @@ from typing import TYPE_CHECKING, ClassVar
 
 from textual.binding import Binding
 
-from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l4_frameworks_and_drivers.apps.base import BaseApp
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import see_debug_log
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
 )
@@ -173,7 +173,7 @@ class TranscribeApp(BaseApp):
             self._update_hints('error')
             if message.error:
                 self.notify(
-                    f'Transcription error: {message.error}\n(see {DEBUG_LOG.name})',
+                    f'Transcription error: {message.error}{see_debug_log()}',
                     severity='error',
                     timeout=12,
                 )

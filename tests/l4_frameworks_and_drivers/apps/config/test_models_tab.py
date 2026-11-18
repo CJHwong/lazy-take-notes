@@ -110,6 +110,24 @@ class TestModelsTab:
             assert app.query_one('#download-tiny').display is False
             assert app.query_one('#remove-tiny').display is True
 
+    async def test_a_download_in_another_window_shows_and_can_be_followed(self, app_factory):
+        app, store = app_factory(AssetStatus.BUSY)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert str(app.query_one('#status-tiny').render()) == 'Downloading'
+            assert 'In another window' in str(app.query_one('#detail-tiny').render())
+            assert app.query_one('#cancel-tiny').display is False
+            assert app.query_one('#remove-tiny').display is False
+            app.query_one('#download-tiny', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert store.installs == ['tiny']
+            assert str(app.query_one('#status-tiny').render()) == 'Ready'
+
     async def test_download_installs_and_updates_the_row(self, app_factory):
         app, store = app_factory(AssetStatus.MISSING)
 
@@ -199,6 +217,12 @@ class SpeakerStore(FakeStore):
         self._states[asset_id] = replace(state, status=AssetStatus.READY, path=f'/tmp/{asset_id}')
         return Path(f'/tmp/{asset_id}')
 
+    def remove(self, asset_id: str) -> int:
+        self.removes.append(asset_id)
+        state = self._states[asset_id]
+        self._states[asset_id] = replace(state, status=AssetStatus.MISSING, installed_bytes=0, path=None)
+        return state.installed_bytes
+
 
 class TestSpeakerAssets:
     async def test_install_downloads_both_assets_and_shows_ready(self, app_factory):
@@ -247,6 +271,36 @@ class TestSpeakerAssets:
             await pilot.pause()
             assert 'Downloading' in str(app.query_one('.speaker-status').render())
             assert app.query_one('#speaker-install').display is False
+
+
+class TestSpeakerSizes:
+    async def test_ready_and_remove_state_the_size_on_disk(self, app_factory):
+        store = SpeakerStore()
+        # An extracted runtime takes more space than its archive download.
+        for asset_id, size in (('nemo-runtime', 17 * 2**20), ('nemotron-3-diarization', 102 * 2**20)):
+            state = store._states[asset_id]  # noqa: SLF001 -- seed the fake store
+            store._states[asset_id] = replace(state, status=AssetStatus.READY, installed_bytes=size, path='/tmp/x')  # noqa: SLF001 -- seed the fake store
+        app = ConfigApp(asset_store=store)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert str(app.query_one('.speaker-status').render()) == 'Ready (119 MB)'
+            app.query_one('#speaker-remove', Button).press()
+            await pilot.pause()
+            await pilot.pause()
+            body = str(app.app.screen.query_one('#discard-body').render())
+            assert body.startswith('This frees 119 MB.')
+            app.app.screen.query_one('#discard-confirm', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert sorted(store.removes) == ['nemo-runtime', 'nemotron-3-diarization']
+            freed = [n.message for n in app.app._notifications if n.message.startswith('Freed')]  # noqa: SLF001 -- read the toasts
+            assert freed == ['Freed 119 MB.']
+            assert str(app.query_one('.speaker-status').render()) == 'Missing'
 
 
 class TestLeavingDuringADownload:

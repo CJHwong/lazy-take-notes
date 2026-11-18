@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
-from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import see_debug_log, setup_file_logging
 
 
 class TestSetupFileLogging:
@@ -29,6 +29,20 @@ class TestSetupFileLogging:
         session_handlers = [h for h in root.handlers if getattr(h, '_ltn_session_handler', False)]
         assert len(session_handlers) == 1
         assert isinstance(session_handlers[0], logging.NullHandler)
+
+
+class TestSeeDebugLog:
+    def test_points_at_the_log_while_one_is_written(self, tmp_path: Path):
+        setup_file_logging(tmp_path, enabled=True)
+        assert see_debug_log() == ' (see debug.log)'
+
+    def test_says_nothing_with_the_log_turned_off(self, tmp_path: Path):
+        setup_file_logging(tmp_path, enabled=False)
+        assert not see_debug_log()
+
+    def test_says_nothing_when_the_log_could_not_open(self, tmp_path: Path):
+        setup_file_logging(tmp_path / 'missing', enabled=True)
+        assert not see_debug_log()
 
 
 class TestRepeatedSessions:

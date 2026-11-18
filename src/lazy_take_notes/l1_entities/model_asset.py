@@ -13,6 +13,7 @@ class AssetStatus(StrEnum):
     READY = 'ready'
     MISSING = 'missing'
     DOWNLOADING = 'downloading'
+    BUSY = 'busy'  # another process or store holds the download lock
     CORRUPT = 'corrupt'
     UNSUPPORTED = 'unsupported'
 

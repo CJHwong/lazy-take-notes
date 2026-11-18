@@ -20,13 +20,13 @@ from textual.widgets import Static, TextArea
 from textual.worker import Worker, WorkerCancelled, WorkerFailed
 
 from lazy_take_notes.l1_entities.config import AppConfig
-from lazy_take_notes.l1_entities.session_files import DEBUG_LOG, SPEAKER_TRANSCRIPT
+from lazy_take_notes.l1_entities.session_files import SPEAKER_TRANSCRIPT
 from lazy_take_notes.l1_entities.template import SessionTemplate
 from lazy_take_notes.l1_entities.transcript import format_wall_time
 from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
-from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import setup_file_logging
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import see_debug_log, setup_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     DigestError,
     DigestReady,
@@ -244,7 +244,7 @@ class BaseApp(ShellScreen):
         if error is None or error == self._last_persist_error:
             return
         self._last_persist_error = error
-        self.notify(f'{error} (see {DEBUG_LOG.name})', severity='warning', timeout=10)
+        self.notify(f'{error}{see_debug_log()}', severity='warning', timeout=10)
 
     def _speaker_label(self, segment) -> str | None:
         return self._controller.speaker_label(segment)
@@ -322,7 +322,9 @@ class BaseApp(ShellScreen):
             panel = self.query_one('#transcript-panel', TranscriptPanel)
             panel.render_segments(self._controller.all_segments, self._speaker_label)
 
-        self.app.push_screen(LabelModal(current_label=current, title=f'Name for S{speaker}'), apply)
+        self.app.push_screen(
+            LabelModal(current_label=current, title=f'Name for S{speaker}', placeholder='Speaker name...'), apply
+        )
 
     def _dismiss_download_modal(self) -> None:
         if self._download_modal is not None:
@@ -360,7 +362,7 @@ class BaseApp(ShellScreen):
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = ''
         self.notify(
-            f'Digest failed: {message.error} (see {DEBUG_LOG.name})',
+            f'Digest failed: {message.error}{see_debug_log()}',
             severity='error',
             timeout=8,
         )

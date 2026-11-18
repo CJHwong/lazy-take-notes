@@ -38,17 +38,24 @@ class LabelModal(ModalScreen[str | None]):
 
     BINDINGS = [('escape', 'cancel', 'Cancel')]
 
-    def __init__(self, current_label: str = '', title: str = 'Session label', **kwargs) -> None:
+    def __init__(
+        self,
+        current_label: str = '',
+        title: str = 'Session label',
+        placeholder: str = 'Session label...',
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._current_label = current_label
         self._title = title
+        self._placeholder = placeholder
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Static(self._title, id='label-title')
             yield Input(
                 value=self._current_label,
-                placeholder='Session label...',
+                placeholder=self._placeholder,
                 id='label-input',
             )
             yield Static('Press Enter to confirm, or Escape to cancel.', id='label-hint')

@@ -244,7 +244,7 @@ class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
     def _rebuild_list(self, query: str = '') -> None:
         """Rebuild the ListView contents, optionally filtered by *query*."""
         list_view = self.query_one('#sp-list', _TemplateListView)
-        list_view.clear()
+        rows: list[ListItem] = []
 
         # Group templates by locale.
         groups: dict[str, list[str]] = defaultdict(list)
@@ -257,7 +257,7 @@ class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
         first_item_index: int = 0
         insert_idx: int = 0
         for locale in sorted(groups):
-            list_view.append(LocaleHeader(locale))
+            rows.append(LocaleHeader(locale))
             insert_idx += 1
             for name in sorted(groups[locale]):
                 item = TemplateItem(
@@ -266,11 +266,16 @@ class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
                     display_name=self._templates[name].metadata.name,
                     is_user=name in self._user_names,
                 )
-                list_view.append(item)
+                rows.append(item)
                 if first_item is None:
                     first_item = item
                     first_item_index = insert_idx
                 insert_idx += 1
+
+        list_view.clear()
+        # clear() only schedules the removal. Rows put after the old ones would leave
+        # the index on an old row, and its late highlight would replace the preview.
+        list_view.insert(0, rows)
 
         if first_item is not None:
             list_view.index = first_item_index
