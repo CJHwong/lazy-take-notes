@@ -391,3 +391,75 @@ class TestFilePickerFaults:
 
     def test_count_dir_items_reports_vanished_dir(self, tmp_path: Path) -> None:
         assert _count_dir_items(tmp_path / 'missing').startswith('Cannot read')
+
+
+class TestFilesANewUserHas:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'name', ['meet.webm', 'memo.aiff', 'memo.aif', 'take.flac', 'a.ogg', 'b.opus', 'c.aac', 'd.mov']
+    )
+    async def test_formats_ffmpeg_reads_are_listed(self, tmp_path: Path, name: str) -> None:
+        (tmp_path / name).write_bytes(b'\x00' * 16)
+        picker = FilePicker(start_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            assert [c.path.name for c in picker.query_one('#sp-list').children if isinstance(c, FileItem)] == [name]
+
+
+class TestFilterAndPath:
+    @pytest.mark.asyncio
+    async def test_entering_a_folder_clears_the_filter(self, audio_dir: Path) -> None:
+        (audio_dir / 'music' / 'track.mp3').write_bytes(b'\x00' * 16)
+        picker = FilePicker(start_dir=audio_dir)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            picker.query_one('#sp-search', Input).value = 'music'
+            await pilot.pause()
+            picker._navigate_to(audio_dir / 'music')
+            await pilot.pause()
+            assert not picker.query_one('#sp-search', Input).value
+            assert [c.path.name for c in picker.query_one('#sp-list').children if isinstance(c, FileItem)] == [
+                'track.mp3'
+            ]
+
+    @pytest.mark.asyncio
+    async def test_a_typed_folder_path_opens_the_folder(self, audio_dir: Path, tmp_path_factory) -> None:
+        other = tmp_path_factory.mktemp('other')
+        picker = FilePicker(start_dir=audio_dir)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            search = picker.query_one('#sp-search', Input)
+            search.focus()
+            search.value = str(other)
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+            assert picker._current_dir == other.resolve()
+            assert not search.value
+
+    @pytest.mark.asyncio
+    async def test_a_typed_file_path_selects_the_file(self, audio_dir: Path) -> None:
+        picker = FilePicker(start_dir=audio_dir.parent)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            search = picker.query_one('#sp-search', Input)
+            search.focus()
+            search.value = f'{audio_dir}/song.mp3'
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+        assert picker.return_value == audio_dir / 'song.mp3'
+
+    @pytest.mark.asyncio
+    async def test_a_path_that_does_not_exist_says_so(self, audio_dir: Path) -> None:
+        picker = FilePicker(start_dir=audio_dir)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            search = picker.query_one('#sp-search', Input)
+            search.focus()
+            search.value = '/no/such/place.mp3'
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+            assert 'Not found: /no/such/place.mp3' in _preview_text(picker)
+            assert picker._current_dir == audio_dir.resolve()

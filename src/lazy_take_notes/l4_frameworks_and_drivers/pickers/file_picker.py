@@ -18,7 +18,25 @@ from lazy_take_notes.l4_frameworks_and_drivers.pickers.base import (
     SearchablePicker,
 )
 
-AUDIO_EXTS = frozenset({'.mp3', '.wav', '.m4a', '.mp4'})
+# Formats ffmpeg decodes that people record meetings and memos in.
+AUDIO_EXTS = frozenset(
+    {
+        '.mp3',
+        '.wav',
+        '.m4a',
+        '.mp4',
+        '.aac',
+        '.aiff',
+        '.aif',
+        '.flac',
+        '.ogg',
+        '.opus',
+        '.webm',
+        '.mov',
+        '.mkv',
+    }
+)
+_PATH_STARTS = ('/', '~', './', '../')
 _DIR_COUNT_CAP = 1000
 
 
@@ -137,7 +155,7 @@ class FilePicker(SearchablePicker[Path]):
         )
 
     def _search_placeholder(self) -> str:
-        return 'Filter files...'
+        return 'Filter, or type a path and press Enter'
 
     def _rebuild_list(self, query: str = '') -> None:
         list_view = self.query_one('#sp-list', _FileListView)
@@ -162,7 +180,7 @@ class FilePicker(SearchablePicker[Path]):
             key=lambda p: p.name.lower(),
         )
 
-        if query:
+        if query and not query.startswith(_PATH_STARTS):
             dirs = [d for d in dirs if query in d.name.lower()]
             files = [f for f in files if query in f.name.lower()]
 
@@ -181,13 +199,19 @@ class FilePicker(SearchablePicker[Path]):
         # Navigating to a new directory invalidates any in-flight dir counts.
         self._highlighted_dir = None
         self._refresh_header()
-        query = self.query_one('#sp-search', Input).value.strip().lower()
-        self._rebuild_list(query)
+        # A filter typed in one folder would hide everything in the next one.
+        self.query_one('#sp-search', Input).value = ''
+        self._rebuild_list()
 
     def _on_item_highlighted(self, item: ListItem) -> None:
         self._update_info(item)
 
     def action_select_item(self) -> None:
+        search = self.query_one('#sp-search', Input)
+        typed = search.value.strip()
+        if self.app.focused is search and typed.startswith(_PATH_STARTS):
+            self._open_typed_path(typed)
+            return
         list_view = self.query_one('#sp-list', _FileListView)
         item = list_view.highlighted_child
         if isinstance(item, (ParentItem, DirItem)):
@@ -195,6 +219,15 @@ class FilePicker(SearchablePicker[Path]):
             self._navigate_to(target)
         elif isinstance(item, FileItem):
             self.dismiss(item.path)
+
+    def _open_typed_path(self, typed: str) -> None:
+        path = (self._current_dir / Path(typed).expanduser()).resolve()
+        if path.is_dir():
+            self._navigate_to(path)
+        elif path.is_file():
+            self.dismiss(path)
+        else:
+            self._set_info(f'Not found: {escape(typed)}')
 
     def action_parent(self) -> None:
         self._navigate_to(self._current_dir.parent)

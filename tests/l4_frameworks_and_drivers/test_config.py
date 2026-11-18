@@ -30,7 +30,8 @@ class TestBuildAppConfig:
         assert cfg.digest.min_interval == 60.0
         assert cfg.digest.compact_token_threshold == 100_000
         assert cfg.interactive.model == 'gpt-oss:20b'
-        assert cfg.output.directory == './output'
+        # Not relative to the start folder, so every terminal finds the same sessions.
+        assert cfg.output.directory == '~/Documents/LazyTakeNotes'
         assert cfg.output.save_audio is True
         assert cfg.output.save_notes_history is True
         assert cfg.output.save_context is True

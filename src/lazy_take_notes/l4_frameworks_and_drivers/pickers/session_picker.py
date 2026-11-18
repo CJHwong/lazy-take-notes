@@ -32,7 +32,12 @@ class SessionItem(ListItem):
     def __init__(self, session: SessionInfo) -> None:
         super().__init__()
         self.session_dir: Path = session.dir
-        digest_badge = '  [green]\u2713 digest[/green]' if session.has_notes else '  [dim]no digest[/dim]'
+        if not session.has_transcript:
+            digest_badge = '  [dim]audio only[/dim]'
+        elif session.has_notes:
+            digest_badge = '  [green]\u2713 digest[/green]'
+        else:
+            digest_badge = '  [dim]no digest[/dim]'
         self._label_text = f'{session.name}{digest_badge}'
 
     def compose(self) -> ComposeResult:
@@ -116,6 +121,8 @@ class SessionPicker(SearchablePicker[Path]):
                     lines.append(f'*...{total - 10} more lines*')
             else:
                 lines.append('*Empty transcript*')
+        else:
+            lines.append('*No transcript. The audio is in this folder.*')
 
         digest_path = NOTES.resolve(session_dir)
         if digest_path:

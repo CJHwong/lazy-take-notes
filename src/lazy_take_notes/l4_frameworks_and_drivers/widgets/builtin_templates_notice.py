@@ -73,7 +73,7 @@ class BuiltinTemplatesNotice(ModalScreen[None]):
             yield Static('Built-in Templates', id='btn-title')
             yield Markdown(NOTICE_BODY, id='btn-body')
             yield Static(
-                "Press any key to dismiss \u00b7 \\[d] don't show again",
+                'Press any key to dismiss, or \\[d] to stop showing this.',
                 id='btn-hint',
             )
 

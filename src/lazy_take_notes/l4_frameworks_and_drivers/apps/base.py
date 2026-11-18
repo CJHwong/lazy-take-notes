@@ -20,8 +20,9 @@ from textual.widgets import Static, TextArea
 from textual.worker import Worker, WorkerCancelled, WorkerFailed
 
 from lazy_take_notes.l1_entities.config import AppConfig
-from lazy_take_notes.l1_entities.session_files import DEBUG_LOG
+from lazy_take_notes.l1_entities.session_files import DEBUG_LOG, SPEAKER_TRANSCRIPT
 from lazy_take_notes.l1_entities.template import SessionTemplate
+from lazy_take_notes.l1_entities.transcript import format_wall_time
 from lazy_take_notes.l2_use_cases.digest_use_case import DigestResult
 from lazy_take_notes.l3_interface_adapters.controllers.session_controller import SessionController
 from lazy_take_notes.l4_frameworks_and_drivers.config import load_theme
@@ -81,7 +82,7 @@ class BaseApp(ShellScreen):
         Binding('l', 'rename_session', 'Label', show=False),
         Binding('o', 'open_session_dir', 'Open', show=False),
         Binding('h', 'show_help', 'Help', priority=True),
-        Binding('tab', 'focus_next', 'Switch Panel', show=False),
+        Binding('tab', 'app.focus_next', 'Switch Panel', show=False),
     ]
 
     def __init__(
@@ -226,6 +227,8 @@ class BaseApp(ShellScreen):
         panel = self.query_one('#transcript-panel', TranscriptPanel)
         if self._controller.speaker_turns:
             panel.render_segments(self._controller.all_segments, self._speaker_label)
+            # The screen labels each new line now; the saved file must not lag until the next pass.
+            self._save_speaker_transcript()
         else:
             panel.append_segments(message.segments)
 
@@ -276,10 +279,30 @@ class BaseApp(ShellScreen):
         try:
             (self._output_dir / 'speakers.json').write_text(json.dumps(payload, indent=2), encoding='utf-8')
         except OSError as e:
-            log.error('Could not save speakers.json: %s', e, exc_info=True)
-            if self._last_persist_error != 'speakers':
-                self._last_persist_error = 'speakers'
-                self.notify(f'Could not save speakers: {e}', severity='warning', timeout=10)
+            self._speakers_not_saved('speakers.json', e)
+            return
+        self._save_speaker_transcript()
+
+    def _save_speaker_transcript(self) -> None:
+        try:
+            (self._output_dir / SPEAKER_TRANSCRIPT).write_text(self._speaker_transcript(), encoding='utf-8')
+        except OSError as e:
+            self._speakers_not_saved(SPEAKER_TRANSCRIPT, e)
+
+    def _speakers_not_saved(self, name: str, error: OSError) -> None:
+        log.error('Could not save %s: %s', name, error, exc_info=True)
+        if self._last_persist_error != 'speakers':
+            self._last_persist_error = 'speakers'
+            self.notify(f'Could not save speakers: {error}', severity='warning', timeout=10)
+
+    def _speaker_transcript(self) -> str:
+        """The transcript with the labels shown on screen, in the format `diarize` writes."""
+        lines = []
+        for segment in self._controller.all_segments:
+            label = self._speaker_label(segment)
+            text = f'{label}: {segment.text}' if label else segment.text
+            lines.append(f'[{format_wall_time(segment.wall_start)}] {text}\n')
+        return ''.join(lines)
 
     def on_click(self, event: events.Click) -> None:
         widget_id = getattr(event.widget, 'id', '') or ''

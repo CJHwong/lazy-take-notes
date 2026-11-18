@@ -71,7 +71,7 @@ class ConsentNotice(ModalScreen[None]):
         with VerticalScroll():
             yield Static('Recording Notice', id='notice-title')
             yield Markdown(NOTICE_BODY, id='notice-body')
-            yield Static('Press any key to dismiss \u00b7 \\[n] never show again', id='notice-hint')
+            yield Static('Press any key to dismiss, or \\[n] to stop showing this.', id='notice-hint')
 
     def on_key(self, event) -> None:  # noqa: ANN001 -- Textual Key event; type not needed
         if event.key == 'n' and self._on_suppress is not None:

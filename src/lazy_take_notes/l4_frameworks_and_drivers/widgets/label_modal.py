@@ -51,7 +51,7 @@ class LabelModal(ModalScreen[str | None]):
                 placeholder='Session label...',
                 id='label-input',
             )
-            yield Static('Enter to confirm · Escape to cancel', id='label-hint')
+            yield Static('Press Enter to confirm, or Escape to cancel.', id='label-hint')
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()

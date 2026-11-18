@@ -845,3 +845,46 @@ class TestTemplateItemMarkup:
         rendered = Content.from_markup(item._label_text).plain
         assert 'Retro [/INST] notes' in rendered
         assert '[user]' in rendered
+
+
+class TestConfirmDeleteArrows:
+    @pytest.mark.asyncio
+    async def test_right_and_left_move_between_the_buttons(self):
+        from textual.app import App
+
+        from lazy_take_notes.l4_frameworks_and_drivers.pickers.template_picker import (
+            _ConfirmDeleteScreen,  # noqa: PLC2701 -- the dialog is private to the picker
+        )
+
+        class Host(App):
+            def on_mount(self) -> None:
+                self.push_screen(_ConfirmDeleteScreen('mine'))
+
+        app = Host()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            first = app.focused
+            await pilot.press('right')
+            await pilot.pause()
+            assert app.focused is not first
+            await pilot.press('left')
+            await pilot.pause()
+            assert app.focused is first
+
+
+class TestNoTemplatesAtAll:
+    @pytest.mark.asyncio
+    async def test_says_how_to_get_one_and_n_works_at_once(self):
+        picker = TemplatePicker(show_builtins=False)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            for screen in list(picker.app.screen_stack[2:]):
+                screen.dismiss()  # the first-run notice
+            await pilot.pause()
+            text = picker.query_one('#sp-preview-md', Markdown).source
+            assert 'No templates yet.' in text
+            assert 'Press n to create one' in text
+            assert 'Show built-in templates' in text
+            await pilot.press('n')
+            await pilot.pause()
+        assert picker.return_value == '__create_template__'

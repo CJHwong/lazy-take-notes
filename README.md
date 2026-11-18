@@ -48,7 +48,7 @@ pip install -e .
 take-note                                     # interactive mode selector
 take-note record                              # start recording
 take-note record -l sprint-review             # record with session label
-take-note transcribe recording.m4a            # transcribe an audio file
+take-note transcribe recording.m4a            # transcribe an audio file (mp3, wav, m4a, webm, aiff, flac, ogg, ...)
 take-note view                                # browse saved sessions
 take-note config                              # open the settings editor
 take-note create-template                     # build a custom template with AI
@@ -119,7 +119,7 @@ digest:
 interactive:
   model: "gpt-oss:20b"            # fast model for quick actions
 output:
-  directory: "./output"
+  directory: "~/Documents/LazyTakeNotes"
   save_audio: true                # save recording.wav alongside transcript; when false, it is still kept if transcription fails
   save_notes_history: true        # keep numbered snapshots in history/
   save_context: true              # save session context text
@@ -136,10 +136,10 @@ To add your own or override a built-in, drop a `.yaml` file in the `templates/` 
 
 ## Output
 
-After a session:
+After a session, `~/Documents/LazyTakeNotes` holds one folder per session:
 
 ```
-output/
+2026-11-08_100000_standup/
 ├── transcript.txt            # timestamped transcript
 ├── notes.md                  # latest notes/digest (markdown)
 ├── context.txt               # user-provided context (when save_context: true)
@@ -168,7 +168,7 @@ For a custom build, set an absolute path in `config.yaml`, or export the old ove
 ```bash
 export LTN_NEMO_BINARY=/path/to/nemo-speech
 export LTN_NEMO_MODEL=/path/to/Nemotron-3-Diarization.q8_0.gguf
-take-note diarize output/2026-11-08_100000_standup
+take-note diarize ~/Documents/LazyTakeNotes/2026-11-08_100000_standup
 ```
 
 The command writes `speakers.json` and `transcript_speakers.txt` in the session directory.
@@ -191,6 +191,8 @@ output:
 `binary` and `model` are optional overrides. Leave them blank to use the managed cache.
 
 A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript, is saved to `speakers.json`, and is used in the digest prompt, so the notes can attribute statements to a person.
+
+The session saves the labeled transcript as `transcript_speakers.txt` next to `transcript.txt`. `take-note transcript` prints the labeled one when it exists.
 
 Speaker numbers follow arrival order, so a label already on screen stays valid when a new voice joins. Each pass reads the whole recording, which is cheap: about 11 s per hour on Metal.
 
@@ -235,7 +237,7 @@ The bundle sets three environment variables in `trolley.toml`:
 
 | Variable | Value | Why |
 | --- | --- | --- |
-| `LTN_OUTPUT_DIR` | `~/Documents/LazyTakeNotes` | The default `./output` would land inside the bundle. |
+| `LTN_OUTPUT_DIR` | `~/Documents/LazyTakeNotes` | The same folder as the default, so a session from the app and one from a terminal land together. |
 | `LTN_KIOSK` | `1` | Returns to the mode picker after a session instead of exiting. |
 | `TEXTUAL_DRIVER` | `...drivers.ghostty_driver:GhosttyDriver` | Turns off the Kitty keyboard protocol under Trolley. Leaving it on breaks arrow keys. |
 

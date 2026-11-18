@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from textual.widgets import Markdown
 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (
+    SessionItem,
     SessionPicker,
 )
 
@@ -194,3 +196,18 @@ class TestSessionPickerFaults:
             md = picker.query_one('#sp-preview-md', Markdown)
             assert 'Cannot read' in md.source
             assert 'Key points' in md.source
+
+
+class TestAudioOnly:
+    @pytest.mark.asyncio
+    async def test_an_audio_only_session_is_listed_and_marked(self, tmp_path: Path):
+        session = tmp_path / '2026-02-21_120000'
+        session.mkdir()
+        (session / 'recording.wav').write_bytes(b'RIFF')
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            item = picker.query_one(SessionItem)
+            assert 'audio only' in item._label_text
+            preview = picker.query_one('#sp-preview-md', Markdown)
+            assert 'No transcript. The audio is in this folder.' in preview.source

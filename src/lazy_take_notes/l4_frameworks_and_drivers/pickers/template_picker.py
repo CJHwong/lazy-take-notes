@@ -87,8 +87,8 @@ class _ConfirmDeleteScreen(ModalScreen[bool]):
         Binding('y', 'confirm', 'Yes'),
         Binding('n', 'dismiss_no', 'No'),
         Binding('escape', 'dismiss_no', 'Cancel'),
-        Binding('left', 'focus_previous', 'Focus previous', show=False),
-        Binding('right', 'focus_next', 'Focus next', show=False),
+        Binding('left', 'app.focus_previous', 'Focus previous', show=False),
+        Binding('right', 'app.focus_next', 'Focus next', show=False),
     ]
 
     def __init__(self, template_name: str) -> None:
@@ -157,6 +157,11 @@ class EditTemplateRequest:
     name: str
 
 
+_NO_TEMPLATES = (
+    '**No templates yet.**\n\nPress n to create one, or turn on Show built-in templates in Settings > Sessions.'
+)
+
+
 class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
     CSS = """
     #sp-list-pane { max-width: 40; }
@@ -181,6 +186,9 @@ class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
         self._pending_reload_name: str | None = None
 
     def on_mount(self) -> None:  # noqa: D102 -- base class has the docstring; Textual dispatches both via MRO
+        if not self._templates:
+            # Nothing to filter, and a focused filter would take the n key.
+            self.call_after_refresh(self.query_one('#sp-list', _TemplateListView).focus)
         if not BUILTIN_TEMPLATES_NOTICED_PATH.exists():
             self.app.push_screen(
                 BuiltinTemplatesNotice(on_suppress=self._suppress_builtin_notice),
@@ -270,7 +278,9 @@ class TemplatePicker(SearchablePicker['str | EditTemplateRequest']):
             self._show_preview(first_item.template_name)
         else:
             self._current_name = None
-            self.query_one('#sp-preview-md', Markdown).update('*No matching templates*')
+            self.query_one('#sp-preview-md', Markdown).update(
+                '*No matching templates*' if self._templates else _NO_TEMPLATES
+            )
 
     def _on_item_highlighted(self, item: ListItem) -> None:
         if isinstance(item, TemplateItem):

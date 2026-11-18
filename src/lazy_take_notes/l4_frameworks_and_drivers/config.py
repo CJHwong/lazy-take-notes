@@ -32,7 +32,8 @@ APP_CONFIG_DEFAULTS: dict = {
         'model': 'gpt-oss:20b',
     },
     'output': {
-        'directory': './output',
+        # Absolute, so a session recorded from any folder is found from any other.
+        'directory': '~/Documents/LazyTakeNotes',
         'save_audio': True,
         'save_notes_history': True,
         'save_context': True,
