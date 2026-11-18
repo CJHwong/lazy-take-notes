@@ -73,6 +73,24 @@ class TestAudioTab:
             assert start.disabled is False
 
 
+class TestFocusAroundATest:
+    async def test_enter_starts_a_second_test_after_the_first_ends(self):
+        app = Host(RAW)
+        async with app.run_test(size=(120, 50)) as pilot:
+            await pilot.pause()
+            tab = app.query_one(AudioTab)
+            start = app.query_one('#audio-start', Button)
+            start.focus()
+            await pilot.pause()
+            tab._probe_running = True
+            tab._set_running(True)  # what pressing Start does; a disabled button loses focus
+            await pilot.pause()
+            assert app.focused is app.query_one('#audio-stop', Button)
+            tab.post_message(AudioProbeDone())
+            await pilot.pause()
+            assert app.focused is start
+
+
 class TestAudioTabFaults:
     async def test_markup_like_device_name_does_not_crash(self, monkeypatch):
         weird = 'USB Mic [/x] (2)'

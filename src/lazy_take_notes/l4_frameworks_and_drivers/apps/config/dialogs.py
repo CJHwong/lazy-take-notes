@@ -48,9 +48,10 @@ class _DiscardChangesModal(ModalScreen[bool]):
     }
     """
 
+    # Enter presses the focused button, and the safe one has focus: a reflex Enter must not
+    # discard edits or delete a 1.5 GB model.
     BINDINGS = [
         Binding('escape', 'keep_editing', 'Keep editing', priority=True),
-        Binding('enter', 'discard', 'Discard', priority=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -61,14 +62,14 @@ class _DiscardChangesModal(ModalScreen[bool]):
                 yield Button('Keep editing', id='discard-cancel')
                 yield Button('Discard and exit', id='discard-confirm', variant='error')
 
+    def on_mount(self) -> None:
+        self.query_one('#discard-cancel', Button).focus()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == 'discard-confirm')
 
     def action_keep_editing(self) -> None:
         self.dismiss(False)
-
-    def action_discard(self) -> None:
-        self.dismiss(True)
 
 
 class RemoveModelModal(_DiscardChangesModal):

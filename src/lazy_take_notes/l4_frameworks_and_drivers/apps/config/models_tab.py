@@ -36,6 +36,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.container import (
     LLM_PROVIDERS_GROUP,
     TRANSCRIPTION_PROVIDERS_GROUP,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.download_progress import describe, megabytes
 
 _STATUS_TEXT = {
     AssetStatus.READY: 'Ready',
@@ -47,11 +48,7 @@ _STATUS_TEXT = {
 
 log = logging.getLogger('ltn.config')
 
-
-def _megabytes(size: int) -> str:
-    if size >= 1024**3:
-        return f'{size / 1024**3:.1f} GB'
-    return f'{size / (1024 * 1024):.0f} MB'
+_SPEAKER_IDS = (model_catalog.RUNTIME_ID, model_catalog.NEMOTRON_ID)
 
 
 class ModelChoiceRow(Vertical):
@@ -93,8 +90,16 @@ class ModelChoiceRow(Vertical):
     ModelChoiceRow .choice-status.downloading {
         color: $accent;
     }
-    ModelChoiceRow .choice-progress {
+    ModelChoiceRow .choice-progress-line {
+        height: 1;
         margin: 0 0 0 2;
+    }
+    ModelChoiceRow .choice-progress {
+        width: 34;
+    }
+    ModelChoiceRow .choice-detail {
+        width: 1fr;
+        color: $text-muted;
     }
     ModelChoiceRow Button {
         margin-left: 1;
@@ -106,17 +111,20 @@ class ModelChoiceRow(Vertical):
         self.asset = asset
         self._state = state
         self._selected = selected
+        self._kept = 0
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes='choice-line'):
             yield Static('●' if self._selected else '○', classes='choice-mark')
             yield Static(self.asset.label, classes='choice-label')
-            yield Static(_megabytes(self.asset.size), classes='choice-size')
+            yield Static(megabytes(self.asset.size), classes='choice-size')
             yield Static('', id=f'status-{self.asset.id}', classes='choice-status')
             yield Button('Download', id=f'download-{self.asset.id}')
             yield Button('Remove', id=f'remove-{self.asset.id}')
             yield Button('Cancel', id=f'cancel-{self.asset.id}', variant='error')
-        yield ProgressBar(total=100, show_eta=False, id=f'progress-{self.asset.id}', classes='choice-progress')
+        with Horizontal(classes='choice-progress-line'):
+            yield ProgressBar(total=100, show_eta=False, id=f'progress-{self.asset.id}', classes='choice-progress')
+            yield Static('', id=f'detail-{self.asset.id}', classes='choice-detail')
 
     def on_mount(self) -> None:
         self.set_state(self._state)
@@ -138,12 +146,16 @@ class ModelChoiceRow(Vertical):
         self._action('remove').display = status in (AssetStatus.READY, AssetStatus.CORRUPT)
         self._action('cancel').display = status is AssetStatus.DOWNLOADING
         self.query_one(f'#progress-{self.asset.id}', ProgressBar).display = status is AssetStatus.DOWNLOADING
+        detail = self.query_one(f'#detail-{self.asset.id}', Static)
+        detail.update('')
+        detail.display = status is AssetStatus.DOWNLOADING
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
         self.query_one('.choice-mark', Static).update('●' if selected else '○')
 
     def mark_downloading(self) -> None:
+        self._kept = 0
         self.set_state(AssetState(self.asset, AssetStatus.DOWNLOADING))
 
     def set_progress(self, progress: AssetProgress) -> None:
@@ -151,8 +163,20 @@ class ModelChoiceRow(Vertical):
         total = progress.total or self.asset.size or 1
         bar.display = True
         bar.update(total=total, progress=progress.downloaded)
+        detail = self.query_one(f'#detail-{self.asset.id}', Static)
+        detail.display = True
+        detail.update(describe(AssetProgress(progress.downloaded, total, progress.bytes_per_second)))
+        self._kept = progress.downloaded
+
+    def mark_paused(self) -> None:
+        """After Cancel: the .part stays, and Download continues from it."""
+        if not self._kept:
+            return
         label = self.query_one(f'#status-{self.asset.id}', Static)
-        label.update(f'{_megabytes(progress.downloaded)} / {_megabytes(total)}')
+        label.update('Paused')
+        detail = self.query_one(f'#detail-{self.asset.id}', Static)
+        detail.update(f'{megabytes(self._kept)} kept. Download continues from there.')
+        detail.display = True
 
     def _action(self, name: str) -> Button:
         return self.query_one(f'#{name}-{self.asset.id}', Button)
@@ -297,6 +321,7 @@ class ModelsTab(SettingsSection):
         self._infra = infra
         self._states: dict[str, AssetState] = {}
         self._cancel: dict[str, threading.Event] = {}
+        self._speaker_progress: dict[str, AssetProgress] = {}
         self._chooser = ModelChooser(
             [asset for asset in store.catalog() if asset.group == 'transcription'],
             str(raw.get('transcription', {}).get('model', '')),
@@ -308,6 +333,8 @@ class ModelsTab(SettingsSection):
         self._speaker_status = Static('Checking...', classes='speaker-status')
         self._speaker_install = Button('Install', id='speaker-install')
         self._speaker_remove = Button('Remove', id='speaker-remove')
+        self._speaker_cancel = Button('Cancel', id='speaker-cancel', variant='error')
+        self._speaker_cancel.display = False
 
     def compose(self) -> ComposeResult:
         digest = self._raw.get('digest', {})
@@ -332,9 +359,11 @@ class ModelsTab(SettingsSection):
             'cfg-openai-api-key',
             self._infra.openai.api_key or '',
             password=True,
-            placeholder='sk-...',
+            placeholder='No key stored',
         )
-        yield Button('Clear stored key', id='cfg-openai-clear-key')
+        clear = Button('Clear stored key', id='cfg-openai-clear-key')
+        clear.display = bool(self._infra.openai.api_key)
+        yield clear
         with Vertical(id='model-fields'):
             yield FieldRow('Summary model', 'cfg-digest-model', str(digest.get('model', '')))
             yield FieldRow('Quick action model', 'cfg-interactive-model', str(interactive.get('model', '')))
@@ -390,6 +419,7 @@ class ModelsTab(SettingsSection):
             yield self._speaker_status
             yield self._speaker_install
             yield self._speaker_remove
+            yield self._speaker_cancel
 
         yield section_title('Advanced')
         yield Rule(classes='section-rule')
@@ -430,18 +460,33 @@ class ModelsTab(SettingsSection):
 
     # --- Messages -------------------------------------------------------
 
+    @on(ModelChooser.Selected)
+    def _on_model_chosen(self, _message: ModelChooser.Selected) -> None:
+        # A custom path wins over the chosen row, so a click on a row clears it.
+        self.query_one('#cfg-trans-custom-path', Input).value = ''
+
     @on(Loaded)
     def _on_loaded(self, message: Loaded) -> None:
         for state in message.states:
+            if state.asset.id in self._cancel:
+                continue  # a download started before the load finished; its row is newer
             self._apply_state(state)
         self._update_speaker_status()
 
     @on(Started)
     def _on_started(self, message: Started) -> None:
+        if message.asset_id in _SPEAKER_IDS:
+            self._speaker_progress[message.asset_id] = AssetProgress(0, self._asset(message.asset_id).size)
+            self._update_speaker_status()
+            return
         self._row(message.asset_id).mark_downloading()
 
     @on(Progress)
     def _on_progress(self, message: Progress) -> None:
+        if message.asset_id in _SPEAKER_IDS:
+            self._speaker_progress[message.asset_id] = message.progress
+            self._update_speaker_status()
+            return
         self._row(message.asset_id).set_progress(message.progress)
 
     @on(Installed)
@@ -452,11 +497,13 @@ class ModelsTab(SettingsSection):
     @on(Removed)
     def _on_removed(self, message: Removed) -> None:
         self._refresh(message.asset_id)
-        self.notify(f'Freed {_megabytes(message.freed)}.', timeout=4)
+        self.notify(f'Freed {megabytes(message.freed)}.', timeout=4)
 
     @on(Cancelled)
     def _on_cancelled(self, message: Cancelled) -> None:
         self._refresh(message.asset_id)
+        if message.asset_id not in _SPEAKER_IDS:
+            self._row(message.asset_id).mark_paused()
         self.notify(f'Download cancelled: {self._label(message.asset_id)}.', timeout=4)
 
     @on(Failed)
@@ -477,6 +524,9 @@ class ModelsTab(SettingsSection):
             self._start_download(model_catalog.NEMOTRON_ID)
         elif button_id == 'speaker-remove':
             self._confirm_remove_speakers()
+        elif button_id == 'speaker-cancel':
+            for asset_id in _SPEAKER_IDS:
+                self._cancel_download(asset_id)
         else:
             for prefix, action in (
                 ('download-', self._start_download),
@@ -496,26 +546,43 @@ class ModelsTab(SettingsSection):
     def _start_download(self, asset_id: str) -> None:
         if asset_id in self._cancel:
             return
-        self.post_message(self.Started(asset_id))
-        self.run_worker(lambda: self._install(asset_id), thread=True, group=f'model-{asset_id}')
-
-    def _install(self, asset_id: str) -> None:
+        # Registered on the event loop, so a second press never starts a second download.
         cancel = threading.Event()
         self._cancel[asset_id] = cancel
+        self.post_message(self.Started(asset_id))
+        self.run_worker(lambda: self._install(asset_id, cancel), thread=True, group=f'model-{asset_id}')
 
+    def on_unmount(self) -> None:
+        # The worker thread would post into a page that no longer exists. Stop it; the .part stays for resume.
+        for cancel in self._cancel.values():
+            cancel.set()
+
+    def _install(self, asset_id: str, cancel: threading.Event) -> None:
         def report(progress: AssetProgress) -> None:
-            self.post_message(self.Progress(asset_id, progress))
+            self._post(self.Progress(asset_id, progress))
 
         try:
             self._store.install(asset_id, on_progress=report, cancel=cancel)
         except DownloadCancelledError:
-            self.post_message(self.Cancelled(asset_id))
+            log.info('download of %s cancelled', asset_id)
+            self._post(self.Cancelled(asset_id))
         except Exception as exc:  # noqa: BLE001 -- surface every install failure in the row
-            self.post_message(self.Failed(asset_id, str(exc)))
+            log.error('download of %s failed: %s', asset_id, exc, exc_info=True)
+            self._post(self.Failed(asset_id, str(exc)))
         else:
-            self.post_message(self.Installed(asset_id))
+            self._post(self.Installed(asset_id))
         finally:
             self._cancel.pop(asset_id, None)
+
+    def _post(self, message: Message) -> None:
+        # After Settings closes, the page has no app; a report must not kill the download thread.
+        if not self.is_attached:
+            log.debug('Settings closed; dropped %s', type(message).__name__)
+            return
+        try:
+            self.post_message(message)
+        except Exception as exc:  # noqa: BLE001 -- the page can detach between the check and the post
+            log.debug('Settings closed; dropped %s: %s', type(message).__name__, exc)
 
     def _cancel_download(self, asset_id: str) -> None:
         cancel = self._cancel.get(asset_id)
@@ -560,6 +627,8 @@ class ModelsTab(SettingsSection):
 
     def _apply_state(self, state: AssetState) -> None:
         self._states[state.asset.id] = state
+        if state.status is not AssetStatus.DOWNLOADING:
+            self._speaker_progress.pop(state.asset.id, None)
         if state.asset.group == 'transcription':
             self._chooser.set_state(state)
 
@@ -570,11 +639,20 @@ class ModelsTab(SettingsSection):
     def _update_speaker_status(self) -> None:
         runtime = self._states.get(model_catalog.RUNTIME_ID)
         model = self._states.get(model_catalog.NEMOTRON_ID)
+        if self._speaker_progress:
+            done = sum(progress.downloaded for progress in self._speaker_progress.values())
+            total = sum(progress.total for progress in self._speaker_progress.values())
+            self._speaker_status.update(f'Downloading {megabytes(done)} / {megabytes(total)}')
+            self._speaker_install.display = False
+            self._speaker_remove.display = False
+            self._speaker_cancel.display = True
+            return
+        self._speaker_cancel.display = False
         if runtime is None or model is None:
             text = 'Checking...'
             ready = False
         elif runtime.status is AssetStatus.READY and model.status is AssetStatus.READY:
-            text = f'Ready ({_megabytes(runtime.asset.size + model.asset.size)})'
+            text = f'Ready ({megabytes(runtime.asset.size + model.asset.size)})'
             ready = True
         else:
             text = 'Missing'

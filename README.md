@@ -206,11 +206,13 @@ Speaker numbers follow arrival order, so a label already on screen stays valid w
 | Sessions | Output folder, save toggles, auto-label, vocabulary, built-in templates |
 | Appearance | Theme and the recording preview |
 
-Pages use the full window: a left navigation column, then two content columns. Models is first because it is the setup page. Below about 100 columns, the two content columns stack.
+Pages use the full window: a left navigation column, then two content columns. Models is first because it is the setup page. Below about 100 columns, the two content columns stack. Inside a page, Esc goes back to the page list. Esc on the page list leaves Settings. `ctrl+s` saves.
+
+Settings writes `config.yaml` readable by your user only, because it can hold an API key.
 
 The Models page lists each transcript model as a row with its size, state, and one action. Language overrides use `Add language` rows with a locale and a model picker. Speaker runtime and model show only a status and an install or remove action. No model paths are exposed. Advanced settings are always visible. No page uses collapsible sections.
 
-Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show progress, and can be cancelled. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
+Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show size, speed and time left, and can be cancelled. A cancelled download keeps its partial file. Two downloads of one model never run at once, even from two windows: the second waits and uses the first one's file. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
 
 On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place.
 

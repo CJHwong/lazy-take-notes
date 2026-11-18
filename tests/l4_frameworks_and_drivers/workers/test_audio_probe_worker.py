@@ -98,3 +98,23 @@ class TestAudioProbe:
         assert errors and 'device unplugged' in errors[0].error
         assert isinstance(events[-1], AudioProbeDone)
         assert mic.closed and system.closed
+
+
+class SlowSource(FakeSource):
+    """System audio that delivers nothing and makes each read wait its full timeout."""
+
+    def read(self, timeout: float = 0.1):
+        time.sleep(timeout)
+
+
+class TestTheMicKeepsUp:
+    def test_each_pass_reads_every_queued_mic_chunk(self):
+        # A real mic queues a chunk every ~10 ms while the loop waits on system audio.
+        mic = FakeSource([np.full(160, 0.1) for _ in range(200)])
+        system = SlowSource([])
+
+        events = run(mic, system, duration=0.2)
+
+        assert mic._chunks == []  # nothing left behind to overflow the queue
+        mic_levels = [event for event in events if isinstance(event, AudioProbeLevel) and event.source == 'mic']
+        assert len(mic_levels) < 20  # one level per pass, not one per chunk

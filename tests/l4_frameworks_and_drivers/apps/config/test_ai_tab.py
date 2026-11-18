@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 import pytest
@@ -72,3 +73,38 @@ class TestPullModel:
             await pilot.pause()
 
         assert calls == ['gpt-oss:20b']
+
+    @pytest.mark.parametrize(
+        ('event', 'text'),
+        [
+            ({'status': 'pulling ca7a9654b546', 'completed': 46_000_000, 'total': 92_000_000}, '44 MB of 88 MB (50%)'),
+            ({'status': 'verifying sha256 digest'}, 'verifying sha256 digest'),
+            ({'status': 'pulling 62fbfd9ed093', 'completed': 182, 'total': 182}, 'pulling 62fbfd9ed093'),
+        ],
+        ids=['layer', 'no-bytes', 'tiny-layer'],
+    )
+    async def test_pull_shows_how_much_is_done(self, app: ConfigApp, monkeypatch: pytest.MonkeyPatch, event, text):
+        from lazy_take_notes.l4_frameworks_and_drivers.container import DependencyContainer
+
+        seen: list[str] = []
+        hold = threading.Event()
+
+        class FakeClient:
+            def pull_model(self, model, on_progress=None):
+                assert on_progress is not None
+                on_progress(type('Progress', (), event)())
+                hold.wait(5)
+
+        monkeypatch.setattr(DependencyContainer, 'resolve_llm_client', staticmethod(lambda _infra: FakeClient()))
+        async with app.run_test(size=(120, 60)) as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-ollama-pull-digest', Button).press()
+            for _ in range(20):
+                await pilot.pause(0.05)
+                seen.append(str(app.query_one('#cfg-ollama-models', Static).render()))
+                if text in seen[-1]:
+                    break
+            hold.set()
+            await app.workers.wait_for_complete()
+
+        assert any(f'Pulling gpt-oss:20b: {text}' == line for line in seen)

@@ -142,8 +142,9 @@ The audio worker posts `AudioHealth` on each change. `RecordApp` shows `MIC LOST
 Models and the diarization runtime download on demand and are verified before use.
 
 - `l3_interface_adapters/gateways/model_catalog.py` pins every asset: source URL, size, SHA-256, cache path, and platform. Versions never float at runtime.
-- `cached_model_store.py` owns the cache. Root: `platformdirs.user_cache_path('lazy-take-notes')`. Layout: `assets/`, `downloads/`, `state.json`.
+- `cached_model_store.py` owns the cache. Root: `platformdirs.user_cache_path('lazy-take-notes')`. Layout: `assets/`, `downloads/`, `locks/`, `state.json`.
 - `download_engine.py` streams with resume, reports progress, checks size and SHA-256, and extracts archives with path-traversal checks.
+- `file_lock.py` holds one `flock` per asset (`locks/<id>.lock`) during a download, across processes and across stores in one process (the kiosk runs preflight and Settings in one process). The store's thread lock covers only `state.json`, so `status()` answers the UI during a download.
 - `hf_model_resolver.py` is a thin adapter over the store. It keeps the `ModelResolver` interface for workers and plugins.
 - `nemo_speech_diarizer.py` resolves paths in this order: explicit config path, `LTN_NEMO_*` env, then the managed cache. It never downloads during a session.
 - The store adopts matching files from the old `pywhispercpp` and `~/.cache/nemotron-diarization` locations. It never deletes the originals.
@@ -158,7 +159,7 @@ Models and the diarization runtime download on demand and are verified before us
 - `audio_tab.py`: live input probe, microphone select, speaker labels, advanced audio settings.
 - `fields.py`: shared form widgets.
 
-Page order: Models, Digest, Audio, Sessions, Appearance. The shell is a left `ListView` nav plus a `ContentSwitcher`. Each page is a `SettingsSection` with two full-height columns that stack below about 100 columns. The Models page holds text generation, speech models, language overrides, and speaker asset install. The Audio page holds the speaker enable switch, device, and interval. Downloads run in thread workers and report through messages. Speaker runtime and model paths are not exposed. Advanced settings are always visible; no page uses collapsibles.
+Page order: Models, Digest, Audio, Sessions, Appearance. Esc inside a page focuses the page list; Esc on the list leaves. Save replaces the keys the form owns (`_FORM_OWNED`: language overrides, `digest.max_lines`) instead of merging them, so a removed entry leaves the file; every other key merges, so plugin keys survive. The file is written with mode 0600. Test runs `preflight.check_ai` on a thread. The shell is a left `ListView` nav plus a `ContentSwitcher`. Each page is a `SettingsSection` with two full-height columns that stack below about 100 columns. The Models page holds text generation, speech models, language overrides, and speaker asset install. The Audio page holds the speaker enable switch, device, and interval. Downloads run in thread workers and report through messages. Speaker runtime and model paths are not exposed. Advanced settings are always visible; no page uses collapsibles.
 
 ## Plugin System
 

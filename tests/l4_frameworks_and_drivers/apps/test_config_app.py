@@ -20,6 +20,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.apps.config.fields import (
     to_float,
     to_int,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.apps.config.models_tab import ModelChoiceRow, ModelChooser
+from lazy_take_notes.l4_frameworks_and_drivers.apps.config.sections import LanguageRow, model_uri
 
 # ── Monkeypatch helpers ──────────────────────────────────────────────────────
 
@@ -234,7 +236,7 @@ class TestConfigAppSave:
             await pilot.pause()
             app.query_one('#cfg-trans-chunk', Input).value = 'abc'
 
-            assert 'Chunk Duration must be a number.' in app._numeric_errors()
+            assert 'Chunk duration must be a number.' in app._numeric_errors()
             await pilot.press('ctrl+s')
             await pilot.pause()
 
@@ -655,6 +657,40 @@ class TestConfigAppQuit:
                 mock_exit.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_enter_keeps_editing(self, tmp_path, monkeypatch):
+        # Enter answers the focused button. The safe one has focus, so a reflex Enter loses nothing.
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                await pilot.press('enter')
+                await pilot.pause()
+                mock_exit.assert_not_called()
+                assert not isinstance(app.app.screen, _DiscardChangesModal)
+
+    @pytest.mark.asyncio
+    async def test_tab_then_enter_discards(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).value = 'changed-model'
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                await pilot.press('tab', 'enter')
+                await pilot.pause()
+                mock_exit.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_keep_editing_stays(self, tmp_path, monkeypatch):
         from textual.widgets import Input
 
@@ -984,3 +1020,259 @@ class TestBrokenConfigOnOpen:
             assert any('cannot be read' in toast and '[e]' in toast for toast in _toasts(app))
             assert app.app.is_running
         assert config_path.read_text(encoding='utf-8') == 'digest: [unclosed\n'  # never overwritten on open
+
+
+def _written(config_path: Path) -> dict:
+    return yaml.safe_load(config_path.read_text(encoding='utf-8'))
+
+
+class TestRemovingAValue:
+    """A value the user removes in the form is removed from config.yaml too."""
+
+    @pytest.mark.asyncio
+    async def test_removing_a_language_override_removes_it_from_the_file(self, tmp_path, monkeypatch):
+        from textual.widgets import Button
+
+        data = {'transcription': {'models': {'ja': 'hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin'}}}
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data=data)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            row = next(row for row in app.query(LanguageRow) if row.locale == 'ja')
+            row.query_one(Button).press()
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+        assert 'ja' not in _written(config_path)['transcription']['models']
+
+    @pytest.mark.asyncio
+    async def test_clearing_force_after_removes_it_from_the_file(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'digest': {'max_lines': 40}})
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-max-lines', Input).value = ''
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+        assert 'max_lines' not in _written(config_path)['digest']
+
+    @pytest.mark.asyncio
+    async def test_keys_the_form_does_not_show_survive_a_save(self, tmp_path, monkeypatch):
+        data = {'my_plugin': {'token': 'x'}, 'transcription': {'models': {'ja': 'large-v3'}, 'extra': 1}}
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data=data)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+        written = _written(config_path)
+        assert written['my_plugin'] == {'token': 'x'}
+        assert written['transcription']['extra'] == 1
+
+
+class TestCustomModelPath:
+    @pytest.mark.asyncio
+    async def test_a_missing_file_is_not_saved(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        app, config_path = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-trans-custom-path', Input).value = str(tmp_path / 'nope.bin')
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            assert not config_path.exists()
+            assert any('nope.bin' in toast for toast in _toasts(app))
+
+    @pytest.mark.asyncio
+    async def test_clicking_a_model_row_replaces_the_custom_path(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        custom = tmp_path / 'mine.bin'
+        custom.write_bytes(b'x')
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'transcription': {'model': str(custom)}})
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-trans-custom-path', Input).value == str(custom)
+            row = app.query(ModelChoiceRow).first()
+            row.post_message(ModelChooser.Selected(row.asset.id))
+            await pilot.pause()
+            assert not app.query_one('#cfg-trans-custom-path', Input).value
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+        assert _written(config_path)['transcription']['model'] == model_uri(row.asset)
+
+    @pytest.mark.asyncio
+    async def test_clearing_the_path_without_a_model_asks_for_one(self, tmp_path, monkeypatch):
+        from textual.widgets import Input
+
+        custom = tmp_path / 'mine.bin'
+        custom.write_bytes(b'x')
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'transcription': {'model': str(custom)}})
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-trans-custom-path', Input).value = ''
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            assert any('Choose a speech model' in toast for toast in _toasts(app))
+        assert _written(config_path)['transcription']['model'] == str(custom)
+
+
+class TestMessagesUseThePageWords:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('field', 'label'),
+        [
+            ('#cfg-digest-min-lines', 'After lines'),
+            ('#cfg-digest-min-interval', 'Wait seconds'),
+            ('#cfg-digest-max-lines', 'Force after'),
+            ('#cfg-digest-compact', 'Compaction threshold'),
+            ('#cfg-diarization-interval', 'Update every'),
+        ],
+    )
+    async def test_a_bad_number_names_the_field_as_the_page_does(self, tmp_path, monkeypatch, field, label):
+        from textual.widgets import Input
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.query_one(field, Input).value = 'abc'
+            assert f'{label} must be a number.' in app._numeric_errors()
+
+    @pytest.mark.asyncio
+    async def test_force_after_help_names_the_right_field(self, tmp_path, monkeypatch):
+        from textual.widgets import Static
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            texts = [str(widget.render()) for widget in app.query(Static)]
+            assert any('Blank means twice After lines.' in text for text in texts)
+
+
+class TestApiKeyField:
+    @pytest.mark.asyncio
+    async def test_without_a_stored_key_there_is_nothing_to_clear(self, tmp_path, monkeypatch):
+        from textual.widgets import Button, Input
+
+        monkeypatch.delenv('OPENAI_API_KEY', raising=False)
+        app, _ = _make_app(tmp_path, monkeypatch, config_data={'llm_provider': 'openai'})
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            assert app.query_one('#cfg-openai-clear-key', Button).display is False
+            assert app.query_one('#cfg-openai-api-key', Input).placeholder == 'No key stored'
+
+    @pytest.mark.asyncio
+    async def test_a_stored_key_can_be_cleared(self, tmp_path, monkeypatch):
+        from textual.widgets import Button
+
+        app, config_path = _make_app(
+            tmp_path, monkeypatch, config_data={'llm_provider': 'openai', 'openai': {'api_key': 'test-key'}}
+        )
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            button = app.query_one('#cfg-openai-clear-key', Button)
+            assert button.display is True
+            button.press()
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+            assert button.display is False
+        assert _written(config_path)['openai']['api_key'] is None
+
+
+class TestAiTest:
+    """Test AI checks what a session start checks, without freezing Settings."""
+
+    async def _press_test(self, app, pilot, client):
+        with patch(
+            'lazy_take_notes.l4_frameworks_and_drivers.container.DependencyContainer.resolve_llm_client',
+            return_value=client,
+        ):
+            app.query_one('#cfg-ai-test').press()
+            await pilot.pause()
+            started = list(_toasts(app))
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        return started
+
+    @pytest.mark.asyncio
+    async def test_it_says_it_is_testing_at_once(self, tmp_path, monkeypatch):
+        from tests.conftest import FakeLLMClient
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            started = await self._press_test(app, pilot, FakeLLMClient())
+            assert any('Testing' in toast for toast in started)
+            assert any(toast.startswith('AI works') for toast in _toasts(app))
+
+    @pytest.mark.asyncio
+    async def test_a_missing_summary_model_fails(self, tmp_path, monkeypatch):
+        from tests.conftest import FakeLLMClient
+
+        client = FakeLLMClient()
+        client._missing_models = ['gpt-oss:20b']
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await self._press_test(app, pilot, client)
+            toasts = _toasts(app)
+            assert not any(toast.startswith('AI works') for toast in toasts)
+            assert any('Model not available: gpt-oss:20b' in toast for toast in toasts)
+
+    @pytest.mark.asyncio
+    async def test_a_failure_reads_as_one_sentence_then_the_fix(self, tmp_path, monkeypatch):
+        from tests.conftest import FakeLLMClient
+
+        client = FakeLLMClient()
+        client._connectivity = (False, 'Authentication failed: Incorrect API key provided.')
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await self._press_test(app, pilot, client)
+            errors = [str(n.message) for n in app.app._notifications if n.severity == 'error']
+            assert errors == [
+                'Cannot reach the AI provider: Authentication failed: Incorrect API key provided. '
+                'Start Ollama (ollama serve), or check ollama.host in Settings > Models.'
+            ]
+
+
+class TestBackToThePageList:
+    @pytest.mark.asyncio
+    async def test_esc_in_a_page_returns_to_the_list_then_leaves(self, tmp_path, monkeypatch):
+        from textual.widgets import Input, ListView
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.query_one('#cfg-digest-model', Input).focus()
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_not_called()
+                assert app.app.focused is app.query_one('#cfg-nav', ListView)
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_esc_with_a_dropdown_open_only_closes_it(self, tmp_path, monkeypatch):
+        from textual.widgets import Select
+
+        app, _ = _make_app(tmp_path, monkeypatch)
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            select = app.query_one('#cfg-llm-provider', Select)
+            select.focus()
+            select.expanded = True
+            await pilot.pause()
+            with patch.object(app, 'dismiss') as mock_exit:
+                await pilot.press('escape')
+                await pilot.pause()
+                mock_exit.assert_not_called()
+                assert select.expanded is False
+                assert app.app.focused is select

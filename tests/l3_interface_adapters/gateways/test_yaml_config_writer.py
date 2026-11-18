@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import stat
+import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from lazy_take_notes.l3_interface_adapters.gateways import yaml_config_writer as mod
@@ -98,3 +101,30 @@ class TestExplicitPath:
             'digest': {'model': 'b'},
         }
         assert not default_path.exists()
+
+
+@pytest.mark.skipif(sys.platform == 'win32', reason='POSIX file modes')
+class TestOnlyTheUserCanRead:
+    """config.yaml can hold an API key."""
+
+    def test_a_new_file_is_private(self, tmp_path: Path):
+        path = tmp_path / 'config.yaml'
+        write_config({'openai': {'api_key': 'k'}}, path)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_an_older_readable_file_becomes_private(self, tmp_path: Path):
+        path = tmp_path / 'config.yaml'
+        path.write_text('{}')
+        path.chmod(0o644)
+        write_config({'theme': 'nord'}, path)
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    def test_a_symlinked_file_stays_a_symlink(self, tmp_path: Path):
+        target = tmp_path / 'dotfiles' / 'config.yaml'
+        target.parent.mkdir()
+        target.write_text('{}')
+        link = tmp_path / 'config.yaml'
+        link.symlink_to(target)
+        write_config({'theme': 'nord'}, link)
+        assert link.is_symlink()
+        assert yaml.safe_load(target.read_text())['theme'] == 'nord'

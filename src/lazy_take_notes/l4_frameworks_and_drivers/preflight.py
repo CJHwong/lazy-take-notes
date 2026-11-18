@@ -31,6 +31,7 @@ from lazy_take_notes.l2_use_cases.ports.llm_client import LLMClient
 from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 from lazy_take_notes.l2_use_cases.utils.template_validator import validate_template
 from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+from lazy_take_notes.l4_frameworks_and_drivers import download_progress
 
 if TYPE_CHECKING:
     from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
@@ -229,6 +230,8 @@ def _check_whisper(check: Check, plan: PreflightPlan, update: Callable[[str], No
     if isinstance(resolver, HfModelResolver):
         # A plugin resolver has no cancel; its download ends with the daemon check thread.
         resolver.cancel = plan.cancel
+        # The first download can take most of an hour; show how much is left.
+        resolver.on_detail = lambda progress: update(f'Downloading {name}: {download_progress.describe(progress)}')
     try:
         path = resolver.resolve(name)
     except ModelResolutionError as error:
@@ -378,16 +381,28 @@ def _check_diarization(check: Check, plan: PreflightPlan, _update: Callable[[str
 
 
 def _check_llm(check: Check, plan: PreflightPlan, update: Callable[[str], None]) -> None:
-    client = plan.llm_client
+    check_ai(
+        check, plan.llm_client, plan.llm_provider, [plan.config.digest.model, plan.config.interactive.model], update
+    )
+
+
+def check_ai(
+    check: Check,
+    client: LLMClient,
+    provider: str,
+    models: list[str],
+    update: Callable[[str], None],
+) -> None:
+    """Reach the provider, find the models, and get one tiny reply from each. Settings > Test runs it too."""
     reachable, error = client.check_connectivity()
     if not reachable:
-        check.set(FAIL, f'Cannot reach the AI provider: {error}', _provider_fix(plan.llm_provider))
+        check.set(FAIL, f'Cannot reach the AI provider: {error}', _provider_fix(provider))
         return
-    models = list(dict.fromkeys([plan.config.digest.model, plan.config.interactive.model]))
+    models = list(dict.fromkeys(models))
     missing = client.check_models(models)
     if missing:
         pull = '; '.join(f'ollama pull {model}' for model in missing)
-        fix = f'Run: {pull}' if plan.llm_provider == 'ollama' else 'Pick an available model in Settings > Models.'
+        fix = f'Run: {pull}' if provider == 'ollama' else 'Pick an available model in Settings > Models.'
         check.set(FAIL, f'Model not available: {", ".join(missing)}', fix)
         return
     for model in models:

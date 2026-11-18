@@ -35,7 +35,7 @@ class DigestTab(SettingsSection):
             '' if digest.get('max_lines') is None else str(digest.get('max_lines')),
             placeholder='30',
         )
-        yield Static('Force after is optional. Blank means twice the wait threshold.', classes='section-desc')
+        yield Static('Force after is optional. Blank means twice After lines.', classes='section-desc')
 
         yield section_title('Advanced')
         yield Rule(classes='section-rule')

@@ -23,6 +23,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
 
 _PROBE_SECONDS = 15.0
 _PERMISSION_INTERVAL = 0.5
+# Bounds one pass, so a source that never runs dry still lets the other source and Stop through.
+_MAX_CHUNKS_PER_PASS = 100
 
 
 def run_audio_probe(
@@ -49,7 +51,7 @@ def run_audio_probe(
     try:
         while not stop.is_set() and time.monotonic() - started < duration:
             for name, source in (('mic', mic), ('system', system)):
-                chunk = source.read(timeout=0.05)
+                chunk = _read_queued(source)
                 if chunk is None:
                     continue
                 samples = np.asarray(chunk, dtype=np.float64)
@@ -69,6 +71,24 @@ def run_audio_probe(
     finally:
         _close(mic, system)
         post_message(AudioProbeDone())
+
+
+def _read_queued(source):
+    """Every chunk the source has queued, as one array.
+
+    The loop waits up to 50 ms on each source. A mic queues a chunk about every
+    10 ms, so one read per pass let its queue overflow and drop audio.
+    """
+    first = source.read(timeout=0.05)
+    if first is None:
+        return None
+    chunks = [first]
+    while len(chunks) < _MAX_CHUNKS_PER_PASS:
+        chunk = source.read(timeout=0)
+        if chunk is None:
+            break
+        chunks.append(chunk)
+    return np.concatenate([np.asarray(chunk).ravel() for chunk in chunks])
 
 
 def _system_state(source) -> str:

@@ -155,3 +155,16 @@ async def test_a_config_that_fails_to_load_on_retry_keeps_the_screen():
             await _settle(pilot)
     assert run.call_count == 1
     assert screen.plan is plan
+
+
+@pytest.mark.asyncio
+async def test_an_error_before_the_session_does_not_say_the_session_continues():
+    screen = PreflightScreen(MagicMock())
+    with patch(_RUN, return_value=_report(mic=FAIL)):
+        async with screen.run_test() as pilot:
+            await _settle(pilot)
+            screen.call_later(lambda: 1 / 0)
+            await _settle(pilot)
+            messages = [str(n.message) for n in screen.app._notifications if n.severity == 'error']
+            assert any('ZeroDivisionError' in message for message in messages)
+            assert not any('session' in message for message in messages)
