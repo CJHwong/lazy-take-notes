@@ -398,9 +398,10 @@ class TestCrashCapture:
         assert 'worker bug' in logged
 
     @pytest.mark.asyncio
-    async def test_an_error_storm_ends_the_session_cleanly(self, tmp_path):
+    async def test_an_error_storm_raises_one_alert_and_keeps_recording(self, tmp_path, caplog):
         from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ERROR_BURST_LIMIT
 
+        caplog.set_level('CRITICAL', logger='ltn.app')
         app = make_app(tmp_path)
         with patch.object(app, '_start_audio_worker'):
             async with app.run_test() as pilot:
@@ -408,14 +409,24 @@ class TestCrashCapture:
                     patch('lazy_take_notes.l4_frameworks_and_drivers.screen_base.SHUTDOWN_GRACE_S', 0.05),
                     patch.object(app.app, 'exit') as exit_app,
                 ):
-                    for _ in range(ERROR_BURST_LIMIT + 1):
+                    for _ in range(ERROR_BURST_LIMIT * 3):
                         app.call_later(lambda: 1 / 0)
                     await _settle(pilot, 4)
                     await asyncio.sleep(0.2)
                     await _settle(pilot)
 
-                    assert app._audio_shutdown.is_set()  # noqa: SLF001 -- recording stopped and flushed
-                    exit_app.assert_called()
+                    assert not app._audio_shutdown.is_set()  # noqa: SLF001 -- the recording goes on
+                    exit_app.assert_not_called()
+                    alerts = [n for n in app.app._notifications if 'Errors keep repeating' in n.message]  # noqa: SLF001 -- Textual keeps the shown toasts here
+                    assert len(alerts) == 1
+                    tracebacks = [r for r in caplog.records if r.exc_info]
+                    assert len(tracebacks) == ERROR_BURST_LIMIT + 1  # then only counts, so the log stays small
+
+                    with patch('lazy_take_notes.l4_frameworks_and_drivers.screen_base.STORM_LOG_INTERVAL_S', 0.0):
+                        app.call_later(lambda: 1 / 0)
+                        await _settle(pilot)
+                    assert 'more errors' in caplog.records[-1].getMessage()
+                    assert 'ZeroDivisionError' in caplog.records[-1].getMessage()
 
 
 class TestShutdownSignals:
