@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1262,7 +1263,12 @@ class TestAudioWithSaveAudioOff:
             nonlocal calls
             calls += 1
             if seen is not None and calls == 4:
-                seen.append((tmp_path / 'recording.wav').exists())
+                # The writer thread opens the file, so give a slow machine time to catch up.
+                wav = tmp_path / 'recording.wav'
+                deadline = time.monotonic() + 5
+                while not wav.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                seen.append(wav.exists())
             return calls > 5
 
         messages: list = []
