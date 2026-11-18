@@ -42,6 +42,7 @@ _STATUS_TEXT = {
     AssetStatus.READY: 'Ready',
     AssetStatus.MISSING: 'Missing',
     AssetStatus.DOWNLOADING: 'Downloading',
+    AssetStatus.BUSY: 'Downloading',
     AssetStatus.CORRUPT: 'Damaged',
     AssetStatus.UNSUPPORTED: 'Unsupported',
 }
@@ -87,7 +88,7 @@ class ModelChoiceRow(Vertical):
     ModelChoiceRow .choice-status.corrupt {
         color: $error;
     }
-    ModelChoiceRow .choice-status.downloading {
+    ModelChoiceRow .choice-status.downloading, ModelChoiceRow .choice-status.busy {
         color: $accent;
     }
     ModelChoiceRow .choice-progress-line {
@@ -139,16 +140,18 @@ class ModelChoiceRow(Vertical):
         status = state.status
         label = self.query_one(f'#status-{self.asset.id}', Static)
         label.update(_STATUS_TEXT[status])
-        for name in ('ready', 'missing', 'corrupt', 'downloading', 'unsupported'):
+        for name in ('ready', 'missing', 'corrupt', 'downloading', 'busy', 'unsupported'):
             label.remove_class(name)
         label.add_class(status.value)
-        self._action('download').display = status in (AssetStatus.MISSING, AssetStatus.CORRUPT)
+        # Download on a BUSY row waits for the other download and shows its progress.
+        self._action('download').display = status in (AssetStatus.MISSING, AssetStatus.CORRUPT, AssetStatus.BUSY)
         self._action('remove').display = status in (AssetStatus.READY, AssetStatus.CORRUPT)
         self._action('cancel').display = status is AssetStatus.DOWNLOADING
         self.query_one(f'#progress-{self.asset.id}', ProgressBar).display = status is AssetStatus.DOWNLOADING
         detail = self.query_one(f'#detail-{self.asset.id}', Static)
-        detail.update('')
-        detail.display = status is AssetStatus.DOWNLOADING
+        busy = status is AssetStatus.BUSY
+        detail.update('In another window. Press Download to follow it.' if busy else '')
+        detail.display = status is AssetStatus.DOWNLOADING or busy
 
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
@@ -348,7 +351,7 @@ class ModelsTab(SettingsSection):
             'cfg-llm-provider',
             discover_providers(LLM_PROVIDERS_GROUP, BUILTIN_LLM_PROVIDERS),
             self._infra.llm_provider,
-            help_text='Ollama is local. OpenAI uses a cloud API.',
+            help_text='Ollama runs a model here, or a cloud model after ollama signin. OpenAI needs an API key.',
         )
         yield FieldRow('Server', 'cfg-ollama-host', self._infra.ollama.host, placeholder='http://localhost:11434')
         yield FieldRow(
@@ -496,7 +499,8 @@ class ModelsTab(SettingsSection):
 
     @on(Removed)
     def _on_removed(self, message: Removed) -> None:
-        self._refresh(message.asset_id)
+        for asset_id in _SPEAKER_IDS if message.asset_id in _SPEAKER_IDS else (message.asset_id,):
+            self._refresh(asset_id)
         self.notify(f'Freed {megabytes(message.freed)}.', timeout=4)
 
     @on(Cancelled)
@@ -592,21 +596,30 @@ class ModelsTab(SettingsSection):
     def _confirm_remove(self, asset_id: str) -> None:
         asset = self._asset(asset_id)
         self.app.push_screen(
-            RemoveModelModal(asset.label, asset.size),
+            RemoveModelModal(asset.label, self._disk_size(asset_id)),
             callback=lambda confirmed: self._remove(asset_id) if confirmed else None,
         )
 
     def _confirm_remove_speakers(self) -> None:
-        assets = [self._asset(model_catalog.RUNTIME_ID), self._asset(model_catalog.NEMOTRON_ID)]
-        size = sum(asset.size for asset in assets)
+        size = self._disk_size(model_catalog.RUNTIME_ID) + self._disk_size(model_catalog.NEMOTRON_ID)
         self.app.push_screen(
             RemoveModelModal('Speaker runtime and model', size),
             callback=lambda confirmed: self._remove_speakers() if confirmed else None,
         )
 
     def _remove_speakers(self) -> None:
-        for asset_id in (model_catalog.RUNTIME_ID, model_catalog.NEMOTRON_ID):
-            self._remove(asset_id)
+        # One worker and one toast: the user removed one thing.
+        self.run_worker(self._remove_speakers_worker, thread=True, group='remove-speakers')
+
+    def _remove_speakers_worker(self) -> None:
+        freed = 0
+        for asset_id in _SPEAKER_IDS:
+            try:
+                freed += self._store.remove(asset_id)
+            except Exception as exc:  # noqa: BLE001 -- surface every removal failure
+                self.post_message(self.Failed(asset_id, str(exc)))
+                return
+        self.post_message(self.Removed(model_catalog.RUNTIME_ID, freed))
 
     def _remove(self, asset_id: str) -> None:
         self.run_worker(lambda: self._remove_worker(asset_id), thread=True, group=f'remove-{asset_id}')
@@ -651,8 +664,12 @@ class ModelsTab(SettingsSection):
         if runtime is None or model is None:
             text = 'Checking...'
             ready = False
+        elif AssetStatus.BUSY in (runtime.status, model.status):
+            text = 'Downloading elsewhere'
+            ready = False
         elif runtime.status is AssetStatus.READY and model.status is AssetStatus.READY:
-            text = f'Ready ({megabytes(runtime.asset.size + model.asset.size)})'
+            size = self._disk_size(model_catalog.RUNTIME_ID) + self._disk_size(model_catalog.NEMOTRON_ID)
+            text = f'Ready ({megabytes(size)})'
             ready = True
         else:
             text = 'Missing'
@@ -660,6 +677,13 @@ class ModelsTab(SettingsSection):
         self._speaker_status.update(text)
         self._speaker_install.display = not ready
         self._speaker_remove.display = ready
+
+    def _disk_size(self, asset_id: str) -> int:
+        # The catalog size is the download; a runtime archive takes more space once extracted.
+        state = self._states.get(asset_id)
+        if state is not None and state.installed_bytes:
+            return state.installed_bytes
+        return self._asset(asset_id).size
 
     def _row(self, asset_id: str) -> ModelChoiceRow:
         return self.query_one(f'#choice-{asset_id}', ModelChoiceRow)

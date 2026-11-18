@@ -107,6 +107,7 @@ transcription:
   models:                         # per-locale overrides
     zh: "breeze25-q8"             # Breeze-ASR-25, Mandarin / Traditional Chinese
     zh-min-nan: "breeze26"        # Breeze-ASR-26, Taiwanese Hokkien (台語)
+                                  # these two are built in; set one to null to use the default model
   chunk_duration: 25.0
   overlap: 1.0
   silence_threshold: 0.01
@@ -214,7 +215,7 @@ Settings writes `config.yaml` readable by your user only, because it can hold an
 
 The Models page lists each transcript model as a row with its size, state, and one action. Language overrides use `Add language` rows with a locale and a model picker. Speaker runtime and model show only a status and an install or remove action. No model paths are exposed. Advanced settings are always visible. No page uses collapsible sections.
 
-Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show size, speed and time left, and can be cancelled. A cancelled download keeps its partial file. Two downloads of one model never run at once, even from two windows: the second waits and uses the first one's file. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
+Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show size, speed and time left, and can be cancelled. A cancelled download keeps its partial file. Two downloads of one model never run at once, even from two windows: the second waits and uses the first one's file. A model that another window is downloading shows as Downloading; press Download to follow it. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
 
 On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place.
 

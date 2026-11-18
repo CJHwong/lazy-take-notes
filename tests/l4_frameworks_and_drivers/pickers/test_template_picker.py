@@ -112,6 +112,20 @@ class TestTemplatePicker:
             assert filtered > 0
 
     @pytest.mark.asyncio
+    async def test_a_typed_filter_moves_the_preview_and_enter_to_the_match(self):
+        picker = TemplatePicker()
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            # Fast typing: one rebuild replaces a list whose first row is another template.
+            picker.query_one('#sp-search', Input).value = 'lecture_notes_en'
+            await pilot.pause()
+            assert 'Lecture' in picker.query_one('#sp-preview-md', Markdown).source
+            await pilot.press('enter')
+            await pilot.pause()
+
+        assert picker.return_value == 'lecture_notes_en'
+
+    @pytest.mark.asyncio
     async def test_search_no_match_shows_empty(self):
         picker = TemplatePicker()
         async with picker.run_test() as pilot:

@@ -48,6 +48,8 @@ from lazy_take_notes.l4_frameworks_and_drivers.config import (
     APP_CONFIG_DEFAULTS,
     InfraConfig,
     build_app_config,
+    drop_removed_language_models,
+    language_models_for_file,
 )
 from lazy_take_notes.l4_frameworks_and_drivers.container import (
     BUILTIN_LLM_PROVIDERS,
@@ -213,6 +215,7 @@ class ConfigApp(ShellScreen):
         user_raw = loader.load(str(self._config_path) if self._config_path else None)
         merged = copy.deepcopy(APP_CONFIG_DEFAULTS)
         deep_merge(merged, user_raw)
+        drop_removed_language_models(merged)
         self._raw = merged
         try:
             self._infra = InfraConfig.model_validate(user_raw)
@@ -387,7 +390,7 @@ class ConfigApp(ShellScreen):
             'openai': openai_config,
             'transcription': {
                 'model': self._model_value(),
-                'models': self.query_one(ModelsTab).language_models(),
+                'models': language_models_for_file(self.query_one(ModelsTab).language_models()),
                 'input_device': self._input_device(),
                 'chunk_duration': to_float(self.query_one('#cfg-trans-chunk', Input).value),
                 'overlap': to_float(self.query_one('#cfg-trans-overlap', Input).value),

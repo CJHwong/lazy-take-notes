@@ -83,19 +83,32 @@ class CachedModelStore:
 
             entry = self._entry_path(asset)
             if entry.exists():
+                size = _tree_size(self._installed_path(asset))
                 if self._final_matches(asset, entry):
-                    return AssetState(asset, AssetStatus.READY, _tree_size(entry), 0, str(entry))
-                return AssetState(asset, AssetStatus.CORRUPT, _tree_size(entry), 0, str(entry))
+                    return AssetState(asset, AssetStatus.READY, size, 0, str(entry))
+                return AssetState(asset, AssetStatus.CORRUPT, size, 0, str(entry))
 
-            legacy = self._legacy_entry(asset)
-            if legacy is None:
-                return AssetState(asset, AssetStatus.MISSING)
-            legacy_bytes = _legacy_size(asset, legacy)
-            digest = self._legacy_digest(asset, legacy)
-            if digest is not None:
-                self._adopt(asset, legacy, digest)
-                return AssetState(asset, AssetStatus.READY, _tree_size(entry), legacy_bytes, str(entry))
-            return AssetState(asset, AssetStatus.MISSING, 0, legacy_bytes)
+            # A download in another process or store shows only as a .part file. Its lock tells.
+            with file_lock.try_exclusive(self._lock_path(asset)) as free:
+                if not free:
+                    return AssetState(asset, AssetStatus.BUSY)
+                return self._status_from_legacy(asset)
+
+    def _status_from_legacy(self, asset: ModelAsset) -> AssetState:
+        entry = self._entry_path(asset)
+        if entry.exists():  # the download that held the lock has just finished
+            return AssetState(asset, AssetStatus.READY, _tree_size(self._installed_path(asset)), 0, str(entry))
+        legacy = self._legacy_entry(asset)
+        if legacy is None:
+            return AssetState(asset, AssetStatus.MISSING)
+        legacy_bytes = _legacy_size(asset, legacy)
+        digest = self._legacy_digest(asset, legacy)
+        if digest is not None:
+            self._adopt(asset, legacy, digest)
+            return AssetState(
+                asset, AssetStatus.READY, _tree_size(self._installed_path(asset)), legacy_bytes, str(entry)
+            )
+        return AssetState(asset, AssetStatus.MISSING, 0, legacy_bytes)
 
     def install(
         self,
@@ -117,7 +130,7 @@ class CachedModelStore:
     def remove(self, asset_id: str) -> int:
         asset = self._require(asset_id)
         with self._lock:
-            target = self._entry_path(asset).parent if asset.archive else self._entry_path(asset)
+            target = self._installed_path(asset)
             freed = _tree_size(target)
             if target.is_dir():
                 shutil.rmtree(target)
@@ -247,16 +260,19 @@ class CachedModelStore:
                 return  # the other download just finished and renamed it
             on_progress(AssetProgress(size, asset.size))
 
-        name = ''.join(char if char.isalnum() or char in '-_.' else '_' for char in asset.id)
         try:
             with file_lock.exclusive(
-                self._root / 'locks' / f'{name}.lock',
+                self._lock_path(asset),
                 cancelled=lambda: cancel is not None and cancel.is_set(),
                 on_wait=waiting,
             ):
                 yield
         except InterruptedError as error:
             raise DownloadCancelledError(str(error)) from error
+
+    def _lock_path(self, asset: ModelAsset) -> Path:
+        name = ''.join(char if char.isalnum() or char in '-_.' else '_' for char in asset.id)
+        return self._root / 'locks' / f'{name}.lock'
 
     def _part_path(self, asset: ModelAsset) -> Path:
         if asset.archive:
@@ -310,7 +326,7 @@ class CachedModelStore:
             if tree.exists():
                 shutil.rmtree(tree)
             tree.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(legacy.parent.parent, tree)
+            shutil.copytree(legacy.parent.parent, tree, symlinks=True)  # a library keeps its second name as a link
         else:
             entry.parent.mkdir(parents=True, exist_ok=True)
             try:
@@ -365,6 +381,10 @@ class CachedModelStore:
 
     def _entry_path(self, asset: ModelAsset) -> Path:
         return self._asset_dir(asset) / asset.entry
+
+    def _installed_path(self, asset: ModelAsset) -> Path:
+        # An archive extracts a whole tree (bin/, lib/, share/); the entry is one file in it.
+        return self._asset_dir(asset) if asset.archive else self._entry_path(asset)
 
     def _relative(self, path: Path) -> str:
         return str(path.relative_to(self._root))
@@ -426,7 +446,8 @@ def _tree_size(path: Path) -> int:
         return path.stat().st_size
     if not path.is_dir():
         return 0
-    return sum(child.stat().st_size for child in path.rglob('*') if child.is_file())
+    # A runtime links each library under two names; a link takes no space of its own.
+    return sum(child.stat().st_size for child in path.rglob('*') if child.is_file() and not child.is_symlink())
 
 
 def _megabytes(size: int) -> str:

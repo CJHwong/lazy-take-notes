@@ -1045,6 +1045,30 @@ class TestRemovingAValue:
         assert 'ja' not in _written(config_path)['transcription']['models']
 
     @pytest.mark.asyncio
+    async def test_a_removed_built_in_language_override_stays_removed(self, tmp_path, monkeypatch):
+        from textual.widgets import Button
+
+        app, config_path = _make_app(tmp_path, monkeypatch, config_data={'digest': {'min_lines': 15}})
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            row = next(row for row in app.query(LanguageRow) if row.locale == 'zh')
+            row.query_one(Button).press()
+            await pilot.pause()
+            await pilot.press('ctrl+s')
+            await pilot.pause()
+        from lazy_take_notes.l4_frameworks_and_drivers.config import build_app_config
+
+        written = _written(config_path)
+        assert written['transcription']['models']['zh'] is None
+        assert 'zh' not in build_app_config(written).transcription.models
+        assert 'zh-min-nan' in build_app_config(written).transcription.models
+
+        reopened = ConfigApp()  # the same patched config path
+        async with reopened.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            assert [row.locale for row in reopened.query(LanguageRow)] == ['zh-min-nan']
+
+    @pytest.mark.asyncio
     async def test_clearing_force_after_removes_it_from_the_file(self, tmp_path, monkeypatch):
         from textual.widgets import Input
 

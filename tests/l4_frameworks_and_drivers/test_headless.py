@@ -119,6 +119,28 @@ class TestHeadlessSession:
         assert _read(tmp_path).state == st.STOPPED
 
     @pytest.mark.asyncio
+    async def test_a_failed_ai_check_records_the_transcript_only(
+        self, tmp_path: Path, default_template, fake_persistence, fake_llm
+    ):
+        controller = _controller(default_template, fake_persistence, fake_llm, eager_digest=True)
+        reported: list[str] = []
+
+        def launcher(post_message, _is_cancelled):
+            post_message(TranscriptChunk(segments=[_seg('trigger me')]))
+            post_message(AudioWorkerStatus(status='stopped'))
+
+        session = HeadlessSession(controller, tmp_path, launcher, report=reported.append, ai_notes=False)
+        session.request_stop()
+        await session.run()
+
+        assert fake_llm.chat_calls == []
+        assert fake_persistence.digest_calls == []
+        assert len(fake_persistence.transcript_calls) == 1
+        assert _read(tmp_path).state == st.STOPPED
+        assert not _read(tmp_path).error
+        assert '⏹ stopping… finishing the current chunk' in reported
+
+    @pytest.mark.asyncio
     async def test_progress_messages_update_state(self, tmp_path: Path, default_template, fake_persistence, fake_llm):
         controller = _controller(default_template, fake_persistence, fake_llm)
 
@@ -223,7 +245,7 @@ class TestHeadlessEntryPoints:
         loader.load.return_value = template
         monkeypatch.setattr(hl, 'load_config', lambda *a, **k: (config, MagicMock(), loader))
         monkeypatch.setattr(hl, 'preflight_llm', lambda *a, **k: ([], []))
-        monkeypatch.setattr(hl, '_run_headless_preflight', lambda *a, **k: MagicMock())
+        monkeypatch.setattr(hl, '_run_headless_preflight', lambda *a, **k: (MagicMock(), True))
         monkeypatch.setattr(hl, '_build_container', lambda *a, **k: MagicMock())
         captured: dict = {}
         monkeypatch.setattr(
@@ -296,9 +318,16 @@ class TestHeadlessPreflight:
         assert 'the fix' in capsys.readouterr().err
 
     def test_an_unavailable_ai_model_still_records_the_transcript(self, monkeypatch, capsys):
-        plan, _ = self._run(monkeypatch, self._report(llm='fail'))
-        assert plan is not None
-        assert 'continuing despite' in capsys.readouterr().err
+        (plan, ai_ok), built = self._run(monkeypatch, self._report(llm='fail'))
+        assert plan is built
+        assert ai_ok is False
+        err = capsys.readouterr().err
+        assert 'continuing despite' in err
+        assert 'AI notes off: recording the transcript only' in err
+
+    def test_a_passing_ai_check_keeps_the_notes(self, monkeypatch):
+        (_plan, ai_ok), _ = self._run(monkeypatch, self._report())
+        assert ai_ok is True
 
 
 class TestHeadlessHelpers:
@@ -628,8 +657,8 @@ class TestHeadlessFormatters:
         assert _clock(-5) == '00:00'
 
     def test_heartbeat_line_pluralizes(self):
-        assert _heartbeat_line('recording', 60, 8, 1) == '⏺ recording · 01:00 · 8 seg · 1 digest'
-        assert _heartbeat_line('recording', 0, 0, 0) == '⏺ recording · 00:00 · 0 seg · 0 digests'
+        assert _heartbeat_line('recording', 60, 8, 1) == '⏺ recording | 01:00 | 8 seg | 1 digest'
+        assert _heartbeat_line('recording', 0, 0, 0) == '⏺ recording | 00:00 | 0 seg | 0 digests'
 
     def test_banner_lines(self):
         lines = _banner_lines('recording', Path('/x/sess'), 8123)
@@ -652,7 +681,7 @@ class TestHeadlessFormatters:
             digest_count=3,
         )
         lines = _summary_lines(Path('/x/sess'), status)
-        assert lines[0] == '■ stopped · 12:30 · 45 seg · 3 digests'
+        assert lines[0] == '■ stopped | 12:30 | 45 seg | 3 digests'
         assert any('transcript: /x/sess/transcript.txt' in line for line in lines)
         assert any('notes:      /x/sess/notes.md' in line for line in lines)
 
@@ -672,7 +701,7 @@ class TestHeadlessFormatters:
             state=st.STOPPED, pid=1, started_at='2026-06-06T09:00:00', updated_at='2026-06-06T09:00:05'
         )
         lines = _summary_lines(Path('/x/sess'), status)
-        assert lines == ['■ stopped · 00:05 · 0 seg · 0 digests']
+        assert lines == ['■ stopped | 00:05 | 0 seg | 0 digests']
 
 
 class TestAFailedRun:

@@ -1988,7 +1988,9 @@ class TestSpeakerTurns:
 
                 await pilot.click('#speaker-1')
                 await pilot.pause()
-                app.app.screen.query_one('#label-input', Input).value = 'Alice'
+                field = app.app.screen.query_one('#label-input', Input)
+                assert field.placeholder == 'Speaker name...'
+                field.value = 'Alice'
                 await pilot.press('enter')
                 await pilot.pause()
 

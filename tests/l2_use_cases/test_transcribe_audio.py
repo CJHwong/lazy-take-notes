@@ -413,6 +413,45 @@ class TestSpeechGate:
         assert [s.text for s in uc.flush()] == ['Last words.']
 
 
+class TestLineStartsAtTheSpeech:
+    """Whisper stamps a segment from the silence before it; the line starts where the sound starts."""
+
+    real_gate = True
+
+    def test_a_start_in_a_quiet_lead_moves_to_the_speech(self):
+        audio = np.zeros(SAMPLE_RATE * 25, dtype=np.float32)
+        audio[SAMPLE_RATE * 20 :] = speech_like(SAMPLE_RATE * 5, amplitude=0.05)
+        uc, _ = _use_case([TranscriptSegment(text='Good morning everyone.', wall_start=0.0, wall_end=24.0)])
+        uc.set_session_offset(25.0)
+        uc.feed_audio(audio)
+        [line] = uc.process_buffer(final=True)
+        assert line.wall_start == pytest.approx(20.0, abs=0.1)
+        assert line.wall_end == pytest.approx(24.0)
+
+    def test_a_start_on_sound_stays(self):
+        audio = speech_like(SAMPLE_RATE * 5, amplitude=0.05)
+        uc, _ = _use_case([TranscriptSegment(text='Hello.', wall_start=0.0, wall_end=2.0)])
+        uc.set_session_offset(5.0)
+        uc.feed_audio(audio)
+        [line] = uc.process_buffer(final=True)
+        assert line.wall_start == 0.0
+
+    def test_a_segment_with_no_sound_keeps_its_start(self):
+        audio = np.zeros(SAMPLE_RATE * 10, dtype=np.float32)
+        audio[SAMPLE_RATE * 6 :] = speech_like(SAMPLE_RATE * 4, amplitude=0.05)
+        uc, _ = _use_case(
+            [
+                TranscriptSegment(text='Quiet words.', wall_start=1.0, wall_end=3.0),
+                TranscriptSegment(text='Loud words.', wall_start=4.0, wall_end=9.0),
+            ]
+        )
+        uc.set_session_offset(10.0)
+        uc.feed_audio(audio)
+        quiet, loud = uc.process_buffer(final=True)
+        assert quiet.wall_start == 1.0
+        assert loud.wall_start == pytest.approx(6.0, abs=0.1)
+
+
 class TestNotSpeechLines:
     @pytest.mark.parametrize('text', ['*clap*', '*sad music*', '[BLANK_AUDIO]', '(laughs)', '♪', '.', '...', ' - '])
     def test_an_annotation_or_punctuation_line_is_dropped(self, text):

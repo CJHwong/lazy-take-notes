@@ -25,14 +25,33 @@ _LOOP_REPEATS = 3
 _LOOP = re.compile(rf'(\S.{{8,}}?)(?:\s*\1){{{_LOOP_REPEATS - 1},}}')
 
 
-def voiced_seconds(audio: np.ndarray, silence_threshold: float) -> float:
-    """Seconds of *audio* clearly louder than both the threshold and the chunk's noise floor."""
+def voiced_frames(audio: np.ndarray, silence_threshold: float) -> np.ndarray:
+    """One flag per 0.1 s frame: clearly louder than both the threshold and the chunk's noise floor."""
     count = len(audio) // _FRAME
     if count == 0:
-        return 0.0
+        return np.zeros(0, dtype=bool)
     rms = np.sqrt(np.mean(audio[: count * _FRAME].reshape(count, _FRAME) ** 2, axis=1))
     floor = float(np.percentile(rms, 10))
-    return float(np.count_nonzero(rms >= max(silence_threshold, 2 * floor))) * _FRAME / SAMPLE_RATE
+    return rms >= max(silence_threshold, 2 * floor)
+
+
+def voiced_seconds(audio: np.ndarray, silence_threshold: float) -> float:
+    """Seconds of *audio* clearly louder than both the threshold and the chunk's noise floor."""
+    return float(np.count_nonzero(voiced_frames(audio, silence_threshold))) * _FRAME / SAMPLE_RATE
+
+
+def speech_start(voiced: np.ndarray, start: float, end: float) -> float:
+    """Where the sound of a segment begins, in seconds into the chunk.
+
+    Whisper often starts a segment in the silence before it, as far back as the
+    start of a quiet lead. A start on a voiced frame stays, and so does a start
+    in a segment with no voiced frame.
+    """
+    first = int(start * SAMPLE_RATE) // _FRAME
+    loud = np.flatnonzero(voiced[first : int(np.ceil(end * SAMPLE_RATE / _FRAME))])
+    if len(loud) == 0 or loud[0] == 0:
+        return start
+    return (first + int(loud[0])) * _FRAME / SAMPLE_RATE
 
 
 def _collapse_loops(text: str) -> str:
@@ -230,12 +249,13 @@ class TranscribeAudioUseCase:
         if held_from is not None:
             segments = segments[:-1]
 
+        voiced = voiced_frames(self._sent, self._silence_threshold)
         for seg in segments:
             if seg.wall_end > min_start:
                 adjusted = self._clean(
                     TranscriptSegment(
                         text=seg.text,
-                        wall_start=buffer_wall_start + seg.wall_start,
+                        wall_start=buffer_wall_start + speech_start(voiced, seg.wall_start, seg.wall_end),
                         wall_end=buffer_wall_start + seg.wall_end,
                     )
                 )

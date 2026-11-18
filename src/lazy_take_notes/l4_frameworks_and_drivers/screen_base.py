@@ -23,6 +23,7 @@ from textual.screen import Screen
 from textual.worker import WorkerFailed
 
 from lazy_take_notes.l4_frameworks_and_drivers.drivers.terminal_output import with_terminal_output
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import see_debug_log
 
 T = TypeVar('T')
 
@@ -110,7 +111,7 @@ class SessionHostApp(App):
             session = any(getattr(screen, 'hosts_session', False) for screen in self.screen_stack)
             tail = ' The session continues.' if session else ''
             self.notify(
-                f'Unexpected error: {type(cause).__name__}: {cause} (see debug.log).{tail}',
+                f'Unexpected error: {type(cause).__name__}: {cause}{see_debug_log()}.{tail}',
                 severity='error',
                 timeout=15,
             )
@@ -123,7 +124,7 @@ class SessionHostApp(App):
             now - self._error_times[0],
         )
         self.notify(
-            'Errors keep repeating (see debug.log). The audio recording continues; press s to stop and save.',
+            f'Errors keep repeating{see_debug_log()}. The audio recording continues; press s to stop and save.',
             severity='error',
             timeout=3600,
         )

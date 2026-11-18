@@ -22,6 +22,18 @@ def _detach_previous_session(root: logging.Logger) -> None:
             handler.close()
 
 
+def see_debug_log() -> str:
+    """' (see debug.log)' while this session writes one, else ''.
+
+    With save_debug_log off there is no file, and a hint must not point at one.
+    """
+    writing = any(
+        isinstance(handler, logging.FileHandler) and getattr(handler, _SESSION_HANDLER_FLAG, False)
+        for handler in logging.getLogger('ltn').handlers
+    )
+    return f' (see {DEBUG_LOG.name})' if writing else ''
+
+
 def _attach(root: logging.Logger, handler: logging.Handler) -> None:
     setattr(handler, _SESSION_HANDLER_FLAG, True)
     root.addHandler(handler)

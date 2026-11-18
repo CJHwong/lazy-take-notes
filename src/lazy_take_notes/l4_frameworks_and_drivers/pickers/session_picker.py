@@ -80,17 +80,13 @@ class SessionPicker(SearchablePicker[Path]):
 
     def _rebuild_list(self, query: str = '') -> None:
         list_view = self.query_one('#sp-list', _SessionListView)
+        items = [SessionItem(session) for session in self._sessions if not query or query in session.name.lower()]
         list_view.clear()
+        # clear() only schedules the removal. Rows put after the old ones would leave
+        # index 0 on the old first row, and its late highlight would replace the preview.
+        list_view.insert(0, items)
 
-        first_item: SessionItem | None = None
-        for session in self._sessions:
-            if query and query not in session.name.lower():
-                continue
-            item = SessionItem(session)
-            list_view.append(item)
-            if first_item is None:
-                first_item = item
-
+        first_item = items[0] if items else None
         if first_item is not None:
             list_view.index = 0
             self._current_session = first_item.session_dir

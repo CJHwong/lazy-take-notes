@@ -47,6 +47,23 @@ def exclusive(
         os.close(fd)
 
 
+@contextmanager
+def try_exclusive(path: Path) -> Generator[bool]:
+    """Hold the lock on *path* if it is free, without waiting. Yields False while another holder has it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        if not _try_lock(fd):
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            _unlock(fd)
+    finally:
+        os.close(fd)
+
+
 if sys.platform == 'win32':  # pragma: no cover -- Windows only
     import msvcrt
 

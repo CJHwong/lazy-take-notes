@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from textual.widgets import Markdown
+from textual.widgets import Input, Markdown
 
 from lazy_take_notes.l4_frameworks_and_drivers.pickers.session_picker import (
     SessionItem,
@@ -81,6 +81,26 @@ class TestSessionPicker:
 
         assert picker.return_value is not None
         assert 'retro' in picker.return_value.name
+
+    @pytest.mark.asyncio
+    async def test_a_typed_filter_moves_the_preview_and_enter_to_the_match(self, tmp_path: Path):
+        _create_session(tmp_path, '2026-02-20_standup', transcript='standup words\n')
+        _create_session(tmp_path, '2026-02-21_retro', transcript='retro words\n')
+
+        picker = SessionPicker(sessions_dir=tmp_path)
+        async with picker.run_test() as pilot:
+            await pilot.pause()
+            # Fast typing: one rebuild replaces a list whose first row is another session.
+            picker.query_one('#sp-search', Input).value = 'standup'
+            await pilot.pause()
+            preview = picker.query_one('#sp-preview-md', Markdown).source
+            assert '2026-02-20_standup' in preview
+            assert 'standup words' in preview
+            await pilot.press('enter')
+            await pilot.pause()
+
+        assert picker.return_value is not None
+        assert picker.return_value.name == '2026-02-20_standup'
 
     @pytest.mark.asyncio
     async def test_q_cancels(self, tmp_path: Path):
