@@ -28,7 +28,9 @@ class TranscriptPanel(RichLog):
     BINDINGS = [Binding('c', 'copy_content', 'Copy', show=False)]
 
     def __init__(self, title: str = 'Transcript', **kwargs) -> None:
-        super().__init__(highlight=True, markup=True, wrap=True, auto_scroll=True, **kwargs)
+        # RichLog renders at least 78 columns by default; a narrower panel then cuts
+        # the end of each wrapped line instead of wrapping inside its own width.
+        super().__init__(highlight=True, markup=True, wrap=True, auto_scroll=True, min_width=1, **kwargs)
         self.border_title = title
         self._all_text: list[str] = []
 

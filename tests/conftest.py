@@ -75,6 +75,24 @@ class FakeLLMClient:
         self._missing_models = list(models)
 
 
+def speech_like(samples: int, amplitude: float = 0.1) -> np.ndarray:
+    """Noise that rises and falls at syllable rate, like speech. Steady noise counts as no speech."""
+    t = np.arange(samples) / 16000
+    envelope = ((t % 0.5) < 0.4).astype(np.float32)  # 0.4 s syllables, 0.1 s gaps
+    noise = np.random.default_rng(0).standard_normal(samples).astype(np.float32)
+    return (noise * envelope * amplitude).astype(np.float32)
+
+
+def level_only_voiced_seconds(audio: np.ndarray, silence_threshold: float) -> float:
+    """The speech gate as it was before the noise floor: all of the audio counts once its level reaches the threshold.
+
+    Plumbing tests feed constant blocks, which the real gate calls silence.
+    """
+    if len(audio) == 0 or np.sqrt(np.mean(audio**2)) < silence_threshold:
+        return 0.0
+    return len(audio) / 16000
+
+
 class FakeTranscriber:
     """Fake transcriber for L2 use case tests."""
 
