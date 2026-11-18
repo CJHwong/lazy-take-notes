@@ -6,7 +6,7 @@ import json
 import os
 import re
 import sys
-from importlib.metadata import entry_points
+from importlib.metadata import PackageNotFoundError, distribution, entry_points
 from pathlib import Path
 
 import click
@@ -490,16 +490,40 @@ def plugin_add(spec):
     """Add a plugin by pip/uvx spec (e.g. 'ltn-youtube @ git+https://...')."""
     from lazy_take_notes.l4_frameworks_and_drivers.plugin_manifest import (  # noqa: PLC0415 -- deferred
         add_plugin,
+        load_plugins,
         parse_spec_name,
     )
 
     name = parse_spec_name(spec)
+    if any(parse_spec_name(existing) == name for existing in load_plugins()):
+        click.echo(f'Plugin {name} is already added.')
+        return
     click.echo(f'Validating {name}...', nl=False)
     err = add_plugin(spec)
     if err is not None:
         click.echo(f' failed\n{err}', err=True)
         raise SystemExit(1)
     click.echo(f' ok\nPlugin {name} added.')
+    if not _loads_plugins_txt(name):
+        click.echo(
+            f'\nThis install will not load {name}: only the take-note command from setup.sh reads plugins.txt.\n'
+            'Run setup.sh again to get that command, or install the plugin with this one:\n'
+            f"  uv tool install '{_SOURCE}' --with '{spec}'"
+        )
+
+
+_SOURCE = 'lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git'
+
+
+def _loads_plugins_txt(name: str) -> bool:
+    # The setup.sh wrapper passes every plugins.txt line to uvx --with; other installs never read the file.
+    if os.environ.get('LTN_PLUGIN_WRAPPER') == '1':
+        return True
+    try:
+        distribution(name)
+    except PackageNotFoundError:
+        return False
+    return True
 
 
 @plugin_group.command('remove')
