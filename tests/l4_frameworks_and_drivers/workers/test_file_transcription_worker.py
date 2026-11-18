@@ -295,7 +295,8 @@ class TestRunFileTranscriptionFaults:
 
         result, messages = self._run(mock_transcriber, audio=audio_26s)
 
-        assert result == _FAKE_SEGMENTS
+        # The 25 s chunk was cut mid-speech, so its last segment waited for the flush that failed.
+        assert result == _FAKE_SEGMENTS[:1]
         statuses = [m.status for m in messages if isinstance(m, AudioWorkerStatus)]
         assert statuses[-1] == 'error'
         mock_transcriber.close.assert_called_once()

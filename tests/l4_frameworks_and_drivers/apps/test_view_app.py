@@ -244,5 +244,8 @@ class TestAudioOnlySession:
         app = ViewApp(session_dir=session_dir)
         async with app.run_test(size=(140, 40)) as pilot:
             await pilot.pause()
-            shown = '\n'.join(line.text for line in app.query_one('#transcript-panel', TranscriptPanel).lines)
+            # The panel wraps the line at its own width.
+            shown = ' '.join(
+                ' '.join(line.text for line in app.query_one('#transcript-panel', TranscriptPanel).lines).split()
+            )
             assert 'No transcript. The audio is saved in this folder: press o to open it.' in shown

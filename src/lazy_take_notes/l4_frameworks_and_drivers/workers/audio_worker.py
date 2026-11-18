@@ -543,7 +543,9 @@ def run_audio_worker(
                                 post_message(TranscriptionStatus(active=True))
                                 try:
                                     flush_segs = transcriber.transcribe(flush_buf, language, flush_hints)
-                                    new_segs = use_case.apply_result(flush_segs, flush_wall_start, flush_is_first)
+                                    new_segs = use_case.apply_result(
+                                        flush_segs, flush_wall_start, flush_is_first, final=True
+                                    )
                                     if new_segs:
                                         all_segments.extend(new_segs)
                                         post_message(TranscriptChunk(segments=new_segs))
