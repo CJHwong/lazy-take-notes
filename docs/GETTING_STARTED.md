@@ -158,7 +158,7 @@ You'll see:
 | `q`     | Quit after the final notes      |
 | `ctrl+q` | Save the audio and quit now, without the final notes |
 
-When you quit, your session is saved to the `output/` directory.
+When you quit, your session is saved in `~/Documents/LazyTakeNotes`. Change the folder in Settings > Sessions.
 
 **Want to change settings later?** Run `take-note config` to open the built-in settings editor.
 

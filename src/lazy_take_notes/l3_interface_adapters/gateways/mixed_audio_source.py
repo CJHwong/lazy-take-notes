@@ -101,6 +101,11 @@ class MixedAudioSource:
         return getattr(self._system, 'system_signal_seen', True)
 
     @property
+    def verifies_system_audio(self) -> bool:
+        """Whether a silent tap is proven with the test tone, so silence alone says nothing."""
+        return self._test_tone is not None and getattr(self._system, 'continuous_capture', False)
+
+    @property
     def awaiting_permission(self) -> bool:
         """Whether the system source is still waiting for the user to grant access."""
         return getattr(self._system, 'awaiting_permission', False)

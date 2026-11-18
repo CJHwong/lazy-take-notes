@@ -12,13 +12,14 @@ from pathlib import Path
 import click
 
 from lazy_take_notes import __version__
+from lazy_take_notes.l1_entities.session_files import SPEAKER_TRANSCRIPT
 from lazy_take_notes.l1_entities.session_status import LIVE_STATES
 from lazy_take_notes.l3_interface_adapters.gateways.session_reader import (
     SessionInfo,
     latest_session,
     list_sessions,
+    read_labeled_transcript,
     read_notes,
-    read_transcript,
 )
 from lazy_take_notes.l3_interface_adapters.gateways.session_status import (
     STATUS_FILE,
@@ -67,7 +68,7 @@ def _pre_init_resource_tracker() -> None:  # pragma: no cover -- best-effort pla
         pass
 
 
-@click.group(invoke_without_command=True)
+@click.group(invoke_without_command=True, context_settings={'help_option_names': ['-h', '--help']})
 @click.option(
     '-c',
     '--config',
@@ -196,7 +197,7 @@ def transcribe(ctx, audio_file, label, headless, template_name, language):
         )
 
         _clear_normal_screen()
-        selected = FilePicker().run()
+        selected = FilePicker(start_dir=Path.cwd()).run()
         if selected is None:
             return
         audio_file = str(selected)
@@ -227,8 +228,9 @@ def transcribe(ctx, audio_file, label, headless, template_name, language):
 def diarize(ctx, session_dir, device, timeout_s):
     """Label a saved session's transcript with anonymous speakers.
 
-    Needs LTN_NEMO_BINARY and LTN_NEMO_MODEL. Writes speakers.json and
-    transcript_speakers.txt into the session directory.
+    Needs the speaker runtime and model: install them in Settings > Models >
+    Speaker assets. Writes speakers.json and transcript_speakers.txt into the
+    session directory.
     """
     from lazy_take_notes.l2_use_cases.speaker_attribution import speaker_at  # noqa: PLC0415 -- deferred
     from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import (  # noqa: PLC0415 -- deferred: model cache only on diarize
@@ -270,7 +272,7 @@ def diarize(ctx, session_dir, device, timeout_s):
             labeled.append(line)
         else:
             labeled.append(f'[{match.group(1)}:{match.group(2)}:{match.group(3)}] S{speaker}: {match.group(4)}')
-    labeled_path = session_dir / 'transcript_speakers.txt'
+    labeled_path = session_dir / SPEAKER_TRANSCRIPT
     labeled_path.write_text('\n'.join(labeled) + '\n', encoding='utf-8')
 
     speech: dict[int, float] = {}
@@ -343,7 +345,7 @@ def _resolve_session(base_dir: Path, name: str | None) -> SessionInfo:
     if name is None:
         latest = latest_session(base_dir)
         if latest is None:
-            raise click.ClickException('No sessions found.')
+            raise click.ClickException(f'No sessions found in {base_dir}.')
         return latest
     return _match_by_name(list_sessions(base_dir), name, 'session')
 
@@ -369,19 +371,23 @@ def _emit_session_text(ctx, name: str | None, reader, kind: str) -> None:
 @click.pass_context
 def list_command(ctx, as_json, show_all):
     """List saved sessions, newest first (newest 20 by default)."""
-    sessions = list_sessions(_read_base_dir(ctx))
+    base_dir = _read_base_dir(ctx)
+    sessions = list_sessions(base_dir)
     if as_json:
         import json  # noqa: PLC0415 -- deferred: only needed for --json
 
-        payload = [{'name': s.name, 'dir': str(s.dir), 'has_notes': s.has_notes} for s in sessions]
+        payload = [
+            {'name': s.name, 'dir': str(s.dir), 'has_notes': s.has_notes, 'has_transcript': s.has_transcript}
+            for s in sessions
+        ]
         click.echo(json.dumps(payload))
         return
     if not sessions:
-        click.echo('No sessions found.')
+        click.echo(f'No sessions found in {base_dir}.')
         return
     shown = sessions if show_all else sessions[:_LS_DEFAULT_LIMIT]
     for session in shown:
-        marker = 'notes' if session.has_notes else '   -'
+        marker = 'notes' if session.has_notes else '   -' if session.has_transcript else 'audio'
         click.echo(f'{marker}  {session.name}')
     hidden = len(sessions) - len(shown)
     if hidden:
@@ -392,8 +398,11 @@ def list_command(ctx, as_json, show_all):
 @click.argument('session', required=False, default=None)
 @click.pass_context
 def transcript(ctx, session):
-    """Print a session's transcript (newest session by default)."""
-    _emit_session_text(ctx, session, read_transcript, 'transcript')
+    """Print a session's transcript (newest session by default).
+
+    A session with speaker labels prints the labeled transcript.
+    """
+    _emit_session_text(ctx, session, read_labeled_transcript, 'transcript')
 
 
 @cli.command()
@@ -412,7 +421,7 @@ def _resolve_status_dir(base_dir: Path, name: str | None) -> Path:
         else []
     )
     if not candidates:
-        raise click.ClickException('No headless session found.')
+        raise click.ClickException(f'No headless session found in {base_dir}.')
     if name is None:
         return candidates[0]
     return _match_by_name(candidates, name, 'headless session')

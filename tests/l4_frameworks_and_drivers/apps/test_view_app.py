@@ -219,3 +219,30 @@ class TestViewAppFaults:
                 await pilot.press('o')
                 await pilot.pause()
             assert any('open' in str(n.message).lower() for n in app.app._notifications)
+
+
+class TestCopyTheDigest:
+    @pytest.mark.asyncio
+    async def test_tab_then_c_copies_the_digest(self, tmp_path):
+        session_dir = _make_session(tmp_path, transcript='[00:00:01] hello\n', digest='# Notes\nbody')
+        app = ViewApp(session_dir=session_dir)
+        with patch('pyperclip.copy') as copy:
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.pause()
+                await pilot.press('tab')
+                await pilot.press('c')
+                await pilot.pause()
+                assert app.app.focused is app.query_one('#digest-panel', DigestPanel)
+                assert copy.call_args.args[0].startswith('# Notes')
+
+
+class TestAudioOnlySession:
+    @pytest.mark.asyncio
+    async def test_says_where_the_audio_is(self, tmp_path):
+        session_dir = _make_session(tmp_path)
+        (session_dir / 'recording.wav').write_bytes(b'RIFF')
+        app = ViewApp(session_dir=session_dir)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            shown = '\n'.join(line.text for line in app.query_one('#transcript-panel', TranscriptPanel).lines)
+            assert 'No transcript. The audio is saved in this folder: press o to open it.' in shown

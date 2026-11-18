@@ -1013,3 +1013,59 @@ class TestTemplateBuilderFaults:
 
             assert app._saved is False
             assert any('read-only' in str(n.message) for n in app.app._notifications)
+
+
+class ModelNotFoundError(Exception):
+    """What the Ollama client raises for a model the server does not have."""
+
+    status_code = 404
+
+
+class TestAMissingModel:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('provider', 'fix'),
+        [('ollama', 'Run: ollama pull gpt-oss:20b'), ('openai', 'Pick an available model in Settings > Models.')],
+    )
+    async def test_the_error_names_the_fix(self, provider, fix):
+        use_case = MagicMock()
+        missing = ModelNotFoundError("model 'gpt-oss:20b' not found (status code: 404)")
+        use_case.generate = AsyncMock(side_effect=missing)
+        app = TemplateBuilderApp()
+        app._use_case = use_case
+        app._model = 'gpt-oss:20b'
+        app._provider = provider
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.query_one('#tb-input', Input).value = 'make template'
+            await pilot.press('enter')
+            for _ in range(10):
+                await pilot.pause()
+
+            last = app._chat_lines[-1]
+            assert 'The AI model gpt-oss:20b is not available.' in last
+            assert fix in last
+            assert 'ModelNotFoundError' not in last
+
+
+class TestChatMarkdown:
+    @pytest.mark.asyncio
+    async def test_bold_italic_and_code_render_instead_of_showing_marks(self):
+        app = TemplateBuilderApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._append_chat('assistant', 'I set **Daily standup** with *three* sections, see `quick_actions` [/x].')
+            await pilot.pause()
+            shown = str(app.query_one('#tb-chat-log').render())
+            assert 'I set Daily standup with three sections, see quick_actions [/x].' in shown
+            assert '**' not in shown
+
+    @pytest.mark.asyncio
+    async def test_user_text_stays_as_typed(self):
+        app = TemplateBuilderApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app._append_chat('user', 'keep **these** marks')
+            await pilot.pause()
+            assert 'keep **these** marks' in str(app.query_one('#tb-chat-log').render())

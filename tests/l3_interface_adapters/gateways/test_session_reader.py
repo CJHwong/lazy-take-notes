@@ -117,3 +117,33 @@ class TestReadNotes:
     def test_none_when_absent(self, tmp_path: Path):
         session_dir = _create_session(tmp_path, 's')
         assert read_notes(session_dir) is None
+
+
+class TestAudioOnlySessions:
+    def test_a_session_with_only_its_audio_is_listed(self, tmp_path: Path):
+        audio_only = tmp_path / '2026-02-22_120000'
+        audio_only.mkdir()
+        (audio_only / 'recording.wav').write_bytes(b'RIFF')
+        retry_only = tmp_path / '2026-02-23_120000'
+        retry_only.mkdir()
+        (retry_only / 'recording_2.wav').write_bytes(b'RIFF')
+        _create_session(tmp_path, '2026-02-20_120000')
+
+        result = list_sessions(tmp_path)
+
+        assert [(s.name, s.has_transcript) for s in result] == [
+            ('2026-02-23_120000', False),
+            ('2026-02-22_120000', False),
+            ('2026-02-20_120000', True),
+        ]
+
+    def test_latest_session_is_the_newest_with_a_transcript(self, tmp_path: Path):
+        _create_session(tmp_path, '2026-02-20_120000')
+        audio_only = tmp_path / '2026-02-22_120000'
+        audio_only.mkdir()
+        (audio_only / 'recording.wav').write_bytes(b'RIFF')
+
+        latest = latest_session(tmp_path)
+
+        assert latest is not None
+        assert latest.name == '2026-02-20_120000'

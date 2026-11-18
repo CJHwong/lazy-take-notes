@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 
 from rich.markup import escape
@@ -42,6 +43,22 @@ _EDIT_WELCOME = """Describe the change you want. For example:
 
 I'll restate the change and wait for your yes before I edit the template. The preview shows the current version.
 """
+
+
+_NOT_FOUND = 404
+_MARKDOWN_MARKS = (
+    (re.compile(r'\*\*(.+?)\*\*'), r'[b]\1[/b]'),
+    (re.compile(r'(?<![*\w])\*(?!\s)(.+?)(?<!\s)\*(?![*\w])'), r'[i]\1[/i]'),
+    (re.compile(r'`([^`]+)`'), r'[bold]\1[/bold]'),
+    (re.compile(r'^#{1,6} +(.+)$', re.MULTILINE), r'[b]\1[/b]'),
+)
+
+
+def _markdown_marks(text: str) -> str:
+    """Turn the model's bold, italic, code and headings into Rich markup. *text* is already escaped."""
+    for pattern, replacement in _MARKDOWN_MARKS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 @dataclass(frozen=True)
@@ -250,6 +267,7 @@ class TemplateBuilderApp(ShellScreen):
         self._current_template: SessionTemplate | None = base_template
         self._use_case = None  # built lazily on first send
         self._model: str = ''
+        self._provider: str = ''
         self._busy = False
         self._chat_lines: list[str] = []
         self._thinking_timer = None
@@ -265,7 +283,7 @@ class TemplateBuilderApp(ShellScreen):
                 yield Input(placeholder='Describe your template...', id='tb-input')
             with Vertical(id='tb-preview-col'):
                 with VerticalScroll(id='tb-preview-scroll'):
-                    yield Markdown('*No template yet — describe what you want.*', id='tb-preview')
+                    yield Markdown('*No template yet. Describe what you want.*', id='tb-preview')
         yield Static(
             r'\[Enter] Send  \[Ctrl+S] Save  \[Esc] Back',
             id='tb-footer',
@@ -378,9 +396,19 @@ class TemplateBuilderApp(ShellScreen):
         except Exception as exc:
             # A bad config or a dead LLM must leave the builder usable for a retry.
             log.error('Template generation failed: %s', exc, exc_info=True)
-            self._append_chat('assistant', f'Error: {type(exc).__name__}: {exc}')
+            self._append_chat('assistant', self._error_text(exc))
         finally:
             self._set_busy(False)
+
+    def _error_text(self, exc: Exception) -> str:
+        if getattr(exc, 'status_code', None) == _NOT_FOUND:
+            fix = (
+                f'Run: ollama pull {self._model}'
+                if self._provider == 'ollama'
+                else 'Pick an available model in Settings > Models.'
+            )
+            return f'The AI model {self._model} is not available. {fix}'
+        return f'Error: {type(exc).__name__}: {exc}'
 
     def _ensure_use_case(self):
         """Lazily build the use case + LLM client from InfraConfig."""
@@ -409,6 +437,7 @@ class TemplateBuilderApp(ShellScreen):
             infra = InfraConfig()
 
         self._model = config.digest.model
+        self._provider = infra.llm_provider
 
         # The session's resolver: built-in providers and llm_provider plugins alike.
         client = DependencyContainer.resolve_llm_client(infra)
@@ -433,7 +462,8 @@ class TemplateBuilderApp(ShellScreen):
         """Append a message to the chat log display."""
         prefix = '[bold cyan]You[/]' if role == 'user' else '[bold green]AI[/]'
         # User and LLM text can contain '[/x]', which is a markup error unescaped.
-        line = f'{prefix}: {escape(text)}'
+        body = escape(text) if role == 'user' else _markdown_marks(escape(text))
+        line = f'{prefix}: {body}'
         if self._busy and self._chat_lines and 'Thinking' in self._chat_lines[-1]:
             # Keep the indicator last: _set_busy(False) and the animation only touch the last line.
             self._chat_lines.insert(len(self._chat_lines) - 1, line)

@@ -49,6 +49,19 @@ def _no_signal_message() -> str:
     )
 
 
+def _no_signal_hint_due(audio_source) -> bool:
+    """Whether 15 s without system audio should name the permission.
+
+    Not while the permission dialog is open. Not when the source proves the tap
+    with a test tone: a quiet room is then normal, and a dead tap shows SYS LOST.
+    """
+    if getattr(audio_source, 'awaiting_permission', False):
+        return False
+    if getattr(audio_source, 'verifies_system_audio', False):
+        return False
+    return not getattr(audio_source, 'system_signal_seen', True)
+
+
 class _StreamingWavWriter:
     """WAV writer that keeps the RIFF sizes current after every chunk.
 
@@ -629,7 +642,7 @@ def run_audio_worker(
                         # user is already being asked to grant it.
                         if not getattr(audio_source, 'awaiting_permission', False):
                             _no_signal_warned = True
-                            if not getattr(audio_source, 'system_signal_seen', True):
+                            if _no_signal_hint_due(audio_source):
                                 message = _no_signal_message()
                                 log.warning(message)
                                 post_message(AudioWorkerStatus(status='warning', error=message))

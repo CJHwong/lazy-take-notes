@@ -25,7 +25,7 @@ class SessionsTab(SettingsSection):
             'Output folder',
             'cfg-output-dir',
             str(output.get('directory', '')),
-            placeholder='./output',
+            placeholder='~/Documents/LazyTakeNotes',
         )
         yield SwitchRow('Save audio', 'cfg-output-save-audio', output.get('save_audio', True))
         yield SwitchRow(

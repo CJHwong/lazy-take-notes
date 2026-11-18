@@ -534,7 +534,7 @@ class TestReadCommands:
     def test_ls_empty(self, tmp_path: Path):
         result = _invoke_read(['ls'], tmp_path)
         assert result.exit_code == 0
-        assert 'No sessions found.' in result.output
+        assert f'No sessions found in {tmp_path}.' in result.output
 
     def test_ls_lists_newest_first(self, tmp_path: Path):
         _make_session(tmp_path, '2026-02-20_120000')
@@ -620,7 +620,7 @@ class TestReadCommands:
     def test_transcript_no_sessions_errors(self, tmp_path: Path):
         result = _invoke_read(['transcript'], tmp_path)
         assert result.exit_code != 0
-        assert 'No sessions found.' in result.output
+        assert f'No sessions found in {tmp_path}.' in result.output
 
     def test_transcript_ambiguous_errors(self, tmp_path: Path):
         _make_session(tmp_path, '2026-02-20_120000_sync')
@@ -797,7 +797,7 @@ class TestStatusCommand:
     def test_no_session_errors(self, tmp_path: Path):
         result = _invoke_read(['status'], tmp_path)
         assert result.exit_code != 0
-        assert 'No headless session found.' in result.output
+        assert f'No headless session found in {tmp_path}.' in result.output
 
     def test_status_by_name(self, tmp_path: Path):
         _write_status(tmp_path, '2026-06-01_090000', segment_count=1)
@@ -1195,3 +1195,49 @@ class TestPlanReloader:
         last = _preflight_passes.call_args
         assert last.args == (loaded[1][0], loaded[1][1], template, '/out')
         assert last.kwargs == {'mute_mic': True}
+
+
+class TestHelpText:
+    @pytest.mark.parametrize('args', [['-h'], ['record', '-h'], ['diarize', '-h']])
+    def test_dash_h_shows_help(self, args):
+        result = CliRunner().invoke(cli, args)
+        assert result.exit_code == 0
+        assert 'Usage:' in result.output
+
+    def test_diarize_help_names_the_settings_install(self):
+        result = CliRunner().invoke(cli, ['diarize', '--help'])
+        assert 'Needs LTN_NEMO_BINARY' not in result.output
+        assert 'Settings' in result.output
+
+
+class TestTranscribePickerStart:
+    def test_the_picker_starts_in_the_current_folder(self, tmp_path: Path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch('lazy_take_notes.l4_frameworks_and_drivers.pickers.file_picker.FilePicker') as picker_cls,
+            patch('lazy_take_notes.l4_frameworks_and_drivers.cli._clear_normal_screen'),
+        ):
+            picker_cls.return_value.run.return_value = None
+            CliRunner().invoke(cli, ['transcribe'])
+        assert picker_cls.call_args.kwargs['start_dir'] == tmp_path
+
+
+class TestLsAudioOnly:
+    def test_marks_a_session_with_only_audio(self, tmp_path: Path):
+        session = tmp_path / '2026-02-22_120000'
+        session.mkdir()
+        (session / 'recording.wav').write_bytes(b'RIFF')
+
+        lines = _invoke_read(['ls'], tmp_path).output.strip().splitlines()
+        payload = json.loads(_invoke_read(['ls', '--json'], tmp_path).output)
+
+        assert lines == ['audio  2026-02-22_120000']
+        assert payload[0]['has_transcript'] is False
+
+
+class TestTranscriptWithSpeakers:
+    def test_prints_the_labeled_transcript_when_the_session_has_one(self, tmp_path: Path):
+        session = _make_session(tmp_path, '2026-02-20_120000', transcript='[00:00:01] hello\n')
+        (session / 'transcript_speakers.txt').write_text('[00:00:01] S1: hello\n', encoding='utf-8')
+
+        assert _invoke_read(['transcript'], tmp_path).output == '[00:00:01] S1: hello\n'

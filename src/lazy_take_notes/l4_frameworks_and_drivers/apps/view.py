@@ -35,7 +35,7 @@ class ViewApp(ShellScreen):
     BINDINGS = [
         Binding('q', 'quit_app', 'Quit', priority=True),
         Binding('o', 'open_session_dir', 'Open', show=False),
-        Binding('tab', 'focus_next', 'Switch Panel', show=False),
+        Binding('tab', 'app.focus_next', 'Switch Panel', show=False),
     ]
 
     def __init__(self, session_dir: Path, **kwargs) -> None:
@@ -67,6 +67,10 @@ class ViewApp(ShellScreen):
                 transcript_panel._all_text.append(line)
                 # Saved lines hold raw whisper text, which can look like markup.
                 transcript_panel.write(escape(line))
+
+        if TRANSCRIPT.resolve(self._session_dir) is None and next(self._session_dir.glob('recording*.wav'), None):
+            # A failed transcription keeps only the audio.
+            transcript_panel.write('No transcript. The audio is saved in this folder: press o to open it.')
 
         digest_text = self._read_saved(NOTES.resolve(self._session_dir))
         if digest_text:

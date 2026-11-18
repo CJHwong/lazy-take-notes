@@ -226,7 +226,9 @@ class TestHeadlessEntryPoints:
         monkeypatch.setattr(hl, '_run_headless_preflight', lambda *a, **k: MagicMock())
         monkeypatch.setattr(hl, '_build_container', lambda *a, **k: MagicMock())
         captured: dict = {}
-        monkeypatch.setattr(hl, '_run', lambda out_dir, cfg, session: captured.update(out_dir=out_dir, session=session))
+        monkeypatch.setattr(
+            hl, '_run', lambda out_dir, cfg, session, **_: captured.update(out_dir=out_dir, session=session)
+        )
         return hl, captured
 
     def test_run_record_headless_wires_session(self, tmp_path, default_template, monkeypatch):
@@ -671,3 +673,57 @@ class TestHeadlessFormatters:
         )
         lines = _summary_lines(Path('/x/sess'), status)
         assert lines == ['■ stopped · 00:05 · 0 seg · 0 digests']
+
+
+class TestAFailedRun:
+    def _session(self, state):
+        class _FakeSession:
+            status = st.SessionStatus(
+                state=state, pid=1, started_at='2026-06-06T09:00:00', updated_at='2026-06-06T09:00:30', error='boom'
+            )
+
+            async def run(self):
+                pass
+
+        return cast(hl_module().HeadlessSession, _FakeSession())
+
+    def _quiet_logging(self, monkeypatch):
+        monkeypatch.setattr(
+            'lazy_take_notes.l4_frameworks_and_drivers.logging_setup.setup_file_logging', lambda *a, **k: None
+        )
+
+    def test_an_error_exits_1_and_drops_a_folder_with_only_the_status(self, tmp_path, monkeypatch, capsys):
+        self._quiet_logging(monkeypatch)
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+
+        with pytest.raises(SystemExit) as exited:
+            hl_module()._run(out_dir, build_app_config({}), self._session(st.ERROR), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert exited.value.code == 1
+        assert not out_dir.exists()
+        assert str(out_dir) not in capsys.readouterr().out
+
+    def test_an_error_keeps_a_folder_with_anything_else(self, tmp_path, monkeypatch):
+        self._quiet_logging(monkeypatch)
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+        (out_dir / 'recording.wav').write_bytes(b'RIFF')
+
+        with pytest.raises(SystemExit):
+            hl_module()._run(out_dir, build_app_config({}), self._session(st.ERROR), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert (out_dir / 'recording.wav').exists()
+
+    def test_a_clean_stop_exits_normally(self, tmp_path, monkeypatch):
+        self._quiet_logging(monkeypatch)
+        hl_module()._run(tmp_path, build_app_config({}), self._session(st.STOPPED), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+        assert tmp_path.exists()
+
+
+def hl_module():
+    from lazy_take_notes.l4_frameworks_and_drivers import headless
+
+    return headless

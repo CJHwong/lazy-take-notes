@@ -998,3 +998,18 @@ class TestAlertsStayUntilFixed:
         finally:
             release.set()
             source.close()
+
+
+class TestVerifiesSystemAudio:
+    class Tap(FakeAudioSource):
+        continuous_capture = True
+
+    def test_a_tap_with_the_tone_check_verifies_itself(self):
+        assert MixedAudioSource(FakeAudioSource(), self.Tap(), test_tone=lambda: True).verifies_system_audio is True
+
+    def test_no_tone_or_a_loopback_does_not(self):
+        assert MixedAudioSource(FakeAudioSource(), self.Tap()).verifies_system_audio is False
+        assert (
+            MixedAudioSource(FakeAudioSource(), FakeAudioSource(), test_tone=lambda: True).verifies_system_audio
+            is False
+        )

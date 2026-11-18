@@ -1929,6 +1929,50 @@ class TestSpeakerTurns:
                 assert 'S1: Hello world' in copied
 
     @pytest.mark.asyncio
+    async def test_the_labels_are_saved_with_the_transcript(self, tmp_path):
+        from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(
+                    TranscriptChunk(
+                        segments=[
+                            TranscriptSegment(text='Hello world', wall_start=1.0, wall_end=2.0),
+                            TranscriptSegment(text='Nobody yet', wall_start=9.0, wall_end=10.0),
+                        ]
+                    )
+                )
+                await pilot.pause()
+                app.post_message(SpeakerTurns(turns=[SpeakerTurn(start=0.0, end=5.0, speaker=1)]))
+                await pilot.pause()
+
+        saved = (tmp_path / 'output' / 'transcript_speakers.txt').read_text(encoding='utf-8')
+        assert saved == '[00:00:01] S1: Hello world\n[00:00:09] Nobody yet\n'
+
+    @pytest.mark.asyncio
+    async def test_a_line_after_the_last_pass_is_saved_too(self, tmp_path):
+        from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
+        from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
+
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test() as pilot:
+                app.post_message(
+                    TranscriptChunk(segments=[TranscriptSegment(text='Hello world', wall_start=1.0, wall_end=2.0)])
+                )
+                app.post_message(SpeakerTurns(turns=[SpeakerTurn(start=0.0, end=5.0, speaker=1)]))
+                await pilot.pause()
+                app.post_message(
+                    TranscriptChunk(segments=[TranscriptSegment(text='Late line', wall_start=3.0, wall_end=4.0)])
+                )
+                await pilot.pause()
+
+        saved = (tmp_path / 'output' / 'transcript_speakers.txt').read_text(encoding='utf-8')
+        assert saved == '[00:00:01] S1: Hello world\n[00:00:03] S1: Late line\n'
+
+    @pytest.mark.asyncio
     async def test_a_renamed_speaker_replaces_the_label(self, tmp_path):
         from lazy_take_notes.l1_entities.speaker_turn import SpeakerTurn
         from lazy_take_notes.l4_frameworks_and_drivers.messages import SpeakerTurns
@@ -1975,3 +2019,17 @@ class TestFinalDigestGuard:
                     await pilot.pause()
 
                 assert run.await_count == 1
+
+
+class TestTabSwitchesPanels:
+    @pytest.mark.asyncio
+    async def test_tab_moves_focus_off_the_transcript(self, tmp_path):
+        app = make_app(tmp_path)
+        with patch.object(app, '_start_audio_worker'):
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.pause()
+                app.query_one('#transcript-panel', TranscriptPanel).focus()
+                await pilot.pause()
+                await pilot.press('tab')
+                await pilot.pause()
+                assert app.app.focused is not app.query_one('#transcript-panel', TranscriptPanel)

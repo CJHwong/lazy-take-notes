@@ -1376,3 +1376,19 @@ class TestAudioWithSaveAudioOff:
         assert (tmp_path / 'recording.wav').exists()
         assert 'Flushing in-flight transcription on pause failed' in caplog.text
         assert 'Pause flush transcription failed' in caplog.text
+
+
+class TestNoSystemAudioHint:
+    def test_no_hint_when_the_source_checks_the_tap_with_a_tone(self):
+        from types import SimpleNamespace
+
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
+            _no_signal_hint_due,  # noqa: PLC2701 -- the rule behind the hint
+        )
+
+        quiet_tap = SimpleNamespace(awaiting_permission=False, system_signal_seen=False, verifies_system_audio=True)
+        unchecked = SimpleNamespace(awaiting_permission=False, system_signal_seen=False, verifies_system_audio=False)
+        heard = SimpleNamespace(awaiting_permission=False, system_signal_seen=True, verifies_system_audio=False)
+        assert _no_signal_hint_due(quiet_tap) is False
+        assert _no_signal_hint_due(unchecked) is True
+        assert _no_signal_hint_due(heard) is False

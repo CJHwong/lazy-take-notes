@@ -27,7 +27,7 @@ import click
 from lazy_take_notes.l1_entities import session_status as st
 from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
 from lazy_take_notes.l1_entities.session_status import SessionStatus
-from lazy_take_notes.l3_interface_adapters.gateways.session_status import write_status
+from lazy_take_notes.l3_interface_adapters.gateways.session_status import STATUS_FILE, write_status
 from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
     load_config,
     load_template_key,
@@ -456,7 +456,13 @@ def _build_container(config, template, out_dir, infra, **overrides):
     return DependencyContainer(config, template, out_dir, infra=infra, **overrides)
 
 
-def _run(out_dir: Path, config, session: HeadlessSession) -> None:
+def _run(out_dir: Path, config, session: HeadlessSession, *, drop_if_empty: bool = False) -> None:
+    """Run the session, print the summary, and exit 1 when it ended in an error.
+
+    With *drop_if_empty*, a failed run whose folder holds only the status file
+    removes the folder: it has nothing to recover, and a script retrying a bad
+    file would otherwise leave one empty folder per try.
+    """
     from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import (  # noqa: PLC0415 -- deferred
         setup_file_logging,
     )
@@ -465,7 +471,19 @@ def _run(out_dir: Path, config, session: HeadlessSession) -> None:
     asyncio.run(session.run())
     for line in _summary_lines(out_dir, session.status):
         click.echo(line, err=True)
-    click.echo(str(out_dir))
+    failed = session.status.state == st.ERROR
+    if failed and drop_if_empty and _holds_only_status(out_dir):
+        (out_dir / STATUS_FILE).unlink()
+        out_dir.rmdir()
+        click.echo(f'Removed {out_dir}: the run saved nothing.', err=True)
+    else:
+        click.echo(str(out_dir))
+    if failed:
+        sys.exit(1)
+
+
+def _holds_only_status(out_dir: Path) -> bool:
+    return [entry.name for entry in out_dir.iterdir()] == [STATUS_FILE]
 
 
 def _emit_banner(activity: str, out_dir: Path, pid: int, *, show_mute: bool = False) -> None:
@@ -557,4 +575,4 @@ def run_transcribe_headless(
     launcher = _file_launcher(config, template, audio_path, container.model_resolver_factory, container.transcriber)
     session = HeadlessSession(container.controller, out_dir, launcher, activity='transcribing')
     _emit_banner('transcribing', out_dir, session.status.pid)
-    _run(out_dir, config, session)
+    _run(out_dir, config, session, drop_if_empty=True)
