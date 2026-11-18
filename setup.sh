@@ -101,8 +101,8 @@ if [[ -z "$PROVIDER" ]]; then
   echo ""
   echo -e "  Which AI provider do you want to use?"
   echo ""
-  echo -e "  ${BOLD}1${RESET}  Ollama  ${DIM}— runs on your computer (free, private, needs ~4 GB RAM)${RESET}"
-  echo -e "  ${BOLD}2${RESET}  OpenAI  ${DIM}— cloud API (needs an API key from platform.openai.com)${RESET}"
+  echo -e "  ${BOLD}1${RESET}  Ollama  ${DIM}cloud models on Ollama's servers (needs a free Ollama sign-in)${RESET}"
+  echo -e "  ${BOLD}2${RESET}  OpenAI  ${DIM}OpenAI API (needs an API key from platform.openai.com)${RESET}"
   echo ""
   while true; do
     read -rp "  Enter 1 or 2: " choice </dev/tty
@@ -257,6 +257,7 @@ if [[ -f "\$PLUGIN_FILE" ]]; then
     [[ -n "\$line" ]] && ARGS+=(--with "\$line")
   done < "\$PLUGIN_FILE"
 fi
+export LTN_PLUGIN_WRAPPER=1  # tells 'plugin add' that plugins.txt is read
 exec "$UVX_PATH" --from git+https://github.com/CJHwong/lazy-take-notes.git "\${ARGS[@]}" lazy-take-notes "\$@"
 WRAPPER
 chmod +x "$TAKE_NOTE_BIN"
@@ -301,7 +302,7 @@ fi
 
 if [[ "$PROVIDER" == "ollama" ]] && [[ "${LTN_SKIP_SIGNIN:-}" != "1" ]]; then
   echo -e "\n${YELLOW}${BOLD}Almost done!${RESET}"
-  echo -e "Sign in to Ollama to enable cloud models:\n"
+  echo -e "Sign in to Ollama to use its cloud models:\n"
   ollama signin
 fi
 

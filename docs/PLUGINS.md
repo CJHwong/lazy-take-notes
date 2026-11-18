@@ -149,8 +149,12 @@ def test_my_command(tmp_path):
 ## Distribution
 
 ```bash
-# Users install alongside lazy-take-notes
-uv tool install lazy-take-notes --with ltn-my-source
+# With the take-note command from setup.sh
+take-note plugin add "ltn-my-source @ git+https://github.com/you/ltn-my-source.git"
+
+# With uv tool (plugins.txt is read only by take-note, so pass the plugin here)
+uv tool install "lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git" \
+    --with "ltn-my-source @ git+https://github.com/you/ltn-my-source.git"
 
 # Or run directly from GitHub (no install)
 uvx --from "lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git" \

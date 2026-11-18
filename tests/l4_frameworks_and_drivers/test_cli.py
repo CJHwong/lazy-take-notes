@@ -1026,6 +1026,41 @@ class TestPluginCommands:
         assert result.exit_code == 0
         assert 'my-plugin added' in result.output
 
+    def test_plugin_add_twice_says_it_is_already_added(self, plugin_dir: Path):
+        (plugin_dir / 'plugins.yaml').write_text('plugins:\n  - my-plugin @ git+https://example.com\n')
+        with patch(f'{_MANIFEST}.validate_spec') as validate:
+            result = CliRunner().invoke(cli, ['plugin', 'add', 'my-plugin @ git+https://example.com'])
+        assert result.exit_code == 0
+        assert 'already added' in result.output
+        assert 'Plugin my-plugin added.' not in result.output
+        validate.assert_not_called()
+
+    def test_plugin_add_outside_the_wrapper_says_it_will_not_load(self, plugin_dir: Path, monkeypatch):
+        monkeypatch.delenv('LTN_PLUGIN_WRAPPER', raising=False)
+        with patch(f'{_MANIFEST}.validate_spec', return_value=(True, '')):
+            result = CliRunner().invoke(cli, ['plugin', 'add', 'ltn-not-installed @ git+https://example.com'])
+        assert result.exit_code == 0
+        assert 'will not load' in result.output
+        assert 'setup.sh' in result.output
+        assert (
+            "uv tool install 'lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git'"
+            " --with 'ltn-not-installed @ git+https://example.com'"
+        ) in result.output
+
+    def test_plugin_add_through_the_wrapper_does_not_warn(self, plugin_dir: Path, monkeypatch):
+        monkeypatch.setenv('LTN_PLUGIN_WRAPPER', '1')
+        with patch(f'{_MANIFEST}.validate_spec', return_value=(True, '')):
+            result = CliRunner().invoke(cli, ['plugin', 'add', 'ltn-not-installed @ git+https://example.com'])
+        assert result.exit_code == 0
+        assert 'will not load' not in result.output
+
+    def test_plugin_add_of_an_installed_package_does_not_warn(self, plugin_dir: Path, monkeypatch):
+        monkeypatch.delenv('LTN_PLUGIN_WRAPPER', raising=False)
+        with patch(f'{_MANIFEST}.validate_spec', return_value=(True, '')):
+            result = CliRunner().invoke(cli, ['plugin', 'add', 'click'])  # installed in this environment
+        assert result.exit_code == 0
+        assert 'will not load' not in result.output
+
     def test_plugin_add_validation_failure(self, plugin_dir: Path):
         runner = CliRunner()
         with patch(f'{_MANIFEST}.validate_spec', return_value=(False, 'No matching distribution')):
