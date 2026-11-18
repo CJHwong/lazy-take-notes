@@ -119,7 +119,7 @@ interactive:
   model: "gpt-oss:20b"            # fast model for quick actions
 output:
   directory: "./output"
-  save_audio: true                # save recording.wav alongside transcript
+  save_audio: true                # save recording.wav alongside transcript; when false, it is still kept if transcription fails
   save_notes_history: true        # keep numbered snapshots in history/
   save_context: true              # save session context text
   save_debug_log: false           # write debug.log (off by default)
@@ -142,7 +142,7 @@ output/
 ├── transcript.txt            # timestamped transcript
 ├── notes.md                  # latest notes/digest (markdown)
 ├── context.txt               # user-provided context (when save_context: true)
-├── recording.wav             # audio recording (when save_audio: true)
+├── recording.wav             # audio recording (when save_audio: true, or when transcription failed)
 ├── debug.log                 # debug log (when save_debug_log: true)
 └── history/                  # numbered snapshots (when save_notes_history: true)
     ├── notes_001.md

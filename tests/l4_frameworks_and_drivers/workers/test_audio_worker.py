@@ -1180,3 +1180,124 @@ class TestRepeatedLoopErrors:
 
         processing = [m.processing for m in messages if isinstance(m, AudioHealth)]
         assert processing == ['error', 'ok']
+
+
+class TestAudioWithSaveAudioOff:
+    """save_audio: false still writes the audio; a clean session deletes it, a failure keeps it."""
+
+    def _record(self, tmp_path, *, save_audio=False, transcriber=None, seen=None):
+        chunks = [_make_nonsilent_chunk(16000) for _ in range(3)]
+        calls = 0
+
+        def is_cancelled():
+            nonlocal calls
+            calls += 1
+            if seen is not None and calls == 4:
+                seen.append((tmp_path / 'recording.wav').exists())
+            return calls > 5
+
+        messages: list = []
+        run_audio_worker(
+            post_message=messages.append,
+            is_cancelled=is_cancelled,
+            model_path='test-model',
+            language='en',
+            chunk_duration=1.0,
+            save_audio=save_audio,
+            output_dir=tmp_path,
+            transcriber=transcriber or FakeTranscriber(),
+            audio_source=FakeAudioSource(chunks=chunks),
+        )
+        return [m.error for m in messages if isinstance(m, AudioWorkerStatus) and m.status == 'warning']
+
+    def test_a_clean_session_writes_the_audio_then_deletes_it(self, tmp_path):
+        seen: list[bool] = []
+        warnings = self._record(tmp_path, seen=seen)
+        assert seen == [True]  # written while the meeting runs
+        assert not list(tmp_path.glob('*.wav'))
+        assert warnings == []
+
+    def test_a_model_that_fails_to_load_keeps_the_audio_and_says_why(self, tmp_path, monkeypatch):
+        transcriber = FakeTranscriber()
+        monkeypatch.setattr(transcriber, 'load_model', MagicMock(side_effect=RuntimeError('model not found')))
+        warnings = self._record(tmp_path, transcriber=transcriber)
+        assert (tmp_path / 'recording.wav').exists()
+        notices = [w for w in warnings if 'save_audio is off' in w]
+        assert len(notices) == 1
+        assert 'speech model failed to load' in notices[0]
+
+    def test_a_failed_transcription_keeps_the_audio(self, tmp_path):
+        class FailingTranscriber(FakeTranscriber):
+            def transcribe(self, audio, language, hints=None):
+                raise RuntimeError('whisper crashed')
+
+        warnings = self._record(tmp_path, transcriber=FailingTranscriber())
+        assert (tmp_path / 'recording.wav').exists()
+        assert any('a transcription failed' in w for w in warnings)
+
+    def test_save_audio_on_keeps_the_audio_without_a_notice(self, tmp_path):
+        warnings = self._record(tmp_path, save_audio=True)
+        assert (tmp_path / 'recording.wav').exists()
+        assert not any('save_audio is off' in w for w in warnings)
+
+    def test_disk_notices_stay_in_the_log_until_the_audio_is_kept(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
+            _UnsavedAudio,  # noqa: PLC2701 -- testing private helper
+        )
+
+        posted: list = []
+        unsaved = _UnsavedAudio(save_audio=False, post_message=posted.append)
+        unsaved.notice('Audio recording paused: disk full')
+        assert posted == []
+        unsaved.keep_because('a transcription failed')
+        unsaved.keep_because('a transcription failed')
+        unsaved.notice('Audio recording continues in recording_2.wav.')
+        assert [m.error for m in posted][1:] == ['Audio recording continues in recording_2.wav.']
+        assert len(posted) == 2
+
+    def test_a_file_that_cannot_be_deleted_is_logged(self, tmp_path, monkeypatch, caplog):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        def _locked(self, missing_ok=False):
+            raise PermissionError(13, 'Permission denied')
+
+        recording = module._RecoveringWav(tmp_path, 16000, None, keep_files=lambda: False)  # noqa: SLF001 -- private helper under test
+        recording.write(np.zeros(160, dtype=np.float32))
+        monkeypatch.setattr(module.Path, 'unlink', _locked)
+        with caplog.at_level('WARNING', logger='ltn.audio'):
+            recording.close()
+        assert 'Could not delete' in caplog.text
+
+    def test_a_transcription_that_fails_at_pause_keeps_the_audio(self, tmp_path, caplog):
+        class FailingTranscriber(FakeTranscriber):
+            def transcribe(self, audio, language, hints=None):
+                raise RuntimeError('whisper crashed')
+
+        speech = np.full(16000, 0.3, dtype=np.float32)
+        pause_event = threading.Event()
+        calls = 0
+
+        def is_cancelled():
+            nonlocal calls
+            calls += 1
+            if calls == 2:  # one chunk in flight, more speech in the buffer
+                pause_event.set()
+            return calls > 4
+
+        messages: list = []
+        with caplog.at_level('ERROR', logger='ltn.audio'):
+            run_audio_worker(
+                post_message=messages.append,
+                is_cancelled=is_cancelled,
+                model_path='test-model',
+                language='en',
+                chunk_duration=0.5,
+                pause_event=pause_event,
+                output_dir=tmp_path,
+                transcriber=FailingTranscriber(),
+                audio_source=FakeAudioSource(chunks=[speech, speech]),
+            )
+
+        assert (tmp_path / 'recording.wav').exists()
+        assert 'Flushing in-flight transcription on pause failed' in caplog.text
+        assert 'Pause flush transcription failed' in caplog.text
