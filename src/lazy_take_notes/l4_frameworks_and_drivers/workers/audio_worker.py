@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import errno
 import logging
 import math
 import os
@@ -10,6 +11,7 @@ import queue
 import struct
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -33,6 +35,10 @@ log = logging.getLogger('ltn.audio')
 # no error. If no system sample arrives in this window, say so once.
 _NO_SIGNAL_WARN_SECONDS = 15.0
 
+# A failing disk: retry this often, and hold at most this much audio in memory (about 19 MB).
+WAV_RETRY_S = 5.0
+WAV_BACKLOG_S = 600.0
+
 
 def _no_signal_message() -> str:
     return (
@@ -52,6 +58,7 @@ class _StreamingWavWriter:
     """
 
     def __init__(self, path: Path, sample_rate: int) -> None:
+        self.path = path
         self._file = open(path, 'wb')  # noqa: SIM115 -- kept open for the whole session
         self._bytes = 0
         self._file.write(
@@ -72,9 +79,122 @@ class _StreamingWavWriter:
         self._file.write(struct.pack('<I', self._bytes))
         self._file.seek(0, os.SEEK_END)
         self._file.flush()
+        if not self._still_at_path():
+            # Writes to a removed or moved file (Finder's Move to Trash) still succeed.
+            raise FileNotFoundError(errno.ENOENT, 'the recording file was moved or removed', str(self.path))
+
+    def _still_at_path(self) -> bool:
+        try:
+            on_disk = os.stat(self.path)
+        except FileNotFoundError:
+            return False
+        opened = os.fstat(self._file.fileno())
+        return (on_disk.st_dev, on_disk.st_ino) == (opened.st_dev, opened.st_ino)
+
+    @property
+    def bytes_written(self) -> int:
+        return self._bytes
 
     def close(self) -> None:
         self._file.close()
+
+
+class _RecoveringWav:
+    """The session WAV, kept going through a failing disk.
+
+    A failed open or write (full disk, removed folder) keeps the audio in memory,
+    up to WAV_BACKLOG_S, and retries every WAV_RETRY_S. Each retry writes a new
+    file (recording_2.wav, ...), so a file that was valid up to the failure stays
+    valid. The meeting can always be recovered from the audio, so the audio must
+    not stop.
+    """
+
+    def __init__(self, output_dir: Path, sample_rate: int, on_notice: Callable[[str], None] | None) -> None:
+        self._dir = output_dir
+        self._sample_rate = sample_rate
+        self._notice = on_notice
+        self._wav: _StreamingWavWriter | None = None
+        self._backlog: deque[bytes] = deque()
+        self._backlog_bytes = 0
+        self._backlog_limit = int(WAV_BACKLOG_S * sample_rate * 2)
+        self._retry_at = 0.0
+        self._failing = False
+        self._dropping = False
+
+    def write(self, chunk: np.ndarray) -> None:
+        self._hold((np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
+        if self._wav is None and time.monotonic() < self._retry_at:
+            return
+        self._flush()
+
+    def close(self) -> None:
+        self._retry_at = 0.0
+        self._flush()
+        self._close_wav()
+        if self._backlog:
+            lost = self._backlog_bytes / (self._sample_rate * 2)
+            log.error('The disk still fails at the end of the session; %.0f s of audio was not saved', lost)
+
+    def _flush(self) -> None:
+        try:
+            if self._wav is None:
+                self._wav = self._open_next()
+            wav = self._wav
+            while self._backlog:
+                wav.write(self._backlog[0])
+                self._backlog_bytes -= len(self._backlog.popleft())
+        except OSError as exc:
+            self._fail(exc)
+            return
+        if self._failing:
+            self._failing = False
+            self._dropping = False
+            log.warning('Recording continues in %s', wav.path)
+            self._tell(f'Audio recording continues in {wav.path.name}.')
+
+    def _open_next(self) -> _StreamingWavWriter:
+        self._dir.mkdir(parents=True, exist_ok=True)  # the session folder may have been removed
+        path = self._dir / 'recording.wav'
+        number = 2
+        while path.exists():
+            path = self._dir / f'recording_{number}.wav'
+            number += 1
+        return _StreamingWavWriter(path, self._sample_rate)
+
+    def _hold(self, pcm: bytes) -> None:
+        self._backlog.append(pcm)
+        self._backlog_bytes += len(pcm)
+        while self._backlog_bytes > self._backlog_limit and len(self._backlog) > 1:
+            self._backlog_bytes -= len(self._backlog.popleft())
+            if not self._dropping:
+                self._dropping = True
+                log.error('Audio held in memory passed %.0f s; dropping the oldest audio', WAV_BACKLOG_S)
+
+    def _fail(self, exc: OSError) -> None:
+        already_failing = self._failing
+        self._failing = True
+        self._close_wav()
+        self._retry_at = time.monotonic() + WAV_RETRY_S
+        if already_failing:
+            log.debug('Recording retry failed: %s', exc)
+            return
+        log.error('Recording to %s paused: %s', self._dir, exc, exc_info=True)
+        self._tell(f'Audio recording paused: {exc}. Audio is kept in memory and saved when the disk works again.')
+
+    def _close_wav(self) -> None:
+        wav, self._wav = self._wav, None
+        if wav is None:
+            return
+        try:
+            wav.close()
+            if self._failing and wav.bytes_written == 0:
+                wav.path.unlink()  # a failed retry holds no audio; the next one reuses the name
+        except OSError:
+            log.debug('closing a failed WAV file', exc_info=True)
+
+    def _tell(self, message: str) -> None:
+        if self._notice is not None:
+            self._notice(message)
 
 
 def _start_processed_recorder(
@@ -84,32 +204,14 @@ def _start_processed_recorder(
 ) -> tuple[queue.Queue, threading.Thread]:
     """Write processed float32 chunks (system/mixed audio) to a WAV file.
 
-    Used for non-mic sources where _start_raw_recorder is not applicable.
     Send None into the returned queue to signal the writer to flush and close.
-
-    A failed open or write (full disk, removed folder) stops the WAV but not
-    the writer: it keeps draining the queue, so the unbounded queue cannot grow
-    for the rest of the session. *on_error* hears about the first failure.
+    The writer always drains the queue, so the unbounded queue cannot grow while
+    the disk fails. *on_error* hears when the recording pauses and resumes.
     """
-    wav_path = output_dir / 'recording.wav'
     rec_q: queue.Queue[np.ndarray | None] = queue.Queue()
-
-    def _fail(wav: _StreamingWavWriter | None, exc: OSError) -> None:
-        log.error('Recording to %s stopped: %s', wav_path, exc, exc_info=True)
-        if on_error is not None:
-            on_error(f'Audio recording stopped: {exc}. Transcription continues.')
-        if wav is not None:
-            try:
-                wav.close()
-            except OSError:
-                log.debug('closing a failed WAV file', exc_info=True)
+    recording = _RecoveringWav(output_dir, sample_rate, on_error)
 
     def _writer() -> None:
-        wav: _StreamingWavWriter | None = None
-        try:
-            wav = _StreamingWavWriter(wav_path, sample_rate)
-        except OSError as exc:
-            _fail(None, exc)
         while True:
             try:
                 data = rec_q.get(timeout=0.5)
@@ -117,16 +219,8 @@ def _start_processed_recorder(
                 continue
             if data is None:
                 break
-            if wav is None:
-                continue
-            pcm = np.clip(data, -1.0, 1.0)
-            try:
-                wav.write((pcm * 32767).astype(np.int16).tobytes())
-            except OSError as exc:
-                _fail(wav, exc)
-                wav = None
-        if wav is not None:
-            wav.close()
+            recording.write(data)
+        recording.close()
 
     writer = threading.Thread(target=_writer, daemon=True)
     writer.start()
@@ -195,6 +289,19 @@ def _report_health(
     return current
 
 
+class _NoTranscription:
+    """Stands in for a speech model that failed to load, so the audio still records."""
+
+    def load_model(self, model_path: str) -> None:
+        return
+
+    def transcribe(self, audio: np.ndarray, language: str, hints: list[str] | None = None) -> list[TranscriptSegment]:
+        return []
+
+    def close(self) -> None:
+        return
+
+
 def run_audio_worker(
     post_message,
     is_cancelled,
@@ -226,11 +333,13 @@ def run_audio_worker(
             transcriber = SubprocessWhisperTranscriber()
         transcriber.load_model(model_path)
     except Exception as e:
-        log.error('Failed to load transcription model: %s', e, exc_info=True)
-        post_message(AudioWorkerStatus(status='error', error=f'Failed to load model: {e}'))
+        # The audio is the record of the meeting: record it without a transcript.
+        log.error('Failed to load transcription model; recording audio only: %s', e, exc_info=True)
         if transcriber is not None:
             transcriber.close()  # clean up any partially-started subprocess
-        return []
+        transcriber = _NoTranscription()
+        message = f'Speech model failed to load: {e}. Recording audio only; run transcribe on the recording later.'
+        post_message(AudioWorkerStatus(status='warning', error=message))
     post_message(AudioWorkerStatus(status='model_ready'))
 
     # Resolve audio source — default to SounddeviceAudioSource when not injected

@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 
 from lazy_take_notes.l1_entities.audio_constants import SAMPLE_RATE
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment
@@ -25,26 +26,50 @@ from tests.conftest import FakeAudioSource, FakeTranscriber
 
 
 class TestAudioWorker:
-    def test_model_load_failure(self, monkeypatch):
-        """If model fails to load, worker should post error and return empty."""
+    def test_a_model_that_fails_to_load_still_records_the_audio(self, monkeypatch, tmp_path):
+        """The audio is the record of the meeting; a missing transcript must not lose it."""
         fake_transcriber = FakeTranscriber()
         monkeypatch.setattr(fake_transcriber, 'load_model', MagicMock(side_effect=RuntimeError('model not found')))
-        fake_source = FakeAudioSource()
+        fake_source = FakeAudioSource(chunks=[_make_nonsilent_chunk(1600)])
+        calls = 0
+
+        def is_cancelled():
+            nonlocal calls
+            calls += 1
+            return calls > 3
 
         messages = []
         result = run_audio_worker(
             post_message=messages.append,
-            is_cancelled=lambda: True,
+            is_cancelled=is_cancelled,
             model_path='bad-model',
             language='zh',
+            save_audio=True,
+            output_dir=tmp_path,
             transcriber=fake_transcriber,
             audio_source=fake_source,
         )
 
         assert result == []
         statuses = [m for m in messages if isinstance(m, AudioWorkerStatus)]
-        assert any(s.status == 'loading_model' for s in statuses)
-        assert any(s.status == 'error' for s in statuses)
+        assert not any(s.status == 'error' for s in statuses)
+        warning = next(s for s in statuses if s.status == 'warning')
+        assert 'model not found' in warning.error
+        assert 'Recording audio only' in warning.error
+        assert any(s.status == 'recording' for s in statuses)
+        assert fake_source.open_calls == [(16000, 1)]
+        with wave.open(str(tmp_path / 'recording.wav'), 'rb') as wf:
+            assert wf.getnframes() == 1600
+
+    def test_the_stand_in_for_a_failed_model_transcribes_nothing(self):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers.audio_worker import (
+            _NoTranscription,  # noqa: PLC2701 -- testing private helper
+        )
+
+        stand_in = _NoTranscription()
+        stand_in.load_model('any')
+        assert stand_in.transcribe(np.zeros(1600, dtype=np.float32), 'en') == []
+        stand_in.close()
 
     def test_immediate_cancel(self):
         """If cancelled immediately, worker should load model and stop cleanly."""
@@ -924,65 +949,125 @@ class TestSourceFailureWarnings:
 
 
 class TestProcessedRecorderFaults:
-    def test_a_failed_write_reports_once_and_keeps_draining_the_queue(self, tmp_path, monkeypatch):
+    """A failing disk pauses the WAV; the audio waits in memory and the recording resumes."""
+
+    def _run(self, output_dir, chunks, errors, between=None):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        rec_q, writer = module._start_processed_recorder(output_dir, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
+        for index, chunk in enumerate(chunks):
+            if between is not None:
+                between(index)
+            rec_q.put(chunk)
+        rec_q.put(None)
+        writer.join(timeout=5)
+        assert not writer.is_alive()
+        assert rec_q.empty()
+
+    @staticmethod
+    def _frames(path):
+        with wave.open(str(path), 'rb') as wf:
+            return wf.readframes(wf.getnframes())
+
+    def test_a_full_disk_keeps_the_audio_and_writes_it_to_the_next_file(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        real_write = module._StreamingWavWriter.write  # noqa: SLF001 -- fault injection
+        calls = {'count': 0}
+
+        def write(self, pcm):
+            calls['count'] += 1
+            if calls['count'] in (3, 4):  # the third chunk fails, then its first retry fails too
+                raise OSError(28, 'No space left on device')
+            real_write(self, pcm)
+
+        monkeypatch.setattr(module._StreamingWavWriter, 'write', write)  # noqa: SLF001 -- fault injection
+        monkeypatch.setattr(module, 'WAV_RETRY_S', 0.0)
+        chunks = [np.full(160, value / 10, dtype=np.float32) for value in range(6)]
+
+        errors: list[str] = []
+        self._run(tmp_path, chunks, errors)
+
+        assert sorted(path.name for path in tmp_path.glob('*.wav')) == ['recording.wav', 'recording_2.wav']
+        first, second = self._frames(tmp_path / 'recording.wav'), self._frames(tmp_path / 'recording_2.wav')
+        expected = b''.join((np.clip(c, -1, 1) * 32767).astype(np.int16).tobytes() for c in chunks)
+        assert first + second == expected  # every chunk once, in order
+        assert len(errors) == 2
+        assert 'No space left' in errors[0]
+        assert 'recording_2.wav' in errors[1]
+
+    @pytest.mark.parametrize('remove', ['delete', 'move_to_trash'])
+    def test_a_removed_session_folder_is_created_again(self, tmp_path, monkeypatch, remove):
+        import shutil
+
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        monkeypatch.setattr(module, 'WAV_RETRY_S', 0.0)
+        session = tmp_path / 'session'
+        session.mkdir()
+        errors: list[str] = []
+        recording = module._RecoveringWav(session, 16000, errors.append)  # noqa: SLF001 -- private helper under test
+        recording.write(np.full(160, 0.1, dtype=np.float32))
+        if remove == 'delete':
+            shutil.rmtree(session)
+        else:
+            session.rename(tmp_path / 'Trash')
+        recording.write(np.full(160, 0.2, dtype=np.float32))  # lands in the removed file, so it is kept
+        recording.write(np.full(160, 0.3, dtype=np.float32))
+        recording.close()
+
+        frames = np.frombuffer(self._frames(session / 'recording.wav'), dtype=np.int16)
+        assert len(frames) == 320
+        assert frames[0] == int(0.2 * 32767)
+        assert 'removed' in errors[0]
+        assert 'recording.wav' in errors[1]
+
+    def test_a_disk_that_never_recovers_reports_once_and_logs_the_lost_audio(self, tmp_path, monkeypatch, caplog):
         from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
 
         def _full_disk(self, pcm):
             raise OSError(28, 'No space left on device')
 
         monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
+        monkeypatch.setattr(module, 'WAV_RETRY_S', 0.0)
         errors: list[str] = []
-        rec_q, writer = module._start_processed_recorder(tmp_path, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
+        with caplog.at_level('ERROR', logger='ltn.audio'):
+            self._run(tmp_path, [np.zeros(16000, dtype=np.float32)] * 3, errors)
 
-        for _ in range(50):
-            rec_q.put(np.zeros(160, dtype=np.float32))
-        rec_q.put(None)
-        writer.join(timeout=5)
-
-        assert not writer.is_alive()
-        assert rec_q.empty()
         assert len(errors) == 1
         assert 'No space left' in errors[0]
+        assert '3 s of audio was not saved' in caplog.text
 
-    def test_a_failed_open_reports_and_keeps_draining_the_queue(self, tmp_path):
+    def test_the_audio_held_in_memory_is_bounded(self, tmp_path, monkeypatch, caplog):
         from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
 
+        def _full_disk(self, pcm):
+            raise OSError(28, 'No space left on device')
+
+        monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
+        monkeypatch.setattr(module, 'WAV_BACKLOG_S', 2.0)
+        recording = module._RecoveringWav(tmp_path, 16000, None)  # noqa: SLF001 -- private helper under test
+        with caplog.at_level('ERROR', logger='ltn.audio'):
+            for _ in range(5):
+                recording.write(np.zeros(16000, dtype=np.float32))
+
+        assert recording._backlog_bytes <= 2 * 16000 * 2  # noqa: SLF001 -- the bound under test
+        assert caplog.text.count('dropping the oldest audio') == 1
+
+    def test_a_wav_that_fails_to_close_after_a_failed_write_keeps_draining(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        def _full_disk(self, pcm):
+            raise OSError(28, 'No space left on device')
+
+        def _bad_close(self):
+            raise OSError(5, 'Input/output error')
+
+        monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
+        monkeypatch.setattr(module._StreamingWavWriter, 'close', _bad_close)  # noqa: SLF001 -- fault injection
         errors: list[str] = []
-        missing_dir = tmp_path / 'gone'
-        rec_q, writer = module._start_processed_recorder(missing_dir, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
-
-        for _ in range(10):
-            rec_q.put(np.zeros(160, dtype=np.float32))
-        rec_q.put(None)
-        writer.join(timeout=5)
-
-        assert not writer.is_alive()
-        assert rec_q.empty()
+        self._run(tmp_path, [np.zeros(160, dtype=np.float32)] * 5, errors)
         assert len(errors) == 1
-
-
-def test_a_wav_that_fails_to_close_after_a_failed_write_keeps_draining(tmp_path, monkeypatch):
-    from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
-
-    def _full_disk(self, pcm):
-        raise OSError(28, 'No space left on device')
-
-    def _bad_close(self):
-        raise OSError(5, 'Input/output error')
-
-    monkeypatch.setattr(module._StreamingWavWriter, 'write', _full_disk)  # noqa: SLF001 -- fault injection
-    monkeypatch.setattr(module._StreamingWavWriter, 'close', _bad_close)  # noqa: SLF001 -- fault injection
-    errors: list[str] = []
-    rec_q, writer = module._start_processed_recorder(tmp_path, 16000, on_error=errors.append)  # noqa: SLF001 -- private helper under test
-
-    for _ in range(5):
-        rec_q.put(np.zeros(160, dtype=np.float32))
-    rec_q.put(None)
-    writer.join(timeout=5)
-
-    assert not writer.is_alive()
-    assert rec_q.empty()
-    assert len(errors) == 1
 
 
 class TestAudioHealth:

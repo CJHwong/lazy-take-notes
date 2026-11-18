@@ -35,6 +35,8 @@ FORCE_EXIT_AFTER_S = 5.0
 # More unexpected errors than this inside the window means an error loop.
 ERROR_BURST_LIMIT = 5
 ERROR_BURST_WINDOW_S = 10.0
+# During an error loop, log a count of the errors this often instead of each traceback.
+STORM_LOG_INTERVAL_S = 60.0
 
 
 def shutdown_signals() -> tuple[signal.Signals, ...]:
@@ -68,16 +70,19 @@ class SessionHostApp(App):
 
     1. An unexpected exception goes to the session debug log with its full
        traceback, the user sees an error toast, and the app keeps running: a
-       meeting recording must not end because of one bug. More than
+       meeting recording must not end because of a bug. More than
        ERROR_BURST_LIMIT errors within ERROR_BURST_WINDOW_S means something fails
-       on every redraw; then the session is ended cleanly instead.
+       on every redraw; then one alert replaces the toasts, and the recording
+       still continues until the user stops it.
     2. SIGTERM and SIGHUP (window closed) end the session cleanly: the audio
        worker flushes, the context is saved, and the app exits. The final LLM
        digest is skipped because it can take minutes.
     """
 
     _error_times: deque[float]
-    _ending_for_errors = False
+    _storm_reported = False
+    _storm_errors = 0
+    _storm_logged_at = 0.0
 
     def get_driver_class(self) -> type[Driver]:
         driver_class = super().get_driver_class()
@@ -91,6 +96,9 @@ class SessionHostApp(App):
         # Textual wraps a worker exception in WorkerFailed without raising it,
         # so the wrapper has no traceback. Log the original one.
         cause = error.error if isinstance(error, WorkerFailed) else error
+        if self._storm_reported:
+            self._count_storm_error(cause)
+            return
         log.critical('Unexpected error; the session continues', exc_info=cause)
         if not hasattr(self, '_error_times'):
             self._error_times = deque(maxlen=ERROR_BURST_LIMIT + 1)
@@ -104,15 +112,35 @@ class SessionHostApp(App):
                 timeout=15,
             )
             return
-        if self._ending_for_errors:
-            return
-        self._ending_for_errors = True
+        self._storm_reported = True
+        self._storm_logged_at = now
         log.critical(
-            'Errors repeat %d times in %.0fs; ending the session cleanly',
+            'Errors repeat %d times in %.0fs; the recording continues',
             len(self._error_times),
             now - self._error_times[0],
         )
-        self.end_sessions()
+        self.notify(
+            'Errors keep repeating (see debug.log). The audio recording continues; press s to stop and save.',
+            severity='error',
+            timeout=3600,
+        )
+
+    def _count_storm_error(self, cause: BaseException) -> None:
+        # A traceback per error would fill the disk in a long meeting, and a full
+        # disk pauses the recording. Log a count instead.
+        self._storm_errors += 1
+        now = time.monotonic()
+        if now - self._storm_logged_at < STORM_LOG_INTERVAL_S:
+            return
+        log.critical(
+            '%d more errors in %.0fs; the last: %s: %s',
+            self._storm_errors,
+            now - self._storm_logged_at,
+            type(cause).__name__,
+            cause,
+        )
+        self._storm_errors = 0
+        self._storm_logged_at = now
 
     _previous_handlers: dict[int, object]
     _watchdog_armed = False

@@ -157,16 +157,14 @@ class MixedAudioSource:
         self._deaf_system = False
         self._last_delivery = {True: time.monotonic(), False: time.monotonic()}
         self._clear_buffers()
-        try:
-            self._mic.open(sample_rate, channels)
-            self._system.open(sample_rate, channels)
-        except Exception:
-            self._close_sources()
-            raise
+        # A source that fails to open is retried like a lost one. The other source
+        # records from the first second; the recording must not wait for both.
+        mic_error = self._open_source(self._mic, True)
+        system_error = self._open_source(self._system, False)
         self._stop.clear()
         self._threads = [
-            threading.Thread(target=self._reader, args=(self._mic, self._mic_q, True), daemon=True),
-            threading.Thread(target=self._reader, args=(self._system, self._sys_q, False), daemon=True),
+            threading.Thread(target=self._reader, args=(self._mic, self._mic_q, True, mic_error), daemon=True),
+            threading.Thread(target=self._reader, args=(self._system, self._sys_q, False, system_error), daemon=True),
         ]
         try:
             for thread in self._threads:
@@ -177,11 +175,25 @@ class MixedAudioSource:
             self._join_threads()
             raise
 
-    def _reader(self, source: AudioSource, destination: AudioBuffer, is_mic: bool) -> None:
+    def _open_source(self, source: AudioSource, is_mic: bool) -> Exception | None:
+        try:
+            source.open(self._sample_rate, self._channels)
+        except Exception as error:
+            log.warning('%s audio source failed to open; retrying: %s', 'mic' if is_mic else 'system', error)
+            self._set_error(is_mic, error)
+            return error
+        return None
+
+    def _reader(
+        self, source: AudioSource, destination: AudioBuffer, is_mic: bool, open_error: Exception | None = None
+    ) -> None:
         last_delivery = time.monotonic()
         watch = _ZeroWatch()
         while not self._stop.is_set():
             try:
+                if open_error is not None:
+                    error, open_error = open_error, None
+                    raise error
                 chunk = self._read_source(source, last_delivery)
                 if chunk is not None and chunk.size:
                     self._watch_signal(watch, chunk, is_mic)

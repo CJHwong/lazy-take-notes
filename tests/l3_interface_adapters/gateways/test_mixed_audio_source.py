@@ -121,20 +121,6 @@ class TestMixedAudioSource:
         finally:
             source.close()
 
-    def test_startup_rollback_preserves_error_when_cleanup_also_fails(self):
-        class BrokenMicrophone(FakeAudioSource):
-            def close(self):
-                raise RuntimeError('microphone cleanup failed')
-
-        class BrokenSystem(FakeAudioSource):
-            def open(self, sample_rate, channels):
-                raise RuntimeError('system startup failed')
-
-        source = MixedAudioSource(BrokenMicrophone(), BrokenSystem())
-
-        with pytest.raises(RuntimeError, match='system startup failed'):
-            source.open(16000, 1)
-
     def test_reopen_resets_dropped_frame_count(self):
         source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
         source._sys_q.put(np.ones(8000, dtype=np.float32))
@@ -235,6 +221,44 @@ class TestMixedAudioSource:
         finally:
             source.close()
 
+    def test_a_source_that_fails_to_open_is_retried_while_the_other_records(self):
+        class LateMicrophone(RestartableSource):
+            def open(self, sample_rate, channels):
+                super().open(sample_rate, channels)
+                if len(self.open_calls) == 1:
+                    raise RuntimeError('microphone busy')
+
+        microphone = LateMicrophone([[], [np.full(160, 0.4, dtype=np.float32)]])
+        system = FakeAudioSource()
+        source = MixedAudioSource(microphone, system)
+        source._restart_delays = (0.001,)
+        source.open(16000, 1)
+        try:
+            source._sys_q.put(np.full(160, 0.2, dtype=np.float32))
+            assert source.read(timeout=0.1) is not None  # system audio records at once
+            deadline = time.monotonic() + 2
+            while len(microphone.open_calls) < 2 and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert len(microphone.open_calls) >= 2
+            assert system.open_calls == [(16000, 1)]
+        finally:
+            source.close()
+
+    def test_both_sources_failing_to_open_do_not_raise(self):
+        class Unplugged(FakeAudioSource):
+            def open(self, sample_rate, channels):
+                raise RuntimeError('no device')
+
+        source = MixedAudioSource(Unplugged(), Unplugged())
+        source._restart_delays = (0.001,)
+        source.open(16000, 1)
+        try:
+            assert source.health == {'mic': 'lost', 'system': 'lost'}
+            assert len(source.source_errors) == 2
+            assert not source.exhausted
+        finally:
+            source.close()
+
     def test_system_audio_continues_without_microphone_frames(self):
         source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
         source._sys_q.put(np.full(1600, 0.2, dtype=np.float32))
@@ -265,19 +289,6 @@ class TestMixedAudioSource:
             assert not source.exhausted
         finally:
             source.close()
-
-    def test_failed_startup_closes_already_open_microphone(self):
-        class BrokenSource(FakeAudioSource):
-            def open(self, sample_rate, channels):
-                raise RuntimeError('system startup failed')
-
-        microphone = FakeAudioSource()
-        source = MixedAudioSource(microphone, BrokenSource())
-
-        with pytest.raises(RuntimeError, match='system startup failed'):
-            source.open(16000, 1)
-
-        assert microphone.close_calls == 1
 
     def test_close_still_closes_system_when_microphone_close_fails(self):
         class BrokenSource(FakeAudioSource):
