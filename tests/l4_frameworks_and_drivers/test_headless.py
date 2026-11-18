@@ -6,9 +6,13 @@ a real SessionController wired to FakeLLMClient + FakePersistence.
 
 from __future__ import annotations
 
+import asyncio
+import signal
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -160,6 +164,32 @@ class TestHeadlessSession:
         session._toggle_mic()  # noqa: SLF001 -- toggle back
         assert src.mic_muted is False
         assert any('unmuted' in line for line in reported)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('signum', [signal.SIGINT, signal.SIGTERM])
+    async def test_sigint_and_sigterm_end_the_session_cleanly(
+        self, tmp_path: Path, default_template, fake_persistence, fake_llm, signum
+    ):
+        # launchd, systemd and `timeout` stop a service with SIGTERM.
+        loop = asyncio.get_running_loop()
+        handlers: dict[int, Callable[[], object]] = {}
+        controller = _controller(default_template, fake_persistence, fake_llm)
+
+        def launcher(post_message, is_cancelled):
+            try:
+                loop.call_soon_threadsafe(handlers[signum])  # the signal arrives
+                deadline = time.monotonic() + 2
+                while not is_cancelled() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            finally:
+                post_message(AudioWorkerStatus(status='stopped'))
+
+        session = HeadlessSession(controller, tmp_path, launcher)
+        with patch.object(loop, 'add_signal_handler', side_effect=handlers.__setitem__):
+            await session.run()
+
+        assert session._cancel.is_set()  # noqa: SLF001 -- the worker was told to stop
+        assert _read(tmp_path).state == st.STOPPED
 
     @pytest.mark.asyncio
     async def test_run_with_audio_source_installs_mic_toggle(

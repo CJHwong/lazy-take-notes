@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import threading
 from unittest.mock import patch
 
 import numpy as np
@@ -196,6 +197,48 @@ class TestBlocking:
         report = _run(plan)
         assert report.get('diarization').status == FAIL
         assert 'missing-binary' in report.get('diarization').detail
+
+
+class TestLeaving:
+    @pytest.mark.parametrize('model', ['large-v3-turbo-q8_0', 'hf://owner/repo/custom.bin'])
+    def test_the_download_gets_the_plan_s_cancel_event(self, plan, model):
+        from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+
+        seen: list = []
+
+        class Store:
+            def install(self, asset_id, on_progress=None, cancel=None):
+                seen.append(cancel)
+                raise DownloadCancelledError('download cancelled')
+
+            def resolve(self, name, cancel=None):
+                seen.append(cancel)
+                raise DownloadCancelledError('download cancelled')
+
+        plan.config = plan.config.model_copy(
+            update={'transcription': plan.config.transcription.model_copy(update={'model': model, 'models': {}})}
+        )
+        plan.model_resolver_factory = lambda on_progress: HfModelResolver(on_progress, store=Store())
+        check = _run(plan).get('whisper')
+
+        assert seen == [plan.cancel]
+        assert check.status == FAIL
+        assert plan.transcriber.load_model_calls == []
+
+    def test_the_slow_checks_never_keep_the_process_alive(self, plan):
+        # Python joins non-daemon threads at exit, so a 120 s probe would hold a closed app open.
+        seen: list[bool] = []
+
+        class Watching(Resolver):
+            def resolve(self, name: str) -> str:
+                seen.append(threading.current_thread().daemon)
+                return super().resolve(name)
+
+        plan.model_resolver_factory = lambda on_progress: Watching(on_progress=on_progress)
+        _run(plan)
+
+        assert seen == [True]
 
 
 class TestOverridable:

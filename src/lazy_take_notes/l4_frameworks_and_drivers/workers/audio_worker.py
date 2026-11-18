@@ -28,6 +28,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     TranscriptChunk,
     TranscriptionStatus,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.workers.session_folder import SessionFolder
 
 log = logging.getLogger('ltn.audio')
 
@@ -111,14 +112,14 @@ class _RecoveringWav:
 
     def __init__(
         self,
-        output_dir: Path,
+        output_dir: Path | SessionFolder,
         sample_rate: int,
         on_notice: Callable[[str], None] | None,
         keep_files: Callable[[], bool] | None = None,
     ) -> None:
-        self._dir = output_dir
+        self._folder = output_dir if isinstance(output_dir, SessionFolder) else SessionFolder(output_dir)
         self._keep_files = keep_files
-        self._paths: list[Path] = []
+        self._names: list[str] = []
         self._sample_rate = sample_rate
         self._notice = on_notice
         self._wav: _StreamingWavWriter | None = None
@@ -129,6 +130,10 @@ class _RecoveringWav:
         self._failing = False
         self._dropping = False
 
+    @property
+    def _dir(self) -> Path:
+        return self._folder.path
+
     def write(self, chunk: np.ndarray) -> None:
         self._hold((np.clip(chunk, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
         if self._wav is None and time.monotonic() < self._retry_at:
@@ -138,15 +143,20 @@ class _RecoveringWav:
     def close(self) -> None:
         self._retry_at = 0.0
         self._flush()
-        self._close_wav()
+        with self._folder.lock:
+            self._close_wav()
+            if not self._keep_files_at_end():
+                self._delete_files()
         if self._backlog:
             lost = self._backlog_bytes / (self._sample_rate * 2)
             log.error('The disk still fails at the end of the session; %.0f s of audio was not saved', lost)
-        if self._keep_files is not None and not self._keep_files():
-            self._delete_files()
+
+    def _keep_files_at_end(self) -> bool:
+        return self._keep_files is None or self._keep_files()
 
     def _delete_files(self) -> None:
-        for path in self._paths:
+        for name in self._names:
+            path = self._dir / name
             try:
                 path.unlink(missing_ok=True)
             except OSError:
@@ -154,13 +164,18 @@ class _RecoveringWav:
         log.info('save_audio is off and nothing failed; deleted the session audio')
 
     def _flush(self) -> None:
+        # The lock covers one chunk at a time, so a rename never waits for a long backlog.
         try:
-            if self._wav is None:
-                self._wav = self._open_next()
-            wav = self._wav
-            while self._backlog:
-                wav.write(self._backlog[0])
-                self._backlog_bytes -= len(self._backlog.popleft())
+            while True:
+                with self._folder.lock:
+                    if self._wav is None:
+                        self._wav = self._open_next()
+                    wav = self._wav
+                    wav.path = self._dir / wav.path.name  # follows a rename through SessionFolder
+                    if not self._backlog:
+                        break
+                    wav.write(self._backlog[0])
+                    self._backlog_bytes -= len(self._backlog.popleft())
         except OSError as exc:
             self._fail(exc)
             return
@@ -178,7 +193,7 @@ class _RecoveringWav:
             path = self._dir / f'recording_{number}.wav'
             number += 1
         wav = _StreamingWavWriter(path, self._sample_rate)
-        self._paths.append(path)
+        self._names.append(path.name)
         return wav
 
     def _hold(self, pcm: bytes) -> None:
@@ -193,7 +208,8 @@ class _RecoveringWav:
     def _fail(self, exc: OSError) -> None:
         already_failing = self._failing
         self._failing = True
-        self._close_wav()
+        with self._folder.lock:
+            self._close_wav()
         self._retry_at = time.monotonic() + WAV_RETRY_S
         if already_failing:
             log.debug('Recording retry failed: %s', exc)
@@ -218,7 +234,7 @@ class _RecoveringWav:
 
 
 def _start_processed_recorder(
-    output_dir: Path,
+    output_dir: Path | SessionFolder,
     sample_rate: int,
     on_error: Callable[[str], None] | None = None,
     keep_files: Callable[[], bool] | None = None,
@@ -363,7 +379,7 @@ def run_audio_worker(
     pause_duration: float = 1.5,
     recognition_hints: list[str] | None = None,
     pause_event: threading.Event | None = None,
-    output_dir: Path | None = None,
+    output_dir: Path | SessionFolder | None = None,
     save_audio: bool = False,
     transcriber=None,
     audio_source: AudioSource | None = None,

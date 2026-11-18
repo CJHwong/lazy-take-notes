@@ -190,39 +190,40 @@ class ShellApp(SessionHostApp):
         )
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             build_preflight_plan,
+            plan_reloader,
         )
 
         config, infra, _template_loader = self._record_context()
         opts = self._record_options
-        plan = build_preflight_plan(
-            config,
-            infra,
-            template,
-            self._output_dir,
-            llm_client=opts.get('llm_client'),
-            transcriber=opts.get('transcriber'),
-            audio_source=opts.get('audio_source'),
-            mute_mic=opts.get('mute_mic', False),
+        options = {
+            'llm_client': opts.get('llm_client'),
+            'transcriber': opts.get('transcriber'),
+            'audio_source': opts.get('audio_source'),
+            'mute_mic': opts.get('mute_mic', False),
+        }
+        screen = PreflightScreen(
+            build_preflight_plan(config, infra, template, self._output_dir, **options),
+            reload=plan_reloader(self._config_path, self._output_dir, template, **options),
         )
-        self.push_screen(PreflightScreen(plan), functools.partial(self._after_preflight, template, plan))
+        self.push_screen(screen, functools.partial(self._after_preflight, template, screen))
 
     @_back_to_welcome_on_error
-    def _after_preflight(self, template, plan, report) -> None:
+    def _after_preflight(self, template, preflight_screen, report) -> None:
         from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (  # noqa: PLC0415 -- deferred
             build_record_session,
         )
         from lazy_take_notes.l4_frameworks_and_drivers.keep_awake import keep_awake  # noqa: PLC0415 -- deferred
 
         opts = self._record_options
+        plan = preflight_screen.plan
         if report is None:
             if plan.owns_transcriber:
                 plan.transcriber.close()
             self._finished()
             return
-        config, infra, _template_loader = self._record_context()
         screen, out_dir = build_record_session(
-            config,
-            infra,
+            plan.config,
+            plan.infra,
             template,
             self._output_dir,
             opts.get('label'),

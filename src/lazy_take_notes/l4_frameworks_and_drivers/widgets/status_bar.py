@@ -56,6 +56,8 @@ class StatusBar(Static):
     download_model: reactive[str] = reactive('')
     buf_count: reactive[int] = reactive(0)
     buf_max: reactive[int] = reactive(15)
+    # False in a transcript-only session: no digest will ever use the buffer.
+    ai_notes: reactive[bool] = reactive(True)
     audio_level: reactive[float] = reactive(0.0)
     # Below this RMS, render the wave as fully silent (▁). Apps set this from
     # the user's configured silence_threshold so the meter and the VAD agree on
@@ -67,6 +69,8 @@ class StatusBar(Static):
     # Capture problems that last until fixed, e.g. 'MIC LOST'. Shown in red.
     audio_alert: reactive[str] = reactive('')
     mode_label: reactive[str] = reactive('')
+    # What the bar shows while audio flows: a recording, or a file being transcribed.
+    active_label: reactive[str] = reactive('● Rec')
     keybinding_hints: reactive[str] = reactive('')
     quick_action_hints: reactive[str] = reactive('')
     _start_time: float = 0.0
@@ -139,7 +143,7 @@ class StatusBar(Static):
         elif self.paused:
             status_icon = '❚❚ Paused'
         elif self.recording:
-            status_icon = '● Rec'
+            status_icon = self.active_label
         elif self.download_percent >= 0:
             status_icon = f'⟳ Downloading {self.download_model}… {self.download_percent}%'
         elif self.audio_status == 'loading_model':
@@ -162,7 +166,7 @@ class StatusBar(Static):
         left_parts.extend(
             [
                 status_icon,
-                f'buf {self.buf_count}/{self.buf_max}',
+                f'buf {self.buf_count}/{self.buf_max}' if self.ai_notes else 'AI notes off',
                 self._format_elapsed(now),
             ]
         )

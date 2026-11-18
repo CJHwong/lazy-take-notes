@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 
 from rich.markup import escape
@@ -55,9 +56,11 @@ class PreflightScreen(ShellScreen[PreflightReport | None]):
         Binding('escape', 'back', 'Back'),
     ]
 
-    def __init__(self, plan: PreflightPlan) -> None:
+    def __init__(self, plan: PreflightPlan, reload: Callable[[], PreflightPlan] | None = None) -> None:
         super().__init__()
         self._plan = plan
+        # Retry builds the plan again from config.yaml, so a fix made there is seen.
+        self._reload = reload
         self._report: PreflightReport | None = None
         self._checks_running = False
         self._left = False
@@ -84,7 +87,10 @@ class PreflightScreen(ShellScreen[PreflightReport | None]):
         self.query_one('#preflight-summary', Static).update('')
         self.query_one('#preflight-retry', Button).disabled = True
         self.query_one('#preflight-override', Button).display = False
-        self.run_worker(self._run_checks, thread=True, exclusive=True, group='preflight')
+        # A daemon thread, not a Textual thread worker: asyncio waits for its
+        # executor threads at exit, so Back during a download left a blank,
+        # living process until the download ended.
+        threading.Thread(target=self._run_checks, daemon=True, name='ltn-preflight').start()
 
     def _run_checks(self) -> None:
         try:
@@ -130,6 +136,8 @@ class PreflightScreen(ShellScreen[PreflightReport | None]):
         if self._left:
             return
         self._left = True
+        if result is None:
+            self._plan.cancel.set()
         self.dismiss(result)
 
     def _show_check(self, check: Check) -> None:
@@ -188,8 +196,32 @@ class PreflightScreen(ShellScreen[PreflightReport | None]):
         if action is not None:
             action()
 
+    @property
+    def plan(self) -> PreflightPlan:
+        """The plan the last checks ran with. The session must use its objects."""
+        return self._plan
+
     def action_retry(self) -> None:
+        if self._checks_running:
+            return
+        if self._reload is not None and not self._reload_plan(self._reload):
+            return
         self._begin_checks()
+
+    def _reload_plan(self, reload: Callable[[], PreflightPlan]) -> bool:
+        try:
+            plan = reload()
+        except Exception as error:  # a missing or broken config.yaml, a bad provider name
+            log.warning('Could not read the config again', exc_info=True)
+            self.query_one('#preflight-summary', Static).update(
+                f'[red]Could not read config.yaml: {escape(f"{type(error).__name__}: {error}")}[/]'
+            )
+            return False
+        old = self._plan
+        if old.owns_transcriber and plan.transcriber is not old.transcriber:
+            old.transcriber.close()
+        self._plan = plan
+        return True
 
     def action_back(self) -> None:
         self._leave(None)

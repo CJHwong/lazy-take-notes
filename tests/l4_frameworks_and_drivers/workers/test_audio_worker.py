@@ -1022,6 +1022,75 @@ class TestProcessedRecorderFaults:
         assert 'removed' in errors[0]
         assert 'recording.wav' in errors[1]
 
+    def test_a_folder_renamed_by_the_app_keeps_one_recording(self, tmp_path):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        folder = module.SessionFolder(tmp_path / '2026-02-21_143052')
+        folder.path.mkdir()
+        errors: list[str] = []
+        recording = module._RecoveringWav(folder, 16000, errors.append)  # noqa: SLF001 -- private helper under test
+        recording.write(np.full(160, 0.1, dtype=np.float32))
+        folder.rename(tmp_path / '2026-02-21_143052_standup')
+        recording.write(np.full(160, 0.2, dtype=np.float32))
+        recording.close()
+
+        assert not (tmp_path / '2026-02-21_143052').exists()
+        assert list(folder.path.iterdir()) == [folder.path / 'recording.wav']
+        frames = np.frombuffer(self._frames(folder.path / 'recording.wav'), dtype=np.int16)
+        assert len(frames) == 320
+        assert errors == []
+
+    def test_a_rename_during_a_stalled_write_gives_up_instead_of_freezing(self, tmp_path, monkeypatch):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import session_folder
+
+        monkeypatch.setattr(session_folder, 'RENAME_WAIT_S', 0.05)
+        folder = session_folder.SessionFolder(tmp_path / 'session')
+        folder.path.mkdir()
+        with folder.lock, pytest.raises(OSError, match='busy'):  # the writer is inside a slow write
+            folder.rename(tmp_path / 'session_label')
+        assert folder.path == tmp_path / 'session'
+
+    def test_the_writer_takes_the_lock_once_per_chunk(self, tmp_path):
+        # Holding it for the whole backlog (up to 10 min of audio) would block a rename for that long.
+        import threading
+
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        class CountingLock:
+            def __init__(self) -> None:
+                self.inner = threading.Lock()
+                self.entries = 0
+
+            def __enter__(self):
+                self.entries += 1
+                return self.inner.__enter__()
+
+            def __exit__(self, *exc):
+                return self.inner.__exit__(*exc)
+
+        folder = module.SessionFolder(tmp_path / 'session')
+        folder.path.mkdir()
+        lock = CountingLock()
+        folder.lock = lock  # ty: ignore[invalid-assignment] -- a counting stand-in for threading.Lock
+        recording = module._RecoveringWav(folder, 16000, None)  # noqa: SLF001 -- private helper under test
+        recording._hold(b'\0' * 320)  # noqa: SLF001 -- a backlog of three chunks
+        recording._hold(b'\0' * 320)  # noqa: SLF001
+        recording.write(np.zeros(160, dtype=np.float32))
+
+        assert lock.entries == 4  # three chunks, then one pass that finds the backlog empty
+
+    def test_save_audio_off_deletes_the_file_in_the_renamed_folder(self, tmp_path):
+        from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
+
+        folder = module.SessionFolder(tmp_path / 'session')
+        folder.path.mkdir()
+        recording = module._RecoveringWav(folder, 16000, None, keep_files=lambda: False)  # noqa: SLF001 -- private helper under test
+        recording.write(np.full(160, 0.1, dtype=np.float32))
+        folder.rename(tmp_path / 'session_label')
+        recording.close()
+
+        assert list(folder.path.iterdir()) == []
+
     def test_a_disk_that_never_recovers_reports_once_and_logs_the_lost_audio(self, tmp_path, monkeypatch, caplog):
         from lazy_take_notes.l4_frameworks_and_drivers.workers import audio_worker as module
 

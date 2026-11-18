@@ -19,15 +19,18 @@ class StubStore:
         self.path = path
         self.installed: list[str] = []
         self.resolved: list[str] = []
+        self.cancels: list = []
 
     def install(self, asset_id, on_progress=None, cancel=None) -> Path:
         self.installed.append(asset_id)
+        self.cancels.append(cancel)
         if on_progress is not None:
             on_progress(AssetProgress(downloaded=5, total=10))
         return self.path
 
-    def resolve(self, name: str) -> str:
+    def resolve(self, name: str, cancel=None) -> str:
         self.resolved.append(name)
+        self.cancels.append(cancel)
         return name
 
 
@@ -55,6 +58,17 @@ class TestHfModelResolver:
 
         assert resolver.resolve('some-custom-model') == 'some-custom-model'
         assert store.resolved == ['some-custom-model']
+
+    def test_the_cancel_event_reaches_the_store(self, tmp_path: Path):
+        import threading
+
+        store = StubStore(tmp_path / 'model.bin')
+        resolver = HfModelResolver(store=store)
+        resolver.cancel = threading.Event()
+        resolver.resolve('some-custom-model')
+        resolver.resolve('large-v3-turbo-q8_0')
+
+        assert store.cancels == [resolver.cancel, resolver.cancel]
 
     def test_absolute_path_exists(self, tmp_path: Path):
         model = tmp_path / 'model.bin'

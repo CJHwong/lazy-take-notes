@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -52,6 +53,31 @@ async def test_a_hard_failure_blocks_and_shows_the_fix():
 
 
 @pytest.mark.asyncio
+async def test_back_cancels_the_checks_and_never_waits_for_them():
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[bool] = []
+
+    def slow_checks(plan, on_update=None):
+        seen.append(threading.current_thread().daemon)
+        started.set()
+        release.wait(5)
+        return _report()
+
+    plan = MagicMock()
+    screen = PreflightScreen(plan)
+    with patch(_RUN, side_effect=slow_checks):
+        async with screen.run_test() as pilot:
+            started.wait(5)
+            await pilot.press('escape')
+            await _settle(pilot)
+            plan.cancel.set.assert_called_once()
+    release.set()
+    assert screen.return_value is None
+    assert seen == [True]  # a daemon thread: the app exits without waiting for a download
+
+
+@pytest.mark.asyncio
 async def test_an_llm_failure_offers_transcript_only():
     screen = PreflightScreen(MagicMock())
     with patch(_RUN, return_value=_report(llm=FAIL)):
@@ -87,3 +113,45 @@ async def test_a_crash_in_the_checks_keeps_the_screen_alive():
             await _settle(pilot)
             assert 'bug' in str(screen.query_one('#preflight-summary', Static).render())
             assert screen.app.is_running
+
+
+@pytest.mark.asyncio
+async def test_retry_reads_the_config_again():
+    # A user who fixes config.yaml after a failed check expects Retry to see the fix.
+    first, second = MagicMock(owns_transcriber=True), MagicMock()
+    results = iter([_report(mic=FAIL), _report()])
+    seen: list = []
+
+    def checks(plan, on_update=None):
+        seen.append(plan)
+        return next(results)
+
+    screen = PreflightScreen(first, reload=lambda: second)
+    with patch(_RUN, side_effect=checks):
+        async with screen.run_test() as pilot:
+            await _settle(pilot)
+            await pilot.press('r')
+            await _settle(pilot)
+    assert seen == [first, second]
+    assert screen.plan is second
+    first.transcriber.close.assert_called_once()  # the old speech model child is not left running
+
+
+@pytest.mark.asyncio
+async def test_a_config_that_fails_to_load_on_retry_keeps_the_screen():
+    def broken():
+        raise FileNotFoundError('config.yaml was removed')
+
+    plan = MagicMock()
+    screen = PreflightScreen(plan, reload=broken)
+    with patch(_RUN, return_value=_report(mic=FAIL)) as run:
+        async with screen.run_test() as pilot:
+            await _settle(pilot)
+            await pilot.press('r')
+            await _settle(pilot)
+            summary = str(screen.query_one('#preflight-summary', Static).render())
+            assert 'config.yaml' in summary
+            await pilot.press('escape')
+            await _settle(pilot)
+    assert run.call_count == 1
+    assert screen.plan is plan

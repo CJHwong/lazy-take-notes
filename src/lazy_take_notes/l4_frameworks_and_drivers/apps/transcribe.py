@@ -79,6 +79,7 @@ class TranscribeApp(BaseApp):
         super().on_mount()
         bar = self.query_one('#status-bar', StatusBar)
         bar.mode_label = 'Transcribe'
+        bar.active_label = '● Transcribing'
         bar.silence_threshold = self._config.transcription.silence_threshold
         self._start_file_worker()
 
@@ -162,12 +163,10 @@ class TranscribeApp(BaseApp):
             bar.stopped = True
             self._worker_done = True
             self._update_hints('stopped')
-            # Auto-trigger final digest when transcription completes
-            has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-            if has_content and not self._final_digest_done:
-                self._run_final_digest()
-            elif self._pending_quit:
-                self.dismiss()
+            if self._pending_quit:
+                self._continue_pending_quit()
+            elif self.needs_final_digest():
+                self._run_final_digest()  # the file is done: write the final notes
         elif message.status == 'error':
             self._dismiss_download_modal()
             self._worker_done = True
@@ -178,6 +177,7 @@ class TranscribeApp(BaseApp):
                     severity='error',
                     timeout=12,
                 )
+            self._continue_pending_quit()
         elif message.status in ('loading_model', 'model_ready'):
             self._update_hints('idle')
 
@@ -195,18 +195,14 @@ class TranscribeApp(BaseApp):
         super().action_force_digest()
 
     def action_quit_app(self) -> None:
+        if self._pending_quit and not self._digest_running and not self._worker_busy():
+            self.close_session()  # a second q does not wait for the AI label
+            return
+        self._file_shutdown.set()
         if self._digest_running:
-            self.notify('Digest in progress \u2014 please wait', severity='warning', timeout=3)
-            return
+            self.notify('Quitting when the digest finishes.', timeout=4)
+        self._pending_quit = True
+        self._continue_pending_quit()
 
-        if not self._worker_done:
-            self._file_shutdown.set()
-            self._pending_quit = True
-            return
-
-        has_content = self._controller.digest_state.buffer or self._controller.digest_state.digest_count > 0
-        if has_content and not self._final_digest_done:
-            self._pending_quit = True
-            self._run_final_digest()
-        else:
-            self.dismiss()
+    def _worker_busy(self) -> bool:
+        return not self._worker_done

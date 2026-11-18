@@ -190,7 +190,7 @@ class HeadlessSession:
         return self._status
 
     def request_stop(self) -> None:
-        """Signal the worker to wind down (wired to SIGINT)."""
+        """Signal the worker to wind down (wired to SIGINT and SIGTERM)."""
         if not self._cancel.is_set():
             self._report('⏹ stopping… finishing the current chunk, then the final digest')
         self._cancel.set()
@@ -255,10 +255,13 @@ class HeadlessSession:
             )
 
     def _install_signal_handler(self, loop: asyncio.AbstractEventLoop) -> None:
-        try:
-            loop.add_signal_handler(signal.SIGINT, self.request_stop)
-        except (NotImplementedError, RuntimeError):  # pragma: no cover -- platform fallback (e.g. Windows)
-            signal.signal(signal.SIGINT, lambda *_: self.request_stop())
+        # SIGTERM is how launchd, systemd and `timeout` stop a service. SIGHUP is
+        # left alone: `nohup` ignores it on purpose to keep the recording going.
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(signum, self.request_stop)
+            except (NotImplementedError, RuntimeError):  # pragma: no cover -- platform fallback (e.g. Windows)
+                signal.signal(signum, lambda *_: self.request_stop())
 
     def _install_mic_toggle(self, loop: asyncio.AbstractEventLoop) -> None:
         if self._audio_source is None:

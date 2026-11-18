@@ -121,6 +121,10 @@ class BaseApp(ShellScreen):
         self._query_running = False
         self._label_running = False
         self._final_digest_done = False
+        self._pending_quit = False
+        # Never reset: a pending quit tries the final digest once, then closes even if it failed.
+        self._final_attempted = False
+        self._session_closed = False
         self._final_digest_started = False
         # Bumped per digest worker. Only the newest worker may clear
         # _digest_running: a cancelled older worker must not clear it while the
@@ -178,6 +182,7 @@ class BaseApp(ShellScreen):
         self._update_hints('idle')
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_max = self._config.digest.min_lines
+        bar.ai_notes = not self._missing_digest_models
         self.query_one('#context-input', TextArea).border_title = 'Session Context'
         if self._missing_digest_models:
             panel = self.query_one('#digest-panel', DigestPanel)
@@ -225,7 +230,7 @@ class BaseApp(ShellScreen):
         bar = self.query_one('#status-bar', StatusBar)
         bar.buf_count = len(self._controller.digest_state.buffer)
 
-        if self.auto_digest and should_digest and not self._digest_running:
+        if self.auto_digest and should_digest and not self._digest_running and not self._missing_digest_models:
             self._run_digest_worker()
 
     def _report_persist_error(self) -> None:
@@ -323,6 +328,7 @@ class BaseApp(ShellScreen):
         if message.is_final:
             self._final_digest_done = True
             self._run_label_worker()
+        self._continue_pending_quit()
 
     def on_digest_error(self, message: DigestError) -> None:
         self._final_digest_started = False  # allow a retry after a failed final
@@ -333,6 +339,31 @@ class BaseApp(ShellScreen):
             severity='error',
             timeout=8,
         )
+        self._continue_pending_quit()
+
+    def _continue_pending_quit(self) -> None:
+        """After q: wait for the audio, finish the notes once, let the AI label land, then close."""
+        if not self._pending_quit or self._digest_running or self._label_running or self._worker_busy():
+            return
+        if self.needs_final_digest() and not self._final_attempted:
+            self._run_final_digest()
+            return
+        self.close_session()
+
+    def _worker_busy(self) -> bool:
+        """True while the audio or file worker still delivers transcript lines."""
+        return False
+
+    def close_session(self) -> None:
+        """Leave the session screen once. A background end can call this, so it closes any modal first."""
+        if self._session_closed:
+            return
+        self._session_closed = True
+        self._pending_quit = False
+        # Screen.dismiss pops the top screen, which would be a modal, not this one.
+        while self.app.screen is not self and self in self.app.screen_stack:
+            self.app.pop_screen()
+        self.dismiss()
 
     def on_query_result(self, message: QueryResult) -> None:
         bar = self.query_one('#status-bar', StatusBar)
@@ -341,26 +372,23 @@ class BaseApp(ShellScreen):
 
     # --- Workers ---
 
-    def _run_digest_worker(self, is_final: bool = False) -> None:
-        if is_final:
-            if self._final_digest_started:
-                return
-            self._final_digest_started = True
+    def _run_digest_worker(self) -> None:
+        """One periodic digest. The final digest runs through _run_final_digest."""
         bar = self.query_one('#status-bar', StatusBar)
-        bar.activity = 'Final digest...' if is_final else 'Digesting...'
+        bar.activity = 'Digesting...'
         generation = self._start_digest_generation()
         replaced = self._running_digest_workers()
 
         async def _digest_task() -> None:
             try:
                 await _wait_for_replaced(replaced)
-                result = await self._run_digest_safely(is_final)
+                result = await self._run_digest_safely(is_final=False)
                 if result.data is not None:
                     self.post_message(
                         DigestReady(
                             markdown=result.data,
                             digest_number=self._controller.digest_state.digest_count,
-                            is_final=is_final,
+                            is_final=False,
                         )
                     )
                 else:
@@ -425,6 +453,7 @@ class BaseApp(ShellScreen):
         if self._final_digest_started:
             return
         self._final_digest_started = True
+        self._final_attempted = True
         bar = self.query_one('#status-bar', StatusBar)
         bar.activity = 'Final digest...'
         generation = self._start_digest_generation()
@@ -442,7 +471,8 @@ class BaseApp(ShellScreen):
                             is_final=True,
                         )
                     )
-                    self.notify('Final digest ready. Press q to quit.', timeout=10)
+                    if not self._pending_quit:
+                        self.notify('Final digest ready. Press q to quit.', timeout=10)
                 else:
                     self.post_message(
                         DigestError(
@@ -450,11 +480,8 @@ class BaseApp(ShellScreen):
                             consecutive_failures=self._controller.digest_state.consecutive_failures,
                         )
                     )
-                    self.notify(
-                        'Final digest failed. Press q to quit.',
-                        severity='error',
-                        timeout=10,
-                    )
+                    if not self._pending_quit:
+                        self.notify('Final digest failed. Press q to quit.', severity='error', timeout=10)
             finally:
                 self._end_digest_generation(generation)
 
@@ -482,19 +509,40 @@ class BaseApp(ShellScreen):
                 log.debug('Auto-label generation failed', exc_info=True)
             finally:
                 self._label_running = False
+                self._continue_pending_quit()
 
         self.run_worker(_label_task, exclusive=True, group='label')
 
     # --- Actions ---
 
+    def needs_final_digest(self) -> bool:
+        """True when the session has notes to finish and AI notes are on."""
+        if self._missing_digest_models or self._final_digest_done:
+            return False
+        state = self._controller.digest_state
+        return bool(state.buffer) or state.digest_count > 0
+
+    def _ai_off(self, models: list[str], feature: str) -> bool:
+        if not models:
+            return False
+        self.notify(
+            f'{feature} are off for this session: {", ".join(models)} failed the start check. '
+            'The transcript is still recorded.',
+            severity='warning',
+            timeout=6,
+        )
+        return True
+
     def action_force_digest(self) -> None:
+        if self._ai_off(self._missing_digest_models, 'AI notes'):
+            return
         if self._digest_running:
             self.notify('Digest already in progress', severity='warning', timeout=3)
             return
         if not self._controller.digest_state.buffer:
             self.notify('Nothing in buffer to digest yet', timeout=3)
             return
-        self._run_digest_worker(is_final=False)
+        self._run_digest_worker()
 
     def action_rename_session(self) -> None:
         self.app.push_screen(
@@ -521,7 +569,7 @@ class BaseApp(ShellScreen):
                 self.notify(f'Session folder {new_name} already exists', severity='error', timeout=8)
                 return
             try:
-                self._output_dir.rename(new_path)
+                self._move_session_folder(new_path)
             except OSError as e:
                 log.error('Could not rename %s: %s', self._output_dir, e, exc_info=True)
                 self.notify(f'Could not rename the session folder: {e}', severity='error', timeout=8)
@@ -540,16 +588,21 @@ class BaseApp(ShellScreen):
         self.query_one('#header', Static).update(self._build_header_text())
         self.notify(f'Session: {safe_label}', timeout=3)
 
+    def _move_session_folder(self, new_path: Path) -> None:
+        self._output_dir.rename(new_path)
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         if event.text_area.id == 'context-input':
             self._controller.user_context = event.text_area.text
 
     def action_quick_action(self, key: str) -> None:
+        if self._ai_off(self._missing_interactive_models, 'Quick actions'):
+            return
         if self._digest_running:
-            self.notify('Digest in progress \u2014 please wait', severity='warning', timeout=3)
+            self.notify('Digest in progress, please wait', severity='warning', timeout=3)
             return
         if self._query_running:
-            self.notify('Quick action already running \u2014 please wait', severity='warning', timeout=3)
+            self.notify('Quick action already running, please wait', severity='warning', timeout=3)
             return
         self._run_query_worker(key)
 
