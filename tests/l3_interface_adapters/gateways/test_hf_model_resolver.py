@@ -52,6 +52,17 @@ class TestHfModelResolver:
 
         assert calls == [50]
 
+    def test_a_detail_listener_gets_the_bytes_instead_of_the_percent(self, tmp_path: Path):
+        percents: list[int] = []
+        details: list[AssetProgress] = []
+        resolver = HfModelResolver(on_progress=percents.append, store=StubStore(tmp_path / 'model.bin'))
+        resolver.on_detail = details.append
+
+        resolver.resolve('large-v3-turbo-q8_0')
+
+        assert details == [AssetProgress(downloaded=5, total=10)]
+        assert percents == []
+
     def test_custom_name_uses_store_resolve(self, tmp_path: Path):
         store = StubStore(tmp_path / 'model.bin')
         resolver = HfModelResolver(store=store)

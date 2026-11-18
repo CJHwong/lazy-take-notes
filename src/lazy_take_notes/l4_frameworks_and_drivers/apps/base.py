@@ -72,6 +72,8 @@ class BaseApp(ShellScreen):
     """Shared TUI shell — compose, digest/query routing, session management."""
 
     CSS_PATH = 'app.tcss'
+    # A recording or transcription runs here; the host's error toast says it continues.
+    hosts_session = True
     auto_digest: ClassVar[bool] = True
 
     BINDINGS = [

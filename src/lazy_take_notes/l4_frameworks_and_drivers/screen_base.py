@@ -106,8 +106,11 @@ class SessionHostApp(App):
         self._error_times.append(now)
         storm = len(self._error_times) > ERROR_BURST_LIMIT and now - self._error_times[0] <= ERROR_BURST_WINDOW_S
         if not storm:
+            # Settings and the pickers have no session to continue.
+            session = any(getattr(screen, 'hosts_session', False) for screen in self.screen_stack)
+            tail = ' The session continues.' if session else ''
             self.notify(
-                f'Unexpected error: {type(cause).__name__}: {cause} (see debug.log). The session continues.',
+                f'Unexpected error: {type(cause).__name__}: {cause} (see debug.log).{tail}',
                 severity='error',
                 timeout=15,
             )

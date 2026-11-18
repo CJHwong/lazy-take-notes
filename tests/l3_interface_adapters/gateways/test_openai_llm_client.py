@@ -105,6 +105,23 @@ class TestOpenAICompatLLMClient:
         assert 'Authentication failed' in err
 
     @patch('lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.openai.OpenAI')
+    def test_an_auth_failure_shows_the_server_message_not_the_json_body(self, mock_cls):
+        import openai as openai_lib
+
+        mock_client = MagicMock()
+        mock_cls.return_value = mock_client
+        body = {'error': {'message': 'Incorrect API key provided.', 'type': 'invalid_request_error', 'code': 'x'}}
+        mock_client.models.list.side_effect = openai_lib.AuthenticationError(
+            message=f'Error code: 401 - {body}',
+            response=MagicMock(status_code=401),
+            body=body,
+        )
+
+        ok, err = OpenAICompatLLMClient().check_connectivity()
+        assert ok is False
+        assert err == 'Authentication failed: Incorrect API key provided.'
+
+    @patch('lazy_take_notes.l3_interface_adapters.gateways.openai_llm_client.openai.OpenAI')
     def test_check_connectivity_network_failure(self, mock_cls):
         mock_client = MagicMock()
         mock_cls.return_value = mock_client

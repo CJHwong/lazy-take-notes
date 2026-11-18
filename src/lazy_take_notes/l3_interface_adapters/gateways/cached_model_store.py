@@ -7,7 +7,8 @@ import logging
 import os
 import shutil
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from lazy_take_notes.l1_entities.model_asset import (
     AssetStatus,
     ModelAsset,
 )
-from lazy_take_notes.l3_interface_adapters.gateways import model_catalog
+from lazy_take_notes.l3_interface_adapters.gateways import file_lock, model_catalog
 from lazy_take_notes.l3_interface_adapters.gateways.download_engine import (
+    DownloadCancelledError,
     DownloadError,
     HttpSession,
     download_file,
@@ -101,12 +103,16 @@ class CachedModelStore:
         on_progress: Callable[[AssetProgress], None] | None = None,
         cancel: threading.Event | None = None,
     ) -> Path:
-        with self._lock:
-            state = self.status(asset_id)
+        state = self.status(asset_id)
+        if state.status is AssetStatus.READY and state.path:
+            return Path(state.path)
+        # Only the file lock spans the download, so status() still answers the UI meanwhile.
+        with self._download_lock(state.asset, on_progress, cancel):
+            state = self.status(asset_id)  # another store or process may have finished it
             if state.status is AssetStatus.READY and state.path:
                 return Path(state.path)
             self._install_asset(state.asset, on_progress, cancel)
-            return self._entry_path(state.asset)
+        return self._entry_path(state.asset)
 
     def remove(self, asset_id: str) -> int:
         asset = self._require(asset_id)
@@ -212,14 +218,57 @@ class CachedModelStore:
             entry=filename,
             hf_repo=repo,
         )
-        with self._lock:
-            self._install_asset(asset, None, cancel)
+        with self._download_lock(asset, None, cancel):
+            entry = self._entry_path(asset)
+            if not entry.is_file():
+                self._install_asset(asset, None, cancel)
         return self._entry_path(asset)
+
+    @contextmanager
+    def _download_lock(
+        self,
+        asset: ModelAsset,
+        on_progress: Callable[[AssetProgress], None] | None,
+        cancel: threading.Event | None,
+    ) -> Generator[None]:
+        part = self._part_path(asset)
+        logged = False
+
+        def waiting() -> None:
+            nonlocal logged
+            if not logged:
+                log.info('waiting for another download of %s', asset.id)
+                logged = True
+            if on_progress is None:
+                return
+            try:
+                size = part.stat().st_size
+            except OSError:
+                return  # the other download just finished and renamed it
+            on_progress(AssetProgress(size, asset.size))
+
+        name = ''.join(char if char.isalnum() or char in '-_.' else '_' for char in asset.id)
+        try:
+            with file_lock.exclusive(
+                self._root / 'locks' / f'{name}.lock',
+                cancelled=lambda: cancel is not None and cancel.is_set(),
+                on_wait=waiting,
+            ):
+                yield
+        except InterruptedError as error:
+            raise DownloadCancelledError(str(error)) from error
+
+    def _part_path(self, asset: ModelAsset) -> Path:
+        if asset.archive:
+            return self._root / 'downloads' / f'{asset.url.rsplit("/", 1)[-1]}.part'
+        return Path(f'{self._entry_path(asset)}.part')
 
     def _preflight(self, asset: ModelAsset) -> None:
         if asset.size == 0:
             return
-        probe = self._root if self._root.exists() else self._root.parent
+        probe = self._root
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent  # a new Linux account may have no ~/.cache yet
         free = shutil.disk_usage(probe).free
         if free < asset.size + _DISK_MARGIN:
             raise DownloadError(
@@ -274,15 +323,18 @@ class CachedModelStore:
     def _record(self, asset: ModelAsset, digest: str) -> None:
         entry = self._entry_path(asset)
         stat = entry.stat()
-        self._state[asset.id] = {
-            'path': self._relative(entry),
-            'size': stat.st_size,
-            'mtime_ns': stat.st_mtime_ns,
-            'sha256': digest,
-            'source': asset.url,
-            'version': asset.version,
-        }
-        self._save_state()
+        with self._lock:
+            # Another store or process may have recorded assets since this one loaded the file.
+            self._state = {**self._load_state(), **self._state}
+            self._state[asset.id] = {
+                'path': self._relative(entry),
+                'size': stat.st_size,
+                'mtime_ns': stat.st_mtime_ns,
+                'sha256': digest,
+                'source': asset.url,
+                'version': asset.version,
+            }
+            self._save_state()
 
     def _load_state(self) -> dict:
         try:
@@ -301,7 +353,8 @@ class CachedModelStore:
             'updated': datetime.now(UTC).isoformat(timespec='seconds'),
             'assets': self._state,
         }
-        temporary = self._state_path.with_suffix('.json.tmp')
+        # One temporary file per writer, so two processes never replace each other's half-written file.
+        temporary = self._state_path.with_name(f'state.json.{os.getpid()}.{threading.get_ident()}.tmp')
         temporary.write_text(json.dumps(payload, indent=2), encoding='utf-8')
         os.replace(temporary, self._state_path)
 

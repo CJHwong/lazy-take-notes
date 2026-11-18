@@ -13,8 +13,9 @@ from textual.widgets import Button
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader as loader_mod
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_config_writer as writer_mod
 from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, AssetStatus, ModelAsset
+from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError
 from lazy_take_notes.l4_frameworks_and_drivers.apps.config import ConfigApp
-from lazy_take_notes.l4_frameworks_and_drivers.apps.config.models_tab import ModelChoiceRow
+from lazy_take_notes.l4_frameworks_and_drivers.apps.config.models_tab import ModelChoiceRow, ModelsTab
 
 ASSET = ModelAsset(
     id='tiny',
@@ -89,7 +90,7 @@ class TestModelsTab:
             await app.workers.wait_for_complete()
             row = app.query_one('#choice-tiny', ModelChoiceRow)
             assert row.asset is ASSET
-            assert app.query_one('#status-tiny').render().plain == 'Ready'
+            assert str(app.query_one('#status-tiny').render()) == 'Ready'
 
     async def test_missing_asset_shows_download(self, app_factory):
         app, _store = app_factory(AssetStatus.MISSING)
@@ -120,7 +121,7 @@ class TestModelsTab:
             await app.workers.wait_for_complete()
 
             assert store.installs == ['tiny']
-            assert app.query_one('#status-tiny').render().plain == 'Ready'
+            assert str(app.query_one('#status-tiny').render()) == 'Ready'
 
     async def test_remove_asks_for_confirmation(self, app_factory):
         app, store = app_factory(AssetStatus.READY)
@@ -136,7 +137,7 @@ class TestModelsTab:
             await app.workers.wait_for_complete()
 
             assert store.removes == ['tiny']
-            assert app.query_one('#status-tiny').render().plain == 'Missing'
+            assert str(app.query_one('#status-tiny').render()) == 'Missing'
 
     async def test_default_model_row_shows_size_and_purpose(self, app_factory):
         app, _store = app_factory(AssetStatus.MISSING)
@@ -164,3 +165,241 @@ class TestModelsTabFaults:
             await app.workers.wait_for_complete()
             await pilot.pause()
             assert any('Cannot read the model cache' in str(n.message) for n in app.app._notifications)
+
+
+SPEAKER_ASSETS = [
+    replace(ASSET, id='nemo-runtime', label='Speaker runtime', group='speakers', size=200),
+    replace(ASSET, id='nemotron-3-diarization', label='Speaker model', group='speakers', size=300),
+]
+
+
+class SpeakerStore(FakeStore):
+    """A catalog with one speech model and both speaker assets, all missing."""
+
+    def __init__(self) -> None:
+        super().__init__(AssetStatus.MISSING)
+        self._states = {asset.id: AssetState(asset, AssetStatus.MISSING) for asset in [ASSET, *SPEAKER_ASSETS]}
+        self.progress_reports = 0
+
+    def catalog(self) -> list[ModelAsset]:
+        return [ASSET, *SPEAKER_ASSETS]
+
+    def list_assets(self) -> list[AssetState]:
+        return list(self._states.values())
+
+    def status(self, asset_id: str) -> AssetState:
+        return self._states[asset_id]
+
+    def install(self, asset_id, on_progress=None, cancel=None) -> Path:
+        self.installs.append(asset_id)
+        state = self._states[asset_id]
+        if on_progress is not None:
+            on_progress(AssetProgress(state.asset.size // 2, state.asset.size, 1_000_000))
+            self.progress_reports += 1
+        self._states[asset_id] = replace(state, status=AssetStatus.READY, path=f'/tmp/{asset_id}')
+        return Path(f'/tmp/{asset_id}')
+
+
+class TestSpeakerAssets:
+    async def test_install_downloads_both_assets_and_shows_ready(self, app_factory):
+        store = SpeakerStore()
+        app = ConfigApp(asset_store=store)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#speaker-install', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert sorted(store.installs) == ['nemo-runtime', 'nemotron-3-diarization']
+            assert store.progress_reports == 2
+            assert str(app.query_one('.speaker-status').render()).startswith('Ready')
+            assert not [n for n in app.app._notifications if n.severity == 'error']
+
+    async def test_download_all_missing_installs_every_asset(self, app_factory):
+        store = SpeakerStore()
+        app = ConfigApp(asset_store=store)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#models-download-all', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+            assert sorted(store.installs) == ['nemo-runtime', 'nemotron-3-diarization', 'tiny']
+            assert str(app.query_one('#status-tiny').render()) == 'Ready'
+            assert not [n for n in app.app._notifications if n.severity == 'error']
+
+    async def test_speaker_progress_shows_in_the_status(self, app_factory):
+        store = SpeakerStore()
+        app = ConfigApp(asset_store=store)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tab = app.query_one('#section-models', ModelsTab)
+            tab.post_message(tab.Started('nemo-runtime'))
+            tab.post_message(tab.Progress('nemo-runtime', AssetProgress(100, 200, 0)))
+            await pilot.pause()
+            assert 'Downloading' in str(app.query_one('.speaker-status').render())
+            assert app.query_one('#speaker-install').display is False
+
+
+class TestLeavingDuringADownload:
+    async def test_closing_settings_cancels_a_running_download(self, app_factory):
+        app, store = app_factory(AssetStatus.MISSING)
+        started = threading.Event()
+        seen: list[threading.Event] = []
+
+        def slow_install(asset_id, on_progress=None, cancel=None):
+            assert cancel is not None
+            seen.append(cancel)
+            started.set()
+            cancel.wait(5)
+            raise DownloadCancelledError('download cancelled')
+
+        store.install = slow_install
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#download-tiny', Button).press()
+            await pilot.pause()
+            assert started.wait(2)
+        assert seen[0].is_set()
+
+    async def test_two_fast_presses_start_one_download(self, app_factory):
+        app, store = app_factory(AssetStatus.MISSING)
+        release = threading.Event()
+        original = store.install
+
+        def held_install(asset_id, on_progress=None, cancel=None):
+            release.wait(5)
+            return original(asset_id, on_progress, cancel)
+
+        store.install = held_install
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tab = app.query_one('#section-models', ModelsTab)
+            tab._start_download('tiny')
+            tab._start_download('tiny')
+            release.set()
+            await app.workers.wait_for_complete()
+            assert store.installs == ['tiny']
+
+
+class TestErrorToastInSettings:
+    async def test_an_error_in_settings_does_not_mention_a_session(self, app_factory):
+        app, _store = app_factory(AssetStatus.READY)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            app.call_later(lambda: 1 / 0)
+            await pilot.pause()
+            await pilot.pause()
+            messages = [str(n.message) for n in app.app._notifications if n.severity == 'error']
+            assert any('ZeroDivisionError' in message for message in messages)
+            assert not any('session' in message for message in messages)
+
+
+class TestRemoveDialogKeys:
+    async def test_enter_in_the_remove_dialog_keeps_the_model(self, app_factory):
+        app, store = app_factory(AssetStatus.READY)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#remove-tiny', Button).press()
+            await pilot.pause()
+            await pilot.press('enter')
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            assert store.removes == []
+
+
+class TestRowProgress:
+    async def test_a_download_shows_size_speed_and_time_left(self, app_factory):
+        app, _store = app_factory(AssetStatus.MISSING)
+        megabyte = 1024 * 1024
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tab = app.query_one('#section-models', ModelsTab)
+            tab.post_message(tab.Started('tiny'))
+            tab.post_message(tab.Progress('tiny', AssetProgress(13 * megabyte, 1536 * megabyte, 2 * megabyte)))
+            await pilot.pause()
+            assert str(app.query_one('#status-tiny').render()) == 'Downloading'
+            detail = str(app.query_one('#detail-tiny').render())
+            assert detail == '13 MB of 1.5 GB (0%), 2.0 MB/s, about 13 min left'
+
+    async def test_cancel_says_how_much_is_kept(self, app_factory):
+        app, _store = app_factory(AssetStatus.MISSING)
+        megabyte = 1024 * 1024
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tab = app.query_one('#section-models', ModelsTab)
+            tab.post_message(tab.Started('tiny'))
+            tab.post_message(tab.Progress('tiny', AssetProgress(134 * megabyte, 1536 * megabyte, 2 * megabyte)))
+            tab.post_message(tab.Cancelled('tiny'))
+            await pilot.pause()
+            assert str(app.query_one('#status-tiny').render()) == 'Paused'
+            assert str(app.query_one('#detail-tiny').render()) == '134 MB kept. Download continues from there.'
+            assert app.query_one('#download-tiny').display is True
+
+
+class TestSpeakerCancel:
+    async def test_cancel_stops_both_speaker_downloads(self, app_factory):
+        store = SpeakerStore()
+        app = ConfigApp(asset_store=store)
+        seen: list[threading.Event] = []
+        started = threading.Event()
+
+        def slow_install(asset_id, on_progress=None, cancel=None):
+            assert cancel is not None
+            seen.append(cancel)
+            if len(seen) == 2:
+                started.set()
+            cancel.wait(5)
+            raise DownloadCancelledError('download cancelled')
+
+        store.install = slow_install
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#speaker-install', Button).press()
+            await pilot.pause()
+            assert started.wait(2)
+            cancel = app.query_one('#speaker-cancel', Button)
+            assert cancel.display is True
+            cancel.press()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert all(event.is_set() for event in seen)
+            assert str(app.query_one('.speaker-status').render()) == 'Missing'
+            assert cancel.display is False
+
+
+class TestLoadDuringADownload:
+    async def test_the_first_state_load_keeps_a_running_download(self, app_factory):
+        app, _store = app_factory(AssetStatus.MISSING)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tab = app.query_one('#section-models', ModelsTab)
+            tab._cancel['tiny'] = threading.Event()  # a download is running
+            tab.post_message(tab.Started('tiny'))
+            tab.post_message(tab.Loaded([AssetState(ASSET, AssetStatus.MISSING)]))
+            await pilot.pause()
+            assert str(app.query_one('#status-tiny').render()) == 'Downloading'
+            assert app.query_one('#cancel-tiny').display is True

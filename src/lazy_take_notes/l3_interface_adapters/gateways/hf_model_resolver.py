@@ -42,6 +42,9 @@ class HfModelResolver:
         self._store = store or CachedModelStore()
         # Set by the caller to stop a download; the partial file is kept for the next try.
         self.cancel: threading.Event | None = None
+        # Set by a caller that shows bytes, speed and time left. It replaces the percent callback,
+        # which stays an int for plugin resolvers.
+        self.on_detail: Callable[[AssetProgress], None] | None = None
 
     def resolve(self, model_name: str) -> str:
         asset = asset_for_model(model_name)
@@ -50,6 +53,9 @@ class HfModelResolver:
         return self._store.resolve(model_name, cancel=self.cancel)
 
     def _report(self, progress: AssetProgress) -> None:
+        if self.on_detail is not None:
+            self.on_detail(progress)
+            return
         if self._on_progress is None or progress.total <= 0:
             return
         self._on_progress(min(int(progress.downloaded * 100 / progress.total), 100))

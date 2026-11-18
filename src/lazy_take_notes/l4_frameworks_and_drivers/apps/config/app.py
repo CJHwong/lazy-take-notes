@@ -5,13 +5,16 @@ from __future__ import annotations
 import copy
 import logging
 import subprocess  # noqa: S404 -- used for launching $EDITOR, not shell commands
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
+from textual import on
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -24,6 +27,7 @@ from textual.widgets import (
     TextArea,
 )
 
+from lazy_take_notes.l1_entities.model_asset import AssetProgress
 from lazy_take_notes.l2_use_cases.ports.asset_store import ModelAdminStore
 from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
 from lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader import YamlConfigLoader, deep_merge
@@ -52,11 +56,31 @@ from lazy_take_notes.l4_frameworks_and_drivers.container import (
     TRANSCRIPTION_PROVIDERS_GROUP,
     DependencyContainer,
 )
+from lazy_take_notes.l4_frameworks_and_drivers.download_progress import describe
+from lazy_take_notes.l4_frameworks_and_drivers.preflight import FAIL, PASS, Check, check_ai
 from lazy_take_notes.l4_frameworks_and_drivers.screen_base import ShellScreen
 
 # ── Theme preview ─────────────────────────────────────────────────────────────
 
 log = logging.getLogger('ltn.config')
+
+_MEGABYTE = 1024 * 1024
+
+
+class _FromWorker(Message):
+    """Run a UI update on the event loop. A thread worker posts it and never waits for the loop."""
+
+    def __init__(self, update: Callable[..., None], *args: object) -> None:
+        super().__init__()
+        self.update = update
+        self.args = args
+
+
+# Keys the form fully owns. A blank or removed entry in the form deletes the key from config.yaml.
+_FORM_OWNED = (
+    ('transcription', 'models'),
+    ('digest', 'max_lines'),
+)
 
 
 class ConfigApp(ShellScreen):
@@ -271,7 +295,7 @@ class ConfigApp(ShellScreen):
                 text = ', '.join(name for name, _size in models) or 'No models installed.'
         except Exception as exc:  # noqa: BLE001 -- surface the server error in the tab
             text = f'Cannot list models: {exc}'
-        self.app.call_from_thread(self._set_ollama_models, text)
+        self.post_message(_FromWorker(self._set_ollama_models, text))
 
     def _set_ollama_models(self, text: str) -> None:
         self.query_one('#cfg-ollama-models', Static).update(text)
@@ -297,14 +321,19 @@ class ConfigApp(ShellScreen):
                 raise RuntimeError('This provider cannot pull models.')
 
             def report(event) -> None:
-                status = getattr(event, 'status', '')
-                self.app.call_from_thread(self._set_ollama_models, f'Pulling {model}: {status}')
+                status = getattr(event, 'status', '') or ''
+                completed = getattr(event, 'completed', None) or 0
+                total = getattr(event, 'total', None) or 0
+                # Ollama names a layer by its hash; the bytes say how far the pull is.
+                # A layer of a few KB would read "0 MB of 0 MB", so it keeps the status.
+                text = describe(AssetProgress(completed, total)) if total >= _MEGABYTE else status
+                self.post_message(_FromWorker(self._set_ollama_models, f'Pulling {model}: {text}'))
 
             pull(model, on_progress=report)
         except Exception as exc:  # noqa: BLE001 -- surface the server error in the tab
-            self.app.call_from_thread(self._pull_failed, model, str(exc))
+            self.post_message(_FromWorker(self._pull_failed, model, str(exc)))
         else:
-            self.app.call_from_thread(self._pull_done, model)
+            self.post_message(_FromWorker(self._pull_done, model))
 
     def _pull_failed(self, model: str, error: str) -> None:
         self.query_one('#cfg-ollama-models', Static).update(f'Pull failed: {error}')
@@ -319,7 +348,16 @@ class ConfigApp(ShellScreen):
         custom = self.query_one('#cfg-trans-custom-path', Input).value.strip()
         if custom:
             return custom
-        return self.query_one(ModelsTab).model_value()
+        value = self.query_one(ModelsTab).model_value()
+        # A saved custom path the user cleared must not come back from the file.
+        return '' if Path(value).is_absolute() else value
+
+    def _model_error(self, model: str) -> str | None:
+        if not model:
+            return 'Choose a speech model, or enter the path of a model file.'
+        if Path(model).is_absolute() and not Path(model).is_file():
+            return f'Model file not found: {model}'
+        return None
 
     def _input_device(self) -> str | None:
         value = str(self.query_one('#cfg-audio-device', Select).value)
@@ -428,6 +466,10 @@ class ConfigApp(ShellScreen):
             'plugin-model-note',
         )
 
+    def _plugin_manages_transcription(self) -> bool:
+        provider = str(self.query_one('#cfg-trans-provider', Select).value)
+        return plugin_manages_models(provider, TRANSCRIPTION_PROVIDERS_GROUP, BUILTIN_TRANSCRIPTION_PROVIDERS)
+
     def _sync_transcription_model_fields_visibility(self, provider: str) -> None:
         hide = plugin_manages_models(provider, TRANSCRIPTION_PROVIDERS_GROUP, BUILTIN_TRANSCRIPTION_PROVIDERS)
         self.query_one('#models-transcription-fields').display = not hide
@@ -453,9 +495,13 @@ class ConfigApp(ShellScreen):
             self.notify('\n'.join(errors), severity='error', timeout=10)
             return
         data = self._collect_form_data()
+        model_error = self._model_error(data['transcription']['model'])
+        if model_error and not self._plugin_manages_transcription():
+            self.notify(model_error, severity='error', markup=False, timeout=8)
+            return
         if data['diarization']['enabled'] and not data['output']['save_audio']:
             self.notify(
-                'Speaker labels need Save Audio Recording turned on.',
+                'Speaker labels need Save audio turned on.',
                 severity='error',
                 timeout=8,
             )
@@ -468,28 +514,29 @@ class ConfigApp(ShellScreen):
             return
 
         try:
-            path = write_config(data, self._config_path)
+            path = write_config(data, self._config_path, owned=_FORM_OWNED)
         except (OSError, yaml.YAMLError) as exc:
             log.error('Cannot save config: %s', exc, exc_info=True)
             self.notify(f'Cannot save config: {exc}', severity='error', markup=False, timeout=10)
             return
         self._saved = True
         self._clear_api_key = False
+        self.query_one('#cfg-openai-clear-key', Button).display = bool(data['openai'].get('api_key'))
         self._baseline = self._collect_form_data()
         self.notify(f'Saved to {path}', severity='information')
 
     def _numeric_errors(self) -> list[str]:
         """Reject a non-numeric or out-of-range field instead of storing 0."""
         checks = (
-            ('#cfg-trans-chunk', 'Chunk Duration', 'float', 0.0, None),
+            ('#cfg-trans-chunk', 'Chunk duration', 'float', 0.0, None),
             ('#cfg-trans-overlap', 'Overlap', 'float', 0.0, None),
-            ('#cfg-trans-silence', 'Silence Threshold', 'float', 0.0, 1.0),
-            ('#cfg-trans-pause', 'Pause Duration', 'float', 0.0, None),
-            ('#cfg-digest-min-lines', 'Minimum Lines', 'int', 1, None),
-            ('#cfg-digest-min-interval', 'Minimum Interval', 'float', 0.0, None),
-            ('#cfg-digest-compact', 'Compaction Threshold', 'int', 1, None),
-            ('#cfg-digest-max-lines', 'Force After Lines', 'int', 1, None),
-            ('#cfg-diarization-interval', 'Diarization Interval', 'float', 0.0, None),
+            ('#cfg-trans-silence', 'Silence threshold', 'float', 0.0, 1.0),
+            ('#cfg-trans-pause', 'Pause duration', 'float', 0.0, None),
+            ('#cfg-digest-min-lines', 'After lines', 'int', 1, None),
+            ('#cfg-digest-min-interval', 'Wait seconds', 'float', 0.0, None),
+            ('#cfg-digest-compact', 'Compaction threshold', 'int', 1, None),
+            ('#cfg-digest-max-lines', 'Force after', 'int', 1, None),
+            ('#cfg-diarization-interval', 'Update every', 'float', 0.0, None),
         )
         errors: list[str] = []
         for widget_id, label, kind, minimum, maximum in checks:
@@ -526,11 +573,26 @@ class ConfigApp(ShellScreen):
             self.notify(str(exc), severity='error', timeout=8)
             return
 
-        ok, err = client.check_connectivity()
-        if ok:
-            self.notify('Connection OK', severity='information')
-        else:
-            self.notify(f'Connection failed: {err}', severity='error', timeout=8)
+        # The check waits on the network and a model reply; on the event loop it froze Settings.
+        models = [data['digest']['model'], data['interactive']['model']]
+        self.notify('Testing the AI: connection, models, one short reply...', timeout=4)
+        self.run_worker(lambda: self._test_ai_worker(client, infra.llm_provider, models), thread=True, group='ai-test')
+
+    def _test_ai_worker(self, client, provider: str, models: list[str]) -> None:
+        check = Check('ai', 'AI')
+        try:
+            check_ai(check, client, provider, models, lambda _text: None)
+        except Exception as exc:  # noqa: BLE001 -- a plugin client can raise anything; report it
+            log.error('AI test failed: %s', exc, exc_info=True)
+            check.set(FAIL, f'{type(exc).__name__}: {exc}', '')
+        self.post_message(_FromWorker(self._ai_tested, check))
+
+    def _ai_tested(self, check) -> None:
+        if check.status == PASS:
+            self.notify(f'AI works: {check.detail}', severity='information', markup=False, timeout=6)
+            return
+        text = f'{check.detail.rstrip(".")}. {check.fix}' if check.fix else check.detail
+        self.notify(text, severity='error', markup=False, timeout=12)
 
     def _config_file(self) -> Path:
         return self._config_path or config_file_path()
@@ -631,9 +693,24 @@ class ConfigApp(ShellScreen):
         """True when the form no longer matches the values loaded or last saved."""
         return self._baseline is not None and self._collect_form_data() != self._baseline
 
+    @on(_FromWorker)
+    def _run_from_worker(self, message: _FromWorker) -> None:
+        message.update(*message.args)
+
     def action_quit_app(self) -> None:
         if isinstance(self.app.screen, _DiscardChangesModal):
             self.app.screen.dismiss(False)
+            return
+        open_select = next((select for select in self.query(Select) if select.expanded), None)
+        if open_select is not None:
+            # Esc closes an open dropdown, as it does everywhere else.
+            open_select.expanded = False
+            open_select.focus()
+            return
+        nav = self.query_one('#cfg-nav', ListView)
+        if self.app.screen is self and self.focused not in (None, nav):
+            # Inside a page, Esc goes back to the page list; from the list, it leaves.
+            nav.focus()
             return
         if self._has_unsaved_changes():
             self.app.push_screen(_DiscardChangesModal(), self._after_discard_prompt)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import threading
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -342,3 +343,35 @@ class TestNeverCrashes:
         _run(plan, mic=mic, system=system)
         assert mic.close_calls == 1
         assert system.close_calls == 1
+
+
+class TestDownloadProgress:
+    def test_the_first_download_shows_size_speed_and_time_left(self, plan):
+        from lazy_take_notes.l1_entities.model_asset import AssetProgress
+        from lazy_take_notes.l3_interface_adapters.gateways.hf_model_resolver import HfModelResolver
+        from lazy_take_notes.l4_frameworks_and_drivers import preflight
+
+        megabyte = 1024 * 1024
+
+        class Store:
+            def install(self, asset_id, on_progress=None, cancel=None):
+                assert on_progress is not None
+                on_progress(AssetProgress(143 * megabyte, 834 * megabyte, 2.3 * megabyte))
+                return Path('/tmp/model.bin')
+
+            def resolve(self, name, cancel=None):
+                return name
+
+        plan.config = plan.config.model_copy(
+            update={
+                'transcription': plan.config.transcription.model_copy(
+                    update={'model': 'large-v3-turbo-q8_0', 'models': {}}
+                )
+            }
+        )
+        plan.model_resolver_factory = lambda on_progress: HfModelResolver(on_progress, store=Store())
+        updates: list[str] = []
+        check = preflight.Check('whisper', 'Speech model')
+        preflight._check_whisper(check, plan, updates.append)  # noqa: SLF001 -- the live text is not kept in the report
+
+        assert 'Downloading large-v3-turbo-q8_0: 143 MB of 834 MB (17%), 2.3 MB/s, about 5 min left' in updates

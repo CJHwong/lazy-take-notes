@@ -42,7 +42,7 @@ class OpenAICompatLLMClient:
             client.models.list()
             return True, ''
         except openai.AuthenticationError as e:
-            return False, f'Authentication failed: {e}'
+            return False, f'Authentication failed: {_server_message(e)}'
         except Exception as e:
             return False, f'Cannot connect to OpenAI-compatible API: {e}'
 
@@ -63,3 +63,14 @@ class OpenAICompatLLMClient:
             return missing
         except Exception:
             return []
+
+
+def _server_message(error: openai.APIStatusError) -> str:
+    """The server's own sentence. str(error) holds the whole JSON body."""
+    body = error.body
+    if isinstance(body, dict):
+        inner = body.get('error', body)
+        message = inner.get('message') if isinstance(inner, dict) else None
+        if isinstance(message, str) and message:
+            return message
+    return error.message

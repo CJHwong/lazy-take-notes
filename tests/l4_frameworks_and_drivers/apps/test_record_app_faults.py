@@ -365,6 +365,7 @@ class TestCrashCapture:
 
                 assert app.app.is_running
                 assert any('ZeroDivisionError' in notice for notice in _notices(app))
+                assert any('The session continues.' in notice for notice in _notices(app))
 
         records = [record for record in caplog.records if record.levelno == logging.CRITICAL]
         assert records[0].exc_info[0] is ZeroDivisionError

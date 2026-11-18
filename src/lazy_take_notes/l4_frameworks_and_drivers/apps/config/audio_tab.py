@@ -242,8 +242,14 @@ class AudioTab(SettingsSection):
         self.notify(f'Audio test failed: {message.error}', severity='error', timeout=10)
 
     def _set_running(self, running: bool) -> None:
-        self.query_one('#audio-start', Button).disabled = running
-        self.query_one('#audio-stop', Button).disabled = not running
+        start = self.query_one('#audio-start', Button)
+        stop = self.query_one('#audio-stop', Button)
+        # A disabled button drops focus. Hand it to the other button, so Enter works again.
+        had_focus = self.screen.focused in (start, stop)
+        start.disabled = running
+        stop.disabled = not running
+        if had_focus:
+            (stop if running else start).focus()
 
     @staticmethod
     def _open_privacy(pane: str) -> None:

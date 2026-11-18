@@ -301,3 +301,117 @@ class TestState:
 
         with pytest.raises(DownloadCancelledError, match='cancel'):
             store.install(ASSET.id, cancel=cancel)
+
+
+class HeldSession(FakeSession):
+    """Blocks inside the download until released, so a test can act mid-download."""
+
+    def __init__(self, body: bytes) -> None:
+        super().__init__(body)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def get(self, url: str, **kwargs) -> FakeResponse:
+        self.entered.set()
+        assert self.release.wait(5)
+        return super().get(url, **kwargs)
+
+
+class TestTwoDownloadsOfOneAsset:
+    """Two stores share one cache: the preflight and Settings, or two processes."""
+
+    def test_the_second_waits_and_reuses_the_first_download(self, tmp_path: Path):
+        first_session = HeldSession(BODY)
+        second_session = FakeSession(BODY)
+        first = make_store(tmp_path, first_session)
+        second = make_store(tmp_path, second_session)
+        results: list[str] = []
+        worker = threading.Thread(target=lambda: results.append(str(first.install('tiny'))))
+        worker.start()
+        assert first_session.entered.wait(5)
+
+        waiting = threading.Thread(target=lambda: results.append(str(second.install('tiny'))))
+        waiting.start()
+        waiting.join(0.5)
+        assert waiting.is_alive()  # it waits for the first download instead of writing the same .part
+
+        first_session.release.set()
+        worker.join(5)
+        waiting.join(5)
+        assert second_session.calls == 0
+        assert len(results) == 2 and results[0] == results[1]
+        assert second.status('tiny').status is AssetStatus.READY
+
+    def test_a_cancel_while_waiting_stops_the_wait(self, tmp_path: Path):
+        first_session = HeldSession(BODY)
+        first = make_store(tmp_path, first_session)
+        second = make_store(tmp_path, FakeSession(BODY))
+        worker = threading.Thread(target=lambda: first.install('tiny'))
+        worker.start()
+        assert first_session.entered.wait(5)
+
+        cancel = threading.Event()
+        errors: list[BaseException] = []
+
+        def wait_then_cancel() -> None:
+            try:
+                second.install('tiny', cancel=cancel)
+            except BaseException as error:  # noqa: BLE001 -- the test inspects it
+                errors.append(error)
+
+        waiting = threading.Thread(target=wait_then_cancel)
+        waiting.start()
+        cancel.set()
+        waiting.join(5)
+        assert not waiting.is_alive()
+        assert isinstance(errors[0], DownloadCancelledError)
+        first_session.release.set()
+        worker.join(5)
+
+    def test_status_answers_while_a_download_runs(self, tmp_path: Path):
+        session = HeldSession(BODY)
+        store = make_store(tmp_path, session)
+        worker = threading.Thread(target=lambda: store.install('tiny'))
+        worker.start()
+        assert session.entered.wait(5)
+
+        answer: list[AssetStatus] = []
+        probe = threading.Thread(target=lambda: answer.append(store.status('tiny').status))
+        probe.start()
+        probe.join(1)
+        session.release.set()
+        worker.join(5)
+        assert answer == [AssetStatus.MISSING]  # the UI thread did not wait for the download
+
+
+class TestFirstDownloadOnANewAccount:
+    def test_a_missing_cache_parent_still_checks_the_disk(self, tmp_path: Path):
+        store = CachedModelStore(
+            tmp_path / 'home' / '.cache' / 'lazy-take-notes', assets={ASSET.id: ASSET}, session=FakeSession(BODY)
+        )
+        path = store.install('tiny')
+        assert path.read_bytes() == BODY
+
+
+class TestSharedStateFile:
+    def test_a_second_store_keeps_the_first_store_s_record(self, tmp_path: Path):
+        other_body = b'other-model'
+        other = replace(
+            ASSET,
+            id='other',
+            url='https://example.test/other.bin',
+            size=len(other_body),
+            sha256=hashlib.sha256(other_body).hexdigest(),
+            subdir='whisper/other',
+            entry='other.bin',
+        )
+        assets = {ASSET.id: ASSET, other.id: other}
+        first = make_store(tmp_path, FakeSession(BODY), assets=assets)
+        second = make_store(tmp_path, FakeSession(other_body), assets=assets)  # loaded before the first install
+
+        first.install('tiny')
+        second.install('other')
+
+        state = json.loads((tmp_path / 'cache' / 'state.json').read_text())
+        assert set(state['assets']) == {'tiny', 'other'}
+        assert not list((tmp_path / 'cache').glob('*.tmp'))
