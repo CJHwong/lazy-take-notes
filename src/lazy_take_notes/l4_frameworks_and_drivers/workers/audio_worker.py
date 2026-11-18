@@ -109,8 +109,16 @@ class _RecoveringWav:
     not stop.
     """
 
-    def __init__(self, output_dir: Path, sample_rate: int, on_notice: Callable[[str], None] | None) -> None:
+    def __init__(
+        self,
+        output_dir: Path,
+        sample_rate: int,
+        on_notice: Callable[[str], None] | None,
+        keep_files: Callable[[], bool] | None = None,
+    ) -> None:
         self._dir = output_dir
+        self._keep_files = keep_files
+        self._paths: list[Path] = []
         self._sample_rate = sample_rate
         self._notice = on_notice
         self._wav: _StreamingWavWriter | None = None
@@ -134,6 +142,16 @@ class _RecoveringWav:
         if self._backlog:
             lost = self._backlog_bytes / (self._sample_rate * 2)
             log.error('The disk still fails at the end of the session; %.0f s of audio was not saved', lost)
+        if self._keep_files is not None and not self._keep_files():
+            self._delete_files()
+
+    def _delete_files(self) -> None:
+        for path in self._paths:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                log.warning('Could not delete %s', path, exc_info=True)
+        log.info('save_audio is off and nothing failed; deleted the session audio')
 
     def _flush(self) -> None:
         try:
@@ -159,7 +177,9 @@ class _RecoveringWav:
         while path.exists():
             path = self._dir / f'recording_{number}.wav'
             number += 1
-        return _StreamingWavWriter(path, self._sample_rate)
+        wav = _StreamingWavWriter(path, self._sample_rate)
+        self._paths.append(path)
+        return wav
 
     def _hold(self, pcm: bytes) -> None:
         self._backlog.append(pcm)
@@ -201,15 +221,17 @@ def _start_processed_recorder(
     output_dir: Path,
     sample_rate: int,
     on_error: Callable[[str], None] | None = None,
+    keep_files: Callable[[], bool] | None = None,
 ) -> tuple[queue.Queue, threading.Thread]:
     """Write processed float32 chunks (system/mixed audio) to a WAV file.
 
     Send None into the returned queue to signal the writer to flush and close.
     The writer always drains the queue, so the unbounded queue cannot grow while
-    the disk fails. *on_error* hears when the recording pauses and resumes.
+    the disk fails. *on_error* hears when the recording pauses and resumes. When
+    *keep_files* returns False at the end, the writer deletes the files it wrote.
     """
     rec_q: queue.Queue[np.ndarray | None] = queue.Queue()
-    recording = _RecoveringWav(output_dir, sample_rate, on_error)
+    recording = _RecoveringWav(output_dir, sample_rate, on_error, keep_files)
 
     def _writer() -> None:
         while True:
@@ -289,6 +311,34 @@ def _report_health(
     return current
 
 
+class _UnsavedAudio:
+    """With save_audio off, the session audio is still written, then deleted at a clean end.
+
+    A failure keeps it: the audio is then the only full record of the meeting.
+    A crash keeps it too, because nothing runs to delete it.
+    """
+
+    def __init__(self, save_audio: bool, post_message: Callable) -> None:
+        self.keep = save_audio
+        self._post_message = post_message
+
+    def keep_because(self, reason: str) -> None:
+        if self.keep:
+            return
+        self.keep = True
+        log.warning('save_audio is off, but %s; keeping the session audio', reason)
+        message = (
+            f'save_audio is off, but {reason}. The audio of this meeting is kept in recording.wav, '
+            'so you can transcribe it later.'
+        )
+        self._post_message(AudioWorkerStatus(status='warning', error=message))
+
+    def notice(self, message: str) -> None:
+        """Disk notices about audio the user turned off would only confuse; the log keeps them."""
+        if self.keep:
+            self._post_message(AudioWorkerStatus(status='warning', error=message))
+
+
 class _NoTranscription:
     """Stands in for a speech model that failed to load, so the audio still records."""
 
@@ -322,6 +372,8 @@ def run_audio_worker(
 
     Designed to run inside a Textual @work(thread=True) worker.
     """
+    unsaved = _UnsavedAudio(save_audio, post_message)
+
     # Load model
     post_message(AudioWorkerStatus(status='loading_model'))
     try:
@@ -340,6 +392,7 @@ def run_audio_worker(
         transcriber = _NoTranscription()
         message = f'Speech model failed to load: {e}. Recording audio only; run transcribe on the recording later.'
         post_message(AudioWorkerStatus(status='warning', error=message))
+        unsaved.keep_because('the speech model failed to load')
     post_message(AudioWorkerStatus(status='model_ready'))
 
     # Resolve audio source — default to SounddeviceAudioSource when not injected
@@ -395,6 +448,7 @@ def run_audio_worker(
                 post_message(TranscriptChunk(segments=new_segs))
         except Exception as e:
             log.error('Transcription failed: %s', e, exc_info=True)
+            unsaved.keep_because('a transcription failed')
             post_message(AudioWorkerStatus(status='error', error=str(e)))
         finally:
             _transcript_future = None
@@ -403,12 +457,13 @@ def run_audio_worker(
 
     proc_rec_q: queue.Queue | None = None
     proc_rec_writer: threading.Thread | None = None
-    if save_audio and output_dir:
+    if output_dir:  # with save_audio off too, see _UnsavedAudio
         try:
             proc_rec_q, proc_rec_writer = _start_processed_recorder(
                 output_dir,
                 SAMPLE_RATE,
-                on_error=lambda error: post_message(AudioWorkerStatus(status='warning', error=error)),
+                on_error=unsaved.notice,
+                keep_files=lambda: unsaved.keep,
             )
         except Exception:  # noqa: S110 -- best-effort; recording continues without save  # pragma: no cover
             pass
@@ -446,6 +501,7 @@ def run_audio_worker(
                                         e,
                                         exc_info=True,
                                     )
+                                    unsaved.keep_because('a transcription failed')
 
                             # Flush remaining buffer through the transcriber.
                             prepared = use_case.prepare_buffer()
@@ -464,6 +520,7 @@ def run_audio_worker(
                                         post_message(TranscriptChunk(segments=new_segs))
                                 except Exception as e:
                                     log.error('Pause flush transcription failed: %s', e, exc_info=True)
+                                    unsaved.keep_because('a transcription failed')
                                 finally:
                                     post_message(TranscriptionStatus(active=False))
 
@@ -619,6 +676,7 @@ def run_audio_worker(
                     # One bad chunk must not end the meeting recording.
                     iteration_failed = True
                     loop_health.failed(loop_error, reported_health)
+                    unsaved.keep_because('the audio loop hit an error')
                     time.sleep(0.05)
                 finally:
                     if not iteration_failed:
@@ -631,6 +689,7 @@ def run_audio_worker(
                     _collect_future()
                 except Exception as e:
                     log.error('In-flight transcription at shutdown: %s', e, exc_info=True)
+                    unsaved.keep_because('a transcription failed')
 
             # Shutdown drain: read remaining for up to 500ms
             deadline = time.monotonic() + 0.5
@@ -663,6 +722,7 @@ def run_audio_worker(
 
     except Exception as e:
         log.error('Audio source error: %s', e, exc_info=True)
+        unsaved.keep_because('the audio loop failed')
         post_message(AudioWorkerStatus(status='error', error=str(e)))
 
     # Stop processed audio recorder
