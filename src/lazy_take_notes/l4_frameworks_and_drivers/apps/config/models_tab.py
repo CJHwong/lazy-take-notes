@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess  # noqa: S404 -- used to open the cache folder, not a shell command
 import sys
 import threading
@@ -14,7 +15,7 @@ from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Button, Input, ProgressBar, Rule, Static
 
-from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, AssetStatus
+from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, AssetStatus, RemovalEstimate
 from lazy_take_notes.l2_use_cases.ports.asset_store import ModelAdminStore
 from lazy_take_notes.l3_interface_adapters.gateways import model_catalog
 from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError
@@ -50,6 +51,16 @@ _STATUS_TEXT = {
 log = logging.getLogger('ltn.config')
 
 _SPEAKER_IDS = (model_catalog.RUNTIME_ID, model_catalog.NEMOTRON_ID)
+
+
+def _combined(estimates: list[RemovalEstimate]) -> RemovalEstimate:
+    """One estimate for assets removed together. Their older copies are named by their common folder."""
+    legacy = [estimate.legacy_path for estimate in estimates if estimate.legacy_path is not None]
+    return RemovalEstimate(
+        sum(estimate.frees for estimate in estimates),
+        sum(estimate.frees_with_legacy for estimate in estimates),
+        os.path.commonpath(legacy) if legacy else None,
+    )
 
 
 class ModelChoiceRow(Vertical):
@@ -594,39 +605,40 @@ class ModelsTab(SettingsSection):
             cancel.set()
 
     def _confirm_remove(self, asset_id: str) -> None:
-        asset = self._asset(asset_id)
+        modal = RemoveModelModal(self._asset(asset_id).label, self._store.removal(asset_id))
         self.app.push_screen(
-            RemoveModelModal(asset.label, self._disk_size(asset_id)),
-            callback=lambda confirmed: self._remove(asset_id) if confirmed else None,
+            modal,
+            callback=lambda confirmed: self._remove(asset_id, modal.delete_legacy) if confirmed else None,
         )
 
     def _confirm_remove_speakers(self) -> None:
-        size = self._disk_size(model_catalog.RUNTIME_ID) + self._disk_size(model_catalog.NEMOTRON_ID)
+        estimate = _combined([self._store.removal(asset_id) for asset_id in _SPEAKER_IDS])
+        modal = RemoveModelModal('Speaker runtime and model', estimate)
         self.app.push_screen(
-            RemoveModelModal('Speaker runtime and model', size),
-            callback=lambda confirmed: self._remove_speakers() if confirmed else None,
+            modal,
+            callback=lambda confirmed: self._remove_speakers(modal.delete_legacy) if confirmed else None,
         )
 
-    def _remove_speakers(self) -> None:
+    def _remove_speakers(self, delete_legacy: bool) -> None:
         # One worker and one toast: the user removed one thing.
-        self.run_worker(self._remove_speakers_worker, thread=True, group='remove-speakers')
+        self.run_worker(lambda: self._remove_speakers_worker(delete_legacy), thread=True, group='remove-speakers')
 
-    def _remove_speakers_worker(self) -> None:
+    def _remove_speakers_worker(self, delete_legacy: bool) -> None:
         freed = 0
         for asset_id in _SPEAKER_IDS:
             try:
-                freed += self._store.remove(asset_id)
+                freed += self._store.remove(asset_id, delete_legacy=delete_legacy)
             except Exception as exc:  # noqa: BLE001 -- surface every removal failure
                 self.post_message(self.Failed(asset_id, str(exc)))
                 return
         self.post_message(self.Removed(model_catalog.RUNTIME_ID, freed))
 
-    def _remove(self, asset_id: str) -> None:
-        self.run_worker(lambda: self._remove_worker(asset_id), thread=True, group=f'remove-{asset_id}')
+    def _remove(self, asset_id: str, delete_legacy: bool) -> None:
+        self.run_worker(lambda: self._remove_worker(asset_id, delete_legacy), thread=True, group=f'remove-{asset_id}')
 
-    def _remove_worker(self, asset_id: str) -> None:
+    def _remove_worker(self, asset_id: str, delete_legacy: bool) -> None:
         try:
-            freed = self._store.remove(asset_id)
+            freed = self._store.remove(asset_id, delete_legacy=delete_legacy)
         except Exception as exc:  # noqa: BLE001 -- surface every removal failure in the row
             self.post_message(self.Failed(asset_id, str(exc)))
         else:

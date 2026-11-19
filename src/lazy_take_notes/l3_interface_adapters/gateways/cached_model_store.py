@@ -18,6 +18,7 @@ from lazy_take_notes.l1_entities.model_asset import (
     AssetState,
     AssetStatus,
     ModelAsset,
+    RemovalEstimate,
 )
 from lazy_take_notes.l3_interface_adapters.gateways import file_lock, model_catalog
 from lazy_take_notes.l3_interface_adapters.gateways.download_engine import (
@@ -40,8 +41,9 @@ class CachedModelStore:
     """Download, verify, and reuse model assets in one cache root.
 
     The store satisfies both the ``AssetStore`` and ``ModelResolver`` ports.
-    It never deletes legacy copies from other tools. It adopts them with a
-    hard link or a copy, and the caller decides when to remove the original.
+    It adopts legacy copies from other tools with a hard link or a copy. It
+    deletes one only when remove() is asked to, and a removed asset stays
+    removed (not adopted again) until install().
     """
 
     def __init__(
@@ -92,6 +94,9 @@ class CachedModelStore:
             with file_lock.try_exclusive(self._lock_path(asset)) as free:
                 if not free:
                     return AssetState(asset, AssetStatus.BUSY)
+                if self._is_removed(asset):
+                    legacy = self._legacy_entry(asset)
+                    return AssetState(asset, AssetStatus.MISSING, 0, _legacy_size(asset, legacy) if legacy else 0)
                 return self._status_from_legacy(asset)
 
     def _status_from_legacy(self, asset: ModelAsset) -> AssetState:
@@ -116,6 +121,7 @@ class CachedModelStore:
         on_progress: Callable[[AssetProgress], None] | None = None,
         cancel: threading.Event | None = None,
     ) -> Path:
+        self._clear_removed(self._require(asset_id))
         state = self.status(asset_id)
         if state.status is AssetStatus.READY and state.path:
             return Path(state.path)
@@ -127,18 +133,54 @@ class CachedModelStore:
             self._install_asset(state.asset, on_progress, cancel)
         return self._entry_path(state.asset)
 
-    def remove(self, asset_id: str) -> int:
+    def removal(self, asset_id: str) -> RemovalEstimate:
+        asset = self._require(asset_id)
+        target = self._installed_path(asset)
+        legacy = self._deletable_legacy(asset)
+        frees = _freed_bytes([target])
+        if legacy is None:
+            return RemovalEstimate(frees, frees)
+        return RemovalEstimate(frees, _freed_bytes([target, legacy]), str(legacy))
+
+    def remove(self, asset_id: str, *, delete_legacy: bool = False) -> int:
         asset = self._require(asset_id)
         with self._lock:
-            target = self._installed_path(asset)
-            freed = _tree_size(target)
-            if target.is_dir():
-                shutil.rmtree(target)
-            elif target.exists():
-                target.unlink()
-            self._state.pop(asset.id, None)
+            targets = [self._installed_path(asset)]
+            legacy = self._deletable_legacy(asset) if delete_legacy else None
+            if legacy is not None:
+                targets.append(legacy)
+            freed = _freed_bytes(targets)
+            for target in targets:
+                _delete(target)
+            if legacy is not None:
+                log.info('deleted legacy copy of %s: %s', asset.id, legacy)
+            # Without the mark, the next status() would adopt the legacy copy straight back.
+            self._state = {**self._load_state(), **self._state, asset.id: {'removed': True}}
             self._save_state()
             return freed
+
+    def _is_removed(self, asset: ModelAsset) -> bool:
+        # Read the file: Settings and the preflight each hold a store, and either may remove or install.
+        return self._load_state().get(asset.id, {}).get('removed') is True
+
+    def _clear_removed(self, asset: ModelAsset) -> None:
+        with self._lock:
+            self._state = {**self._load_state(), **self._state}
+            if self._state.get(asset.id, {}).get('removed') is True:
+                del self._state[asset.id]
+                self._save_state()
+
+    def _deletable_legacy(self, asset: ModelAsset) -> Path | None:
+        """The legacy file, or the runtime tree that holds it. None unless its layout is the expected one."""
+        legacy = self._legacy_entry(asset)
+        if legacy is None:
+            return None
+        if not asset.archive:
+            return legacy
+        tree = legacy.parents[len(Path(asset.entry).parts) - 1]
+        if tree.name != Path(asset.subdir).name or tree.is_relative_to(self._root):
+            return None
+        return tree
 
     def resolve(self, name: str, cancel: threading.Event | None = None) -> str:
         asset = self._assets.get(name) or model_catalog.asset_for_model(name, self._assets)
@@ -448,6 +490,34 @@ def _tree_size(path: Path) -> int:
         return 0
     # A runtime links each library under two names; a link takes no space of its own.
     return sum(child.stat().st_size for child in path.rglob('*') if child.is_file() and not child.is_symlink())
+
+
+def _files(path: Path) -> list[Path]:
+    if path.is_symlink():
+        return []
+    if path.is_file():
+        return [path]
+    if not path.is_dir():
+        return []
+    return [child for child in path.rglob('*') if child.is_file() and not child.is_symlink()]
+
+
+def _freed_bytes(paths: list[Path]) -> int:
+    """Bytes deleting all of paths frees. A file with another hard link outside them frees nothing."""
+    inodes: dict[tuple[int, int], list[int]] = {}  # (device, inode) -> [size, links, links seen]
+    for path in paths:
+        for file in _files(path):
+            info = file.stat()
+            seen = inodes.setdefault((info.st_dev, info.st_ino), [info.st_size, info.st_nlink, 0])
+            seen[2] += 1
+    return sum(size for size, links, seen in inodes.values() if seen >= links)
+
+
+def _delete(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    elif path.exists() or path.is_symlink():
+        path.unlink()
 
 
 def _megabytes(size: int) -> str:

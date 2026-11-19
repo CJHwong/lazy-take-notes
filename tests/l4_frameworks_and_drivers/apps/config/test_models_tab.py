@@ -8,11 +8,17 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from textual.widgets import Button
+from textual.widgets import Button, Checkbox
 
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_config_loader as loader_mod
 import lazy_take_notes.l3_interface_adapters.gateways.yaml_config_writer as writer_mod
-from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, AssetStatus, ModelAsset
+from lazy_take_notes.l1_entities.model_asset import (
+    AssetProgress,
+    AssetState,
+    AssetStatus,
+    ModelAsset,
+    RemovalEstimate,
+)
 from lazy_take_notes.l3_interface_adapters.gateways.download_engine import DownloadCancelledError
 from lazy_take_notes.l4_frameworks_and_drivers.apps.config import ConfigApp
 from lazy_take_notes.l4_frameworks_and_drivers.apps.config.models_tab import ModelChoiceRow, ModelsTab
@@ -37,6 +43,8 @@ class FakeStore:
         self._state = AssetState(ASSET, status)
         self.installs: list[str] = []
         self.removes: list[str] = []
+        self.legacy_deletes: list[str] = []
+        self.legacy: dict[str, tuple[str, int]] = {}  # asset id -> (older copy, its extra bytes)
         self.cache_root = Path('/tmp/ltn-cache')
 
     def catalog(self) -> list[ModelAsset]:
@@ -60,8 +68,17 @@ class FakeStore:
         self._state = replace(self._state, status=AssetStatus.READY, installed_bytes=100, path='/tmp/tiny.bin')
         return Path('/tmp/tiny.bin')
 
-    def remove(self, asset_id: str) -> int:
+    def removal(self, asset_id: str) -> RemovalEstimate:
+        frees = self.status(asset_id).installed_bytes
+        if asset_id not in self.legacy:
+            return RemovalEstimate(frees, frees)
+        path, extra = self.legacy[asset_id]
+        return RemovalEstimate(frees, frees + extra, path)
+
+    def remove(self, asset_id: str, *, delete_legacy: bool = False) -> int:
         self.removes.append(asset_id)
+        if delete_legacy:
+            self.legacy_deletes.append(asset_id)
         self._state = replace(self._state, status=AssetStatus.MISSING, installed_bytes=0, path=None)
         return 100
 
@@ -157,6 +174,57 @@ class TestModelsTab:
             assert store.removes == ['tiny']
             assert str(app.query_one('#status-tiny').render()) == 'Missing'
 
+    async def test_remove_offers_to_delete_an_older_copy(self, app_factory):
+        app, store = app_factory(AssetStatus.READY)
+        store.legacy['tiny'] = (str(Path.home() / '.cache' / 'old-tool' / 'tiny.bin'), 50 * 2**20)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#remove-tiny', Button).press()
+            await pilot.pause()
+            await pilot.pause()
+            body = str(app.app.screen.query_one('#discard-body').render())
+            box = app.app.screen.query_one('#remove-legacy', Checkbox)
+            assert 'An older copy in ~/.cache/old-tool/tiny.bin uses 50 MB more.' in body
+            assert box.value is False
+            app.app.screen.query_one('#discard-confirm', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+            assert store.removes == ['tiny']
+            assert store.legacy_deletes == []
+
+    async def test_ticking_the_box_deletes_the_older_copy_too(self, app_factory):
+        app, store = app_factory(AssetStatus.READY)
+        store.legacy['tiny'] = ('/old/tiny.bin', 50 * 2**20)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#remove-tiny', Button).press()
+            await pilot.pause()
+            await pilot.pause()
+            app.app.screen.query_one('#remove-legacy', Checkbox).value = True
+            await pilot.pause()
+            app.app.screen.query_one('#discard-confirm', Button).press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+
+            assert store.legacy_deletes == ['tiny']
+
+    async def test_no_older_copy_shows_no_box(self, app_factory):
+        app, _ = app_factory(AssetStatus.READY)
+
+        async with app.run_test(size=(140, 50)) as pilot:
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.query_one('#remove-tiny', Button).press()
+            await pilot.pause()
+            await pilot.pause()
+
+            assert not app.app.screen.query('#remove-legacy')
+
     async def test_default_model_row_shows_size_and_purpose(self, app_factory):
         app, _store = app_factory(AssetStatus.MISSING)
 
@@ -217,8 +285,10 @@ class SpeakerStore(FakeStore):
         self._states[asset_id] = replace(state, status=AssetStatus.READY, path=f'/tmp/{asset_id}')
         return Path(f'/tmp/{asset_id}')
 
-    def remove(self, asset_id: str) -> int:
+    def remove(self, asset_id: str, *, delete_legacy: bool = False) -> int:
         self.removes.append(asset_id)
+        if delete_legacy:
+            self.legacy_deletes.append(asset_id)
         state = self._states[asset_id]
         self._states[asset_id] = replace(state, status=AssetStatus.MISSING, installed_bytes=0, path=None)
         return state.installed_bytes
