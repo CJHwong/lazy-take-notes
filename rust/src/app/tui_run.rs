@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::file_persistence::FilePersistence;
+use crate::adapters::paths::Paths;
 use crate::adapters::session_controller::SessionController;
 use crate::adapters::templates::YamlTemplates;
 use crate::app::container::{
@@ -56,6 +57,49 @@ fn template_from_flags(
         .map(|name| load_template_key(templates, name))
 }
 
+pub enum TemplatePick {
+    Chosen(Box<SessionTemplate>),
+    Cancelled,
+    /// `n` or `a`: the builder, which this version does not have yet.
+    NeedsBuilder,
+}
+
+/// The template picker, as Python's `pick_template`.
+pub fn pick_template(paths: &Paths, show_builtins: bool) -> Result<TemplatePick, String> {
+    use crate::tui::screens::template_picker::{TemplateChoice, TemplatePicker};
+    let runtime = new_runtime()?;
+    crate::tui::terminal::clear_normal_screen();
+    let picker = TemplatePicker::new(
+        YamlTemplates::new(paths),
+        show_builtins,
+        paths.builtin_templates_noticed(),
+    );
+    let result = run_screen(Box::new(picker), &saved_theme(), runtime.handle().clone())
+        .map_err(|e| e.to_string())?;
+    runtime.shutdown_background();
+    let choice = result.and_then(|payload| payload.downcast::<TemplateChoice>().ok());
+    Ok(match choice.map(|choice| *choice) {
+        None => TemplatePick::Cancelled,
+        Some(TemplateChoice::Key(key)) => TemplatePick::Chosen(Box::new(load_template_key(
+            &YamlTemplates::new(paths),
+            &key,
+        )?)),
+        Some(TemplateChoice::Create | TemplateChoice::EditWithAi(_)) => TemplatePick::NeedsBuilder,
+    })
+}
+
+/// The file picker, from the current folder. None when the user cancels.
+pub fn pick_file() -> Result<Option<std::path::PathBuf>, String> {
+    let start = std::env::current_dir().map_err(|e| e.to_string())?;
+    let runtime = new_runtime()?;
+    crate::tui::terminal::clear_normal_screen();
+    let picker = crate::tui::screens::file_picker::FilePicker::new(&start);
+    let result = run_screen(Box::new(picker), &saved_theme(), runtime.handle().clone())
+        .map_err(|e| e.to_string())?;
+    runtime.shutdown_background();
+    Ok(crate::tui::screens::session_picker::picked_dir(result))
+}
+
 /// The transcription TUI for one file. Returns the exit code.
 pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, String> {
     let Loaded {
@@ -64,13 +108,19 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
         paths,
     } = load_config(args.config_path, args.output_dir)?;
     let templates = YamlTemplates::new(&paths);
-    let Some(template) = template_from_flags(&templates, args) else {
-        eprintln!(
-            "lazy-take-notes (Rust): the template picker is not usable yet; pass --template or --language"
-        );
-        return Ok(2);
+    let template = match template_from_flags(&templates, args) {
+        Some(template) => template?,
+        None => match pick_template(&paths, infra.show_builtin_templates)? {
+            TemplatePick::Chosen(template) => *template,
+            TemplatePick::Cancelled => return Ok(0),
+            TemplatePick::NeedsBuilder => {
+                eprintln!(
+                    "lazy-take-notes (Rust): the template builder is not usable yet; pass --template or --language"
+                );
+                return Ok(2);
+            }
+        },
     };
-    let template = template?;
     check_transcription_provider(&infra)?;
     let base_dir = resolve_base_dir(&paths, args.output_dir, &config);
     let out_dir = make_session_dir(&base_dir, args.label).map_err(|e| e.to_string())?;

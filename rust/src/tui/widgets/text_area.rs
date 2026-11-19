@@ -261,28 +261,32 @@ impl TextArea {
         let surface = theme.color("surface");
         let outside = theme.color("background");
         let width = usize::from(area.width - 2);
-        let edge = Style::default().fg(border).bg(surface);
-        let cap = Style::default().fg(border).bg(outside);
+        let edges = crate::tui::widgets::tall_edges(border, surface, outside);
         let title_text = format!(" {title} ");
         let title_cells = title_text.chars().count().min(width.saturating_sub(1));
         let top = Line::from(vec![
-            Span::styled("▊", edge),
-            Span::styled("▔", cap),
+            Span::styled("▊", edges.left),
+            Span::styled("▔", edges.fill),
             Span::styled(
                 title_text.chars().take(title_cells).collect::<String>(),
-                Style::default().fg(theme.color("foreground")).bg(outside),
+                Style::default()
+                    .fg(theme.on("foreground", "surface"))
+                    .bg(surface),
             ),
-            Span::styled("▔".repeat(width.saturating_sub(1 + title_cells)), cap),
-            Span::styled("▎", edge),
+            Span::styled(
+                "▔".repeat(width.saturating_sub(1 + title_cells)),
+                edges.fill,
+            ),
+            Span::styled("▎", edges.right),
         ]);
         frame.render_widget(
             Paragraph::new(top),
             Rect::new(area.x, area.y, area.width, 1),
         );
         let bottom = Line::from(vec![
-            Span::styled("▊", edge),
-            Span::styled("▁".repeat(width), cap),
-            Span::styled("▎", edge),
+            Span::styled("▊", edges.left),
+            Span::styled("▁".repeat(width), edges.fill),
+            Span::styled("▎", edges.right),
         ]);
         frame.render_widget(
             Paragraph::new(bottom),
@@ -290,9 +294,9 @@ impl TextArea {
         );
         for y in area.y + 1..area.bottom() - 1 {
             let side = Line::from(vec![
-                Span::styled("▊", edge),
+                Span::styled("▊", edges.left),
                 Span::styled(" ".repeat(width), Style::default().bg(surface)),
-                Span::styled("▎", edge),
+                Span::styled("▎", edges.right),
             ]);
             frame.render_widget(Paragraph::new(side), Rect::new(area.x, y, area.width, 1));
         }

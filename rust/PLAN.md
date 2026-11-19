@@ -74,3 +74,8 @@ The two versions must work on the same data, in both directions:
 18. The session context box has no selection, undo, redo, cut, copy or paste keys of its own. The terminal's paste still works. Up and down move by logical lines, not by wrapped rows.
 19. A speaker chip cannot be clicked to rename the speaker, because there is no mouse (see 17).
 20. Python's Textual highlighted numbers and strings in plain text (Rich `repr` highlighting). The Rust TUI does not.
+21. In the file picker, a typed path that opens a folder can leave Python showing the old folder's preview, because a late highlight event arrives after the rebuild. The Rust picker always previews the new folder's first entry.
+22. A template that does not load is left out of the template picker, with a warning in `debug.log`. Python crashed the picker.
+23. An editor that fails to start after `e` in the template picker is logged, and the picker stays open. Python crashed.
+24. Home, End, Page Up and Page Down in a list scroll the list and leave the highlight where it is, as Textual's `ListView` does. Earlier Rust builds moved the highlight.
+25. A few colors differ by up to 4 levels per channel: inline code in Markdown, and dim text after Textual's rounding. The left edge of an input's border sits on the theme background, not the terminal's default background.

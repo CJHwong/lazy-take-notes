@@ -18,6 +18,9 @@ pub struct Input {
     cursor: usize,
     pub placeholder: String,
     pub max_length: Option<usize>,
+    /// The theme variable of the parent's background, under the border's outer side.
+    /// None means the screen background.
+    pub parent_background: Option<&'static str>,
 }
 
 impl Input {
@@ -120,20 +123,20 @@ impl Input {
             return;
         }
         let border = theme.color(if focused { "border" } else { "border-blurred" });
-        let surface = if focused {
-            theme.tinted("surface", "foreground", 0.05)
-        } else {
-            theme.color("surface")
-        };
+        let inner = self.background(focused, theme);
+        let outer = theme.color(self.parent_background.unwrap_or("background"));
         let width = usize::from(area.width.saturating_sub(2));
-        let edge = Style::default().fg(border).bg(surface);
-        let cap = Style::default().fg(border).bg(theme.color("background"));
-        let rows = [("▔", cap), (" ", Style::default().bg(surface)), ("▁", cap)];
+        let edges = crate::tui::widgets::tall_edges(border, inner, outer);
+        let rows = [
+            ("▔", edges.fill),
+            (" ", Style::default().bg(inner)),
+            ("▁", edges.fill),
+        ];
         for (offset, (fill, style)) in rows.into_iter().enumerate() {
             let line = Line::from(vec![
-                Span::styled("▊", edge),
+                Span::styled("▊", edges.left),
                 Span::styled(fill.repeat(width), style),
-                Span::styled("▎", edge),
+                Span::styled("▎", edges.right),
             ]);
             frame.render_widget(
                 Paragraph::new(line),
@@ -146,11 +149,20 @@ impl Input {
     }
 
     /// The value (or placeholder) and the cursor, scrolled to keep the cursor shown.
+    /// `$surface`, tinted 5% toward the foreground while focused (`:focus`).
+    fn background(&self, focused: bool, theme: &Theme) -> ratatui::style::Color {
+        match focused {
+            true => theme.tinted("surface", "foreground", 0.05),
+            false => theme.color("surface"),
+        }
+    }
+
     pub fn render_row(&self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
-        let surface = theme.color("surface");
+        let surface = self.background(focused, theme);
         let text_style = Style::default()
-            .fg(theme.on("foreground", "surface"))
+            .fg(theme.on_color("foreground", surface))
             .bg(surface);
+        let placeholder_color = theme.on_color("text-disabled", surface);
         let cursor_style = Style::default()
             .fg(theme.on("input-cursor-foreground", "surface"))
             .bg(theme.on("input-cursor-background", "surface"));
@@ -162,16 +174,11 @@ impl Input {
                 let first = placeholder
                     .next()
                     .map_or(" ".to_string(), |c| c.to_string());
-                spans.push(Span::styled(
-                    first,
-                    cursor_style.fg(theme.on("text-disabled", "surface")),
-                ));
+                spans.push(Span::styled(first, cursor_style));
             }
             spans.push(Span::styled(
                 placeholder.collect::<String>(),
-                Style::default()
-                    .fg(theme.on("text-disabled", "surface"))
-                    .bg(surface),
+                Style::default().fg(placeholder_color).bg(surface),
             ));
             frame.render_widget(Paragraph::new(Line::from(spans)).style(text_style), area);
             return;

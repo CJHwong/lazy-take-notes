@@ -1,6 +1,7 @@
 //! The session's modals: help, a quick-action result, the label prompt and the
 //! model download notice.
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crossterm::event::KeyEvent;
@@ -36,6 +37,14 @@ pub const QUERY_BINDINGS: [Binding; 6] = [
     bind("escape", "dismiss", "Close"),
     bind("c", "copy_body", "Copy"),
 ];
+/// The built-in templates notice. Any other key also closes it, through `on_key`.
+pub const NOTICE_BINDINGS: [Binding; 5] = [
+    SCREEN_BASE[0],
+    SCREEN_BASE[1],
+    SCREEN_BASE[2],
+    SCREEN_BASE[3],
+    bind("escape", "dismiss", "Close"),
+];
 pub const LABEL_BINDINGS: [Binding; 5] = [
     SCREEN_BASE[0],
     SCREEN_BASE[1],
@@ -55,6 +64,15 @@ fn centered_row(frame: &mut Frame, area: Rect, text: &str, style: Style) {
     frame.render_widget(Paragraph::new(line).style(style), area);
 }
 
+/// Which modal a `MarkdownModal` is: its keys and its colors differ.
+#[derive(Clone, PartialEq, Eq)]
+enum Kind {
+    Help,
+    Query,
+    /// The built-in templates notice; `d` writes this flag file.
+    Notice(PathBuf),
+}
+
 /// A `VerticalScroll` modal: a bold title, a Markdown body and a hint docked at the bottom.
 pub struct MarkdownModal {
     title: String,
@@ -64,7 +82,8 @@ pub struct MarkdownModal {
     is_error: bool,
     width_percent: u32,
     max_width: u16,
-    is_help: bool,
+    max_height_percent: u32,
+    kind: Kind,
 }
 
 impl MarkdownModal {
@@ -74,6 +93,9 @@ impl MarkdownModal {
         view.padding = 0;
         view.markdown_padding = 2;
         view.bar_width = 2;
+        // The hint is docked at the bottom with `margin-top: 1`.
+        view.dock_rows = 2;
+        view.dock_cover = 1;
         view.set_markdown(body);
         Self {
             title: title.into(),
@@ -83,15 +105,13 @@ impl MarkdownModal {
             is_error: false,
             width_percent: 60,
             max_width: 80,
-            is_help: false,
+            max_height_percent: 80,
+            kind: Kind::Help,
         }
     }
 
     pub fn help(body: &str) -> Self {
-        Self {
-            is_help: true,
-            ..Self::new("Help", body, "Press Escape or h to close")
-        }
+        Self::new("Help", body, "Press Escape or h to close")
     }
 
     pub fn query(title: &str, body: &str, is_error: bool) -> Self {
@@ -99,19 +119,64 @@ impl MarkdownModal {
             is_error,
             width_percent: 80,
             max_width: 100,
+            kind: Kind::Query,
             // Python writes "[Esc] Close  [c] Copy"; Textual reads both brackets as tags.
             ..Self::new(title, body, " Close   Copy")
         }
     }
 
+    /// Python's `BuiltinTemplatesNotice`. Any key closes it; `d` also writes `noticed`.
+    pub fn builtin_templates_notice(noticed: PathBuf) -> Self {
+        Self {
+            max_width: 72,
+            max_height_percent: 60,
+            kind: Kind::Notice(noticed),
+            ..Self::new(
+                "Built-in Templates",
+                BUILTIN_NOTICE_BODY,
+                "Press any key to dismiss, or [d] to stop showing this.",
+            )
+        }
+    }
+
     pub fn is_help(&self) -> bool {
-        self.is_help
+        self.kind == Kind::Help
     }
 
     fn border_var(&self) -> &'static str {
-        if self.is_error { "error" } else { "primary" }
+        match (&self.kind, self.is_error) {
+            (Kind::Notice(_), _) => "accent",
+            (_, true) => "error",
+            (_, false) => "primary",
+        }
+    }
+
+    /// A key on the notice: any key closes it, and `d` stops it for good.
+    fn notice_key(noticed: &Path, name: &str, ctx: &mut Ctx) -> Action {
+        if name == "d" {
+            let written = noticed
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| std::fs::write(noticed, ""));
+            if let Err(e) = written {
+                ctx.error(
+                    format!("Cannot save the setting: {e}"),
+                    Duration::from_secs(8),
+                );
+            }
+        }
+        Action::Pop(None)
     }
 }
+
+const BUILTIN_NOTICE_BODY: &str =
+    "Built-in templates are **example sessions** for common use cases \
+(meetings, standups, lectures, podcasts, etc.).
+
+- Press **[n]** in the picker to **create your own** template.
+- To hide built-in templates, set `show_builtin_templates: false` \
+in settings or config.yaml.
+";
 
 impl Screen for MarkdownModal {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
@@ -120,9 +185,10 @@ impl Screen for MarkdownModal {
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(surface);
-        let title_style = match self.is_error {
-            true => text.fg(theme.on("error", "surface")),
-            false => text,
+        let title_style = match (&self.kind, self.is_error) {
+            (Kind::Notice(_), _) => text.fg(theme.on("accent", "surface")),
+            (_, true) => text.fg(theme.on("error", "surface")),
+            (_, false) => text,
         }
         .add_modifier(Modifier::BOLD);
         // The title and its margin scroll with the body: all three sit in the VerticalScroll.
@@ -131,11 +197,10 @@ impl Screen for MarkdownModal {
             Line::default(),
         ];
         let width = percent_of(area.width, self.width_percent, self.max_width);
-        // Border and padding, the content with its last block's bottom margin,
-        // then the docked hint and its top margin.
+        // Border and padding around the content and the docked hint.
         let content_rows = self.body.content_rows(width.saturating_sub(2 + 4), theme) as u16;
-        let wanted = 2 + 2 + content_rows + 1 + 1 + 1;
-        let height = wanted.min(percent_of(area.height, 80, u16::MAX));
+        let wanted = 2 + 2 + content_rows;
+        let height = wanted.min(percent_of(area.height, self.max_height_percent, u16::MAX));
         let outer = centered(area, width, height);
         let inner = thick_box(frame, outer, self.border_var(), "surface", theme);
         let padded = Rect::new(
@@ -148,8 +213,7 @@ impl Screen for MarkdownModal {
             return;
         }
         let hint_y = padded.bottom() - 1;
-        let body_area = Rect::new(padded.x, padded.y, padded.width, padded.height - 1);
-        self.body.render(frame, body_area, text, theme);
+        self.body.render(frame, padded, text, theme);
         // The docked hint sits inside the scroll viewport, beside the scrollbar.
         let bar = if self.body.overflows() {
             self.body.bar_width
@@ -166,7 +230,10 @@ impl Screen for MarkdownModal {
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {
-        let table: &[Binding] = if self.is_help {
+        if let Kind::Notice(noticed) = &self.kind {
+            return Self::notice_key(noticed, name, ctx);
+        }
+        let table: &[Binding] = if self.is_help() {
             &HELP_BINDINGS
         } else {
             &QUERY_BINDINGS
@@ -208,6 +275,7 @@ pub struct LabelModal {
 impl LabelModal {
     pub fn new(current: &str, title: &str, placeholder: &str) -> Self {
         let mut input = Input::new(placeholder);
+        input.parent_background = Some("surface");
         input.set_value(current);
         Self {
             title: title.into(),

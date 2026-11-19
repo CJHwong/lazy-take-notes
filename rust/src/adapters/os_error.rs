@@ -45,6 +45,13 @@ impl OsError {
     }
 }
 
+impl OsError {
+    /// The error text alone, as Python's `OSError.strerror`.
+    pub fn strerror(&self) -> &str {
+        &self.text
+    }
+}
+
 impl fmt::Display for OsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let quote = |path: &Path| py_repr_json(&Value::String(path.to_string_lossy().into_owned()));
