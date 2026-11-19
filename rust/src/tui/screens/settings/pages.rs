@@ -88,11 +88,9 @@ fn get<'v>(raw: &'v Value, section: &str, key: &str) -> Option<&'v Value> {
     raw.get(section)?.get(key)
 }
 
-fn title(id: &'static str, text: &str) -> [Item; 2] {
-    [
-        Item::new(id, Kind::Title(text.into())),
-        Item::new("", Kind::Rule),
-    ]
+/// A section heading. It draws its own rule.
+fn title(id: &'static str, text: &str) -> [Item; 1] {
+    [Item::new(id, Kind::Title(text.into()))]
 }
 
 fn desc(id: &'static str, text: &str) -> Item {
@@ -254,7 +252,7 @@ pub fn models_page(source: &Source) -> Page {
         &infra.transcription_provider,
         "whisper-cpp runs locally. Plugin engines appear when installed.",
     ));
-    items.push(Item::new("", Kind::Label("Default model".into())).margins(0, 1));
+    items.push(Item::new("", Kind::Label("Default model".into())).margins(0, 0));
     items.push(Item::new(
         "models-chooser",
         Kind::Custom(Box::new(ModelChooser::new(
@@ -267,12 +265,7 @@ pub fn models_page(source: &Source) -> Page {
         1,
         &[("models-download-all", "Download all missing")],
     ));
-    // Python puts this section in its own Vertical. Margins do not collapse across
-    // a container edge, so the button row's bottom margin and the title's top
-    // margin both show.
-    let [mut heading, rule] = title("", "Language models");
-    heading.margin_top = 2;
-    items.extend([heading, rule]);
+    items.extend(title("", "Language models"));
     items.push(desc(
         "",
         "Use a different model for a locale. The default applies otherwise.",

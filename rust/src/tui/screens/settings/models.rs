@@ -59,7 +59,7 @@ fn cell(text: &str, width: usize, style: Style) -> Span<'static> {
 }
 
 /// Draw buttons left to right in the one-row `row`, each after `gap` columns.
-/// `focus` is the index among them. Returns the x after the last.
+/// `focus` is the index among them. Returns where each drawn button sits.
 fn draw_buttons(
     frame: &mut Frame,
     row: Rect,
@@ -68,25 +68,21 @@ fn draw_buttons(
     focus: Option<usize>,
     width: Option<u16>,
     theme: &Theme,
-) -> u16 {
+) -> Vec<Rect> {
     let (mut x, y, right) = (row.x, row.y, row.right());
+    let mut rects = Vec::new();
     for (index, label) in labels.iter().enumerate() {
         x += gap;
         let w = width.unwrap_or_else(|| compact_button_width(label));
         if x + w > right {
             break;
         }
-        draw_compact_button(
-            frame,
-            Rect::new(x, y, w, 1),
-            label,
-            focus == Some(index),
-            false,
-            theme,
-        );
+        let rect = Rect::new(x, y, w, 1);
+        draw_compact_button(frame, rect, label, focus == Some(index), false, theme);
+        rects.push(rect);
         x += w;
     }
-    x
+    rects
 }
 
 /// Textual's `ProgressBar(show_eta=False)`: a bar and the percentage.
@@ -131,6 +127,8 @@ pub struct ModelChooser {
     assets: Vec<ModelAsset>,
     states: HashMap<&'static str, RowState>,
     selected: Option<&'static str>,
+    /// Each focus stop at the last draw.
+    hits: Vec<(Rect, usize)>,
 }
 
 impl ModelChooser {
@@ -157,6 +155,7 @@ impl ModelChooser {
             assets,
             states,
             selected,
+            hits: Vec::new(),
         }
     }
 
@@ -236,6 +235,41 @@ impl ModelChooser {
         actions
     }
 
+    /// The detail under a row: the download's progress, or why it waits.
+    fn detail(&self, asset: &ModelAsset) -> String {
+        let row = &self.states[asset.id];
+        if row.paused {
+            format!(
+                "{} kept. Download continues from there.",
+                megabytes(row.kept)
+            )
+        } else if row.status == AssetStatus::Busy {
+            "In another window. Press Download to follow it.".into()
+        } else {
+            row.progress.as_ref().map(describe).unwrap_or_default()
+        }
+    }
+
+    /// Rows a model takes: its line, and a detail line when it has one.
+    fn rows_of(&self, asset: &ModelAsset) -> u16 {
+        let row = &self.states[asset.id];
+        let detail = row.status == AssetStatus::Downloading || !self.detail(asset).is_empty();
+        1 + u16::from(detail)
+    }
+
+    /// The first row of each model.
+    fn tops(&self) -> Vec<u16> {
+        let mut top = 0;
+        self.assets
+            .iter()
+            .map(|asset| {
+                let at = top;
+                top += self.rows_of(asset);
+                at
+            })
+            .collect()
+    }
+
     /// The row and the stop within it: 0 is the row itself, then its buttons.
     fn locate(&self, stop: usize) -> Option<(usize, usize)> {
         let mut first = 0;
@@ -252,8 +286,7 @@ impl ModelChooser {
 
 impl Custom for ModelChooser {
     fn height(&self, _width: u16) -> u16 {
-        // Each row: the choice line, the progress line, `margin-bottom: 1`.
-        self.assets.len() as u16 * 3
+        self.assets.iter().map(|asset| self.rows_of(asset)).sum()
     }
 
     fn stops(&self) -> usize {
@@ -264,14 +297,23 @@ impl Custom for ModelChooser {
     }
 
     fn region(&self, stop: usize) -> Option<(u16, u16)> {
-        self.locate(stop).map(|(row, _)| (row as u16 * 3, 1))
+        self.locate(stop).map(|(row, _)| (self.tops()[row], 1))
+    }
+
+    fn hits(&self) -> Vec<(Rect, usize)> {
+        self.hits.clone()
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focus: Option<usize>, theme: &Theme) {
         let focus = focus.and_then(|stop| self.locate(stop));
         let muted = text_style(theme, Some("text-muted"));
+        self.hits.clear();
+        let mut first_stop = 0;
+        let tops = self.tops();
         for (index, asset) in self.assets.iter().enumerate() {
-            let y = area.y + index as u16 * 3;
+            let y = area.y + tops[index];
+            let row_stop = first_stop;
+            first_stop += 1 + self.actions(asset).len();
             if y >= area.bottom() {
                 break;
             }
@@ -283,7 +325,7 @@ impl Custom for ModelChooser {
             };
             let mut label_style = text_style(theme, None).add_modifier(Modifier::BOLD);
             if focus == Some((index, 0)) {
-                // No mouse: the row takes the focus, and Enter marks it.
+                // The row takes the focus; Enter or a click marks it.
                 label_style = label_style.add_modifier(Modifier::REVERSED);
             }
             let status = match row.paused {
@@ -297,6 +339,8 @@ impl Custom for ModelChooser {
                 cell(status, 12, text_style(theme, status_color(row.status))),
             ];
             spans_at(frame, Rect::new(area.x, y, area.width, 1), line);
+            self.hits
+                .push((Rect::new(area.x, y, 53.min(area.width), 1), row_stop));
             let labels: Vec<&str> = self
                 .actions(asset)
                 .iter()
@@ -306,7 +350,7 @@ impl Custom for ModelChooser {
                 Some((at, stop)) if at == index && stop > 0 => Some(stop - 1),
                 _ => None,
             };
-            draw_buttons(
+            let buttons = draw_buttons(
                 frame,
                 Rect::new(area.x + 53, y, area.width.saturating_sub(53), 1),
                 1,
@@ -315,21 +359,15 @@ impl Custom for ModelChooser {
                 None,
                 theme,
             );
+            for (button, rect) in buttons.into_iter().enumerate() {
+                self.hits.push((rect, row_stop + 1 + button));
+            }
             // The progress line: `margin-left: 2`, a 34-column bar, then the detail.
             let line_y = y + 1;
-            if line_y >= area.bottom() {
+            if self.rows_of(asset) < 2 || line_y >= area.bottom() {
                 continue;
             }
-            let detail = if row.paused {
-                format!(
-                    "{} kept. Download continues from there.",
-                    megabytes(row.kept)
-                )
-            } else if row.status == AssetStatus::Busy {
-                "In another window. Press Download to follow it.".into()
-            } else {
-                row.progress.as_ref().map(describe).unwrap_or_default()
-            };
+            let detail = self.detail(asset);
             let mut x = area.x + 2;
             if row.status == AssetStatus::Downloading {
                 let (done, total) = row
@@ -388,6 +426,8 @@ pub struct LanguageEditor {
     assets: Vec<ModelAsset>,
     /// The model box width at the last draw; the open list takes the same.
     model_width: u16,
+    /// Each focus stop at the last draw.
+    hits: Vec<(Rect, usize)>,
 }
 
 /// Focus stops in a row: locale, model, Remove.
@@ -399,6 +439,7 @@ impl LanguageEditor {
             rows: Vec::new(),
             assets,
             model_width: 0,
+            hits: Vec::new(),
         };
         editor.reload(models);
         editor
@@ -465,10 +506,10 @@ impl LanguageEditor {
 
 impl Custom for LanguageEditor {
     fn height(&self, _width: u16) -> u16 {
-        // Rows of 3 with `margin-bottom: 1`, then Add language after `margin-top: 1`.
+        // Rows of 3, then a blank row and Add language.
         match self.rows.len() as u16 {
             0 => 2,
-            rows => rows * 4 + 1,
+            rows => rows * 3 + 2,
         }
     }
 
@@ -479,56 +520,73 @@ impl Custom for LanguageEditor {
     fn region(&self, stop: usize) -> Option<(u16, u16)> {
         let row = (stop / ROW_STOPS) as u16;
         match stop / ROW_STOPS < self.rows.len() {
-            true => Some((row * 4, 3)),
-            false => Some((row * 4, 1)),
+            true => Some((row * 3, 3)),
+            false => Some((row * 3 + 1, 1)),
         }
+    }
+
+    fn hits(&self) -> Vec<(Rect, usize)> {
+        self.hits.clone()
+    }
+
+    fn open_select(&self, origin: (u16, u16), screen: Rect) -> Option<(Rect, Vec<String>)> {
+        let index = self.open_row()?;
+        let select = &self.rows[index].model;
+        let below = Rect::new(
+            origin.0 + 14,
+            origin.1 + index as u16 * 3 + 3,
+            self.model_width,
+            1,
+        );
+        let rect = super::form::overlay_area(below, select.overlay_height(), screen);
+        let labels = select
+            .options()
+            .iter()
+            .map(|(label, _)| label.clone())
+            .collect();
+        Some((rect, labels))
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focus: Option<usize>, theme: &Theme) {
         let remove_width = compact_button_width("Remove");
         self.model_width = area.width.saturating_sub(14 + 1 + remove_width);
+        self.hits.clear();
         for (index, row) in self.rows.iter().enumerate() {
-            let y = area.y + index as u16 * 4;
+            let y = area.y + index as u16 * 3;
             if y + 3 > area.bottom() {
                 break;
             }
-            let at = |offset: usize| focus == Some(index * ROW_STOPS + offset);
-            // Locale: 14 wide; model: the rest; Remove after `margin-left: 1`.
-            row.locale
-                .render_compact(frame, Rect::new(area.x, y, 14, 1), at(0), theme);
+            let first = index * ROW_STOPS;
+            let at = |offset: usize| focus == Some(first + offset);
+            // Locale: 14 wide; model: the rest; Remove after one column. The
+            // one-row parts sit on the model box's middle row.
+            let locale = Rect::new(area.x, y + 1, 13, 1);
+            row.locale.render_compact(frame, locale, at(0), theme);
             let model_width = self.model_width;
-            row.model.render(
-                frame,
-                Rect::new(area.x + 14, y, model_width, 3),
-                at(1),
-                "surface-lighten-1",
-                theme,
-            );
-            let x = area.x + 14 + model_width + 1;
-            draw_compact_button(
-                frame,
-                Rect::new(x, y, remove_width, 1),
-                "Remove",
-                at(2),
-                false,
-                theme,
-            );
+            let model = Rect::new(area.x + 14, y, model_width, 3);
+            row.model.render(frame, model, at(1), "background", theme);
+            let remove = Rect::new(area.x + 14 + model_width + 1, y + 1, remove_width, 1);
+            draw_compact_button(frame, remove, "Remove", at(2), false, theme);
+            self.hits
+                .extend([(locale, first), (model, first + 1), (remove, first + 2)]);
         }
         let y = match self.rows.len() as u16 {
             0 => area.y + 1,
-            rows => area.y + rows * 4,
+            rows => area.y + rows * 3 + 1,
         };
         if y < area.bottom() {
             let width = compact_button_width("Add language");
-            let focused = focus == Some(self.rows.len() * ROW_STOPS);
+            let stop = self.rows.len() * ROW_STOPS;
+            let rect = Rect::new(area.x, y, width, 1);
             draw_compact_button(
                 frame,
-                Rect::new(area.x, y, width, 1),
+                rect,
                 "Add language",
-                focused,
+                focus == Some(stop),
                 false,
                 theme,
             );
+            self.hits.push((rect, stop));
         }
     }
 
@@ -539,13 +597,13 @@ impl Custom for LanguageEditor {
         let screen = frame.area();
         let below = Rect::new(
             origin.0 + 14,
-            origin.1 + index as u16 * 4 + 3,
+            origin.1 + index as u16 * 3 + 3,
             self.model_width,
             1,
         );
         self.rows[index]
             .model
-            .render_overlay(frame, below, screen, "surface-lighten-1", theme);
+            .render_overlay(frame, below, screen, "background", theme);
     }
 
     fn expanded(&self) -> bool {
@@ -618,6 +676,8 @@ pub struct SpeakerState {
     pub install: bool,
     pub remove: bool,
     pub cancel: bool,
+    /// Each button at the last draw.
+    hits: Vec<(Rect, usize)>,
 }
 
 impl SpeakerState {
@@ -663,7 +723,7 @@ impl Custom for SpeakerState {
             ],
         );
         let labels: Vec<&str> = self.buttons().iter().map(|(_, label)| *label).collect();
-        draw_buttons(
+        let buttons = draw_buttons(
             frame,
             Rect::new(area.x + 44, area.y, area.width.saturating_sub(44), 1),
             0,
@@ -672,6 +732,15 @@ impl Custom for SpeakerState {
             Some(12),
             theme,
         );
+        self.hits = buttons
+            .into_iter()
+            .enumerate()
+            .map(|(stop, rect)| (rect, stop))
+            .collect();
+    }
+
+    fn hits(&self) -> Vec<(Rect, usize)> {
+        self.hits.clone()
     }
 
     fn key(&mut self, stop: &mut usize, _key: &KeyEvent, name: &str) -> Option<Option<FormEvent>> {

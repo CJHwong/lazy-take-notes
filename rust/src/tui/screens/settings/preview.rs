@@ -6,7 +6,6 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders};
 
 use super::form::Custom;
 use crate::tui::screens::view::{DigestPanel, TranscriptPanel};
@@ -75,18 +74,14 @@ impl Custom for Preview {
         if area.height < 4 || area.width < 4 {
             return;
         }
-        // `border: round $surface-lighten-2` on the page background.
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(
-                Style::default()
-                    .fg(theme.color("surface-lighten-2"))
-                    .bg(theme.color("background")),
-            )
-            .style(Style::default().bg(theme.color("background")));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            area,
+            "",
+            theme.color("border-blurred"),
+            theme.color("background"),
+            theme,
+        );
         let header = Rect::new(inner.x, inner.y, inner.width, 1);
         let style = Style::default()
             .bg(theme.color("primary"))
@@ -113,34 +108,11 @@ impl Custom for Preview {
         );
         self.transcript.render(frame, transcript, false, theme);
         self.digest.render(frame, digest, false, theme);
-        // Without the record screen's CSS, a panel title takes its border color,
-        // and the transcript log always shows its scrollbar track.
-        title_color(frame, transcript, " Transcript ", theme.color("primary"));
-        title_color(frame, digest, " Digest ", theme.color("secondary"));
-        let track = theme.color("scrollbar-background");
-        let x = transcript.right().saturating_sub(2);
-        for y in transcript.y + 1..transcript.bottom().saturating_sub(1) {
-            if let Some(cell) = frame.buffer_mut().cell_mut((x, y))
-                && cell.symbol() == " "
-            {
-                cell.set_bg(track);
-            }
-        }
         let status = Rect::new(inner.x, panels.bottom(), inner.width, status_height);
         self.status.render(frame, status, theme);
     }
 
     fn as_any(&mut self) -> &mut dyn Any {
         self
-    }
-}
-
-/// Recolor a panel's border title, drawn after `┌─`.
-fn title_color(frame: &mut Frame, panel: Rect, title: &str, color: ratatui::style::Color) {
-    let buffer = frame.buffer_mut();
-    for offset in 0..title.chars().count() as u16 {
-        if let Some(cell) = buffer.cell_mut((panel.x + 2 + offset, panel.y)) {
-            cell.set_fg(color);
-        }
     }
 }
