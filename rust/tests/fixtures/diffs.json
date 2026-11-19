@@ -1,0 +1,309 @@
+[
+ {
+  "old": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "new": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "out": []
+ },
+ {
+  "old": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "new": {
+   "metadata": {
+    "name": "N2",
+    "description": "D",
+    "locale": "zh-TW",
+    "key": "x"
+   },
+   "system_prompt": "S2",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "out": [
+   "name",
+   "locale",
+   "system prompt"
+  ]
+ },
+ {
+  "old": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "new": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "say \"hi\"",
+    "新詞"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "out": [
+   "recognition hints (+'say \"hi\"', +'新詞', -\"O'Brien\", -'貨代')"
+  ]
+ },
+ {
+  "old": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "new": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    },
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    }
+   ]
+  },
+  "out": [
+   "quick action order (keys 1-5 follow it)"
+  ]
+ },
+ {
+  "old": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a"
+    },
+    {
+     "label": "B",
+     "description": "",
+     "prompt_template": "b"
+    }
+   ]
+  },
+  "new": {
+   "metadata": {
+    "name": "N",
+    "description": "D",
+    "locale": "en",
+    "key": ""
+   },
+   "system_prompt": "S",
+   "digest_user_template": "",
+   "final_user_template": "",
+   "recognition_hints": [
+    "GoFreight",
+    "O'Brien",
+    "貨代"
+   ],
+   "quick_actions": [
+    {
+     "label": "A",
+     "description": "",
+     "prompt_template": "a2"
+    },
+    {
+     "label": "C'",
+     "description": "",
+     "prompt_template": "c"
+    }
+   ]
+  },
+  "out": [
+   "quick action 'B' removed",
+   "quick action 'A' changed",
+   "quick action \"C'\" added"
+  ]
+ }
+]
