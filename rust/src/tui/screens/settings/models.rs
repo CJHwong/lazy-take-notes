@@ -529,22 +529,9 @@ impl Custom for LanguageEditor {
         self.hits.clone()
     }
 
-    fn open_select(&self, origin: (u16, u16), screen: Rect) -> Option<(Rect, Vec<String>)> {
-        let index = self.open_row()?;
-        let select = &self.rows[index].model;
-        let below = Rect::new(
-            origin.0 + 14,
-            origin.1 + index as u16 * 3 + 3,
-            self.model_width,
-            1,
-        );
-        let rect = super::form::overlay_area(below, select.overlay_height(), screen);
-        let labels = select
-            .options()
-            .iter()
-            .map(|(label, _)| label.clone())
-            .collect();
-        Some((rect, labels))
+    fn open_select(&self) -> Option<(Vec<(Rect, usize)>, usize)> {
+        let select = &self.rows[self.open_row()?].model;
+        Some((select.drawn_rows(), select.options().len()))
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, focus: Option<usize>, theme: &Theme) {

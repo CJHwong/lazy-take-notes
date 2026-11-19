@@ -142,6 +142,16 @@ impl ListCursor {
         (!self.disabled.get(item).copied().unwrap_or(false)).then_some(item)
     }
 
+    /// Each screen row of the last draw with the item it shows.
+    pub fn drawn_rows(&self) -> Vec<(Rect, usize)> {
+        (self.area.top()..self.area.bottom())
+            .filter_map(|y| {
+                let item = self.item_at(y)?;
+                Some((Rect::new(self.area.x, y, self.area.width, 1), item))
+            })
+            .collect()
+    }
+
     /// A click at screen row `y`: highlight the item there. Returns it, and
     /// whether it already had the highlight (a second click opens it).
     pub fn click(&mut self, y: u16) -> Option<(usize, bool)> {
