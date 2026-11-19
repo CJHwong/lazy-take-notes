@@ -29,5 +29,5 @@ yaml_serde = "0.10.7"
 
 [dev-dependencies]
 tempfile = "3.27.0"
-tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time", "test-util"] }
 tracing-subscriber = "0.3.23"

@@ -4,6 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::adapters::pyrepr::py_dumps;
 use crate::domain::session_status::SessionStatus;
 
 pub const STATUS_FILE: &str = ".status.json";
@@ -12,10 +13,8 @@ pub const STATUS_FILE: &str = ".status.json";
 pub fn write_status(session_dir: &Path, status: &SessionStatus) -> io::Result<PathBuf> {
     let path = session_dir.join(STATUS_FILE);
     let temp = session_dir.join(format!("{STATUS_FILE}.tmp"));
-    fs::write(
-        &temp,
-        serde_json::to_string(status).map_err(io::Error::other)?,
-    )?;
+    // Byte for byte what the Python version writes.
+    fs::write(&temp, py_dumps(status).map_err(io::Error::other)?)?;
     fs::rename(&temp, &path)?;
     Ok(path)
 }
@@ -65,6 +64,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_status(dir.path()), None);
+    }
+
+    #[test]
+    fn the_status_file_has_the_python_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let status = SessionStatus {
+            state: "error".into(),
+            pid: 7,
+            started_at: "x".into(),
+            updated_at: "y".into(),
+            segment_count: 2,
+            digest_count: 0,
+            error: "模型 \"breeze\" 失敗 😀".into(),
+        };
+        let path = write_status(dir.path(), &status).unwrap();
+        // From Python: json.dumps(asdict(status)).
+        let python = r#"{"state": "error", "pid": 7, "started_at": "x", "updated_at": "y", "segment_count": 2, "digest_count": 0, "error": "\u6a21\u578b \"breeze\" \u5931\u6557 \ud83d\ude00"}"#;
+        assert_eq!(fs::read_to_string(path).unwrap(), python);
+        assert_eq!(read_status(dir.path()), Some(status));
     }
 
     #[test]

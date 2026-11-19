@@ -37,6 +37,68 @@ pub fn py_str_json(value: &Value) -> String {
     }
 }
 
+/// Python's `json.dumps(value)` with its defaults: `", "` and `": "` between
+/// items, and every non-ASCII character escaped as `\uXXXX`.
+pub fn py_dumps<T: serde::Serialize + ?Sized>(value: &T) -> serde_json::Result<String> {
+    let mut out = Vec::new();
+    let mut serializer = serde_json::Serializer::with_formatter(&mut out, PythonDefaults);
+    value.serialize(&mut serializer)?;
+    Ok(String::from_utf8(out).expect("the formatter writes ASCII"))
+}
+
+struct PythonDefaults;
+
+impl serde_json::ser::Formatter for PythonDefaults {
+    fn begin_array_value<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        first: bool,
+    ) -> std::io::Result<()> {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+
+    fn begin_object_key<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        first: bool,
+    ) -> std::io::Result<()> {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+
+    fn begin_object_value<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+    ) -> std::io::Result<()> {
+        writer.write_all(b": ")
+    }
+
+    fn write_string_fragment<W: ?Sized + std::io::Write>(
+        &mut self,
+        writer: &mut W,
+        fragment: &str,
+    ) -> std::io::Result<()> {
+        for character in fragment.chars() {
+            if character.is_ascii() {
+                writer.write_all(&[character as u8])?;
+                continue;
+            }
+            let mut units = [0u16; 2];
+            for unit in character.encode_utf16(&mut units) {
+                write!(writer, "\\u{unit:04x}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
