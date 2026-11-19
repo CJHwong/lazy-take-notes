@@ -8,6 +8,28 @@ The Rust version replaces the Python app once it is stable. Until then the Pytho
 - Platforms at the swap: macOS. Linux and Windows system audio come later; Linux loopback needs a spike first.
 - Plugins: none in the first version. Ollama and OpenAI-compatible are built in.
 - Data: drop-in. Both versions read and write the same files.
+- Look: ratatui's idiom, not Textual's. The key bindings and the text stay Python's; the drawing does not. See "Look and mouse" below.
+
+## Look and mouse
+
+The screens follow these rules, over the colors of the saved theme:
+
+1. A box is a rounded border with its title in the top border. A focused box has a `$primary` border. Any other box has a quiet line: the background moved 30% toward the foreground (`widgets::quiet_line`), because most dark themes set `border-blurred` too close to the background.
+2. A button is one row: bold text in its variant's color, or `▌ Label ▐` on that color while it has the focus.
+3. An input is a 3-row rounded box. Where a label sat above it, the label is the box's title.
+4. A select shows `value ▾` in a rounded box and opens a rounded list over the screen.
+5. A list marks the selected row with `▶` and the highlight colors.
+6. A scrollbar is one column on the box's right edge: a `│` track in the quiet line color and a `┃` thumb in `$primary`.
+7. A dialog is a rounded box with its title in the border, over a lighter dim (40%) of the screen below.
+8. A toast is a rounded box at the bottom right, its border colored by severity.
+
+The mouse:
+
+- The terminal reports mouse events while the app runs, and stops before an editor opens and at exit. To select text in Ghostty, hold Shift and drag.
+- While drawing, each widget records its rectangle (`Ctx::hit`). The host sends a click or a wheel step to the top screen, with the widget under the pointer (`Screen::mouse`). A screen that does not handle the wheel gets up and down keys.
+- A click focuses a box, an input or a select, and presses a button. In a picker, a click on a row highlights it and a second click picks it. The welcome menu opens a mode on one click. The wheel scrolls the box under the pointer.
+- A click on a `[key] label` hint in a status bar or footer presses that key (`widgets::hint_targets`). Hints that name no single key (`[↑/↓]`) take no click.
+- A click on a toast closes it. A click outside a dialog does nothing.
 
 ## Data contract
 
@@ -22,7 +44,7 @@ The two versions must work on the same data, in both directions:
 ## Non-goals
 
 - Python plugin compatibility
-- New features, or behavior changes during the port
+- New features, or behavior changes during the port. The look and the mouse are the one exception, asked for after the port.
 - Removing the Python version
 
 ## Verification
@@ -31,7 +53,7 @@ The two versions must work on the same data, in both directions:
 - `scripts/llm_parity.py` drives both versions' LLM clients against one failing local server and compares the shown text and the request count.
 - `scripts/whisper_parity.py` transcribes the start of a real recording in both versions the way the file worker does, with a template's hints, and compares every segment's text and times.
 - `examples/cross_check.rs record DIR SECONDS` records the real mic and system audio into a session WAV, and prints health changes and the delivered audio against wall time. `tone` measures the test tone in the tap. `mic-levels DEVICE SECONDS` reads one input device. `list-devices SECONDS` prints the input list every 0.5 s. `record DIR SECONDS DEVICE` records from a chosen input; changing that device's nominal rate mid-run tests the mic's stop and reopen. Fault runs: `kill -STOP` and `kill -9` on the tap pid, and a small `hdiutil` disk image filled, freed, with the WAV moved and the folder removed.
-- `scripts/tui_compare.sh "ARGS" KEY... snap` runs both TUIs in tmux at one size, sends the same keys, and diffs the screen text at each `snap`. `scripts/gen_bindings.py` records every Python screen's merged key table into `tests/fixtures/bindings.json`; `tests/tui_bindings.rs` checks the Rust tables against it. `scripts/gen_themes.py` writes Textual's generated theme colors into `src/tui/themes.json`.
+- `scripts/tui_compare.sh "ARGS" KEY... snap` runs both TUIs in tmux at one size, sends the same keys, and diffs the screen text at each `snap`. Since the new look, the layouts differ: use it to compare the words on a screen, not their places. `scripts/gen_bindings.py` records every Python screen's merged key table into `tests/fixtures/bindings.json`; `tests/tui_bindings.rs` checks the Rust tables against it. `scripts/gen_themes.py` writes Textual's generated theme colors into `src/tui/themes.json`.
 - `scripts/cross_check.py` compares both versions on copies of the real config, templates, sessions and model cache.
 - Each fixed bug listed in AGENTS.md gets a named Rust test.
 - Before a step is done: a real run (headless record of a call, transcribe of a saved file, Rust `view` of a session Python recorded, and the reverse).
@@ -101,3 +123,5 @@ The two versions must work on the same data, in both directions:
 38. A value that fails validation shows the Rust validator's message, not pydantic's.
 39. The download progress bar is drawn with the same width, colors and percentage, but its partial cells are not Textual's exact glyphs.
 40. In the template builder, Python showed "Unexpected error: ScreenStackError: Can't pop screen; there must be at least one screen on the stack." when Escape came right after a save. Rust shows no error there. The Python bug stays as it is.
+41. The look follows ratatui's idiom, not Textual's (see "Look and mouse"). The words, the key bindings and what each key does are the same; boxes, buttons, inputs, lists, scrollbars, dialogs and toasts are drawn differently, and most screens use fewer rows.
+42. Textual handled the mouse on every widget, drag included. Rust handles clicks and the wheel as in "Look and mouse", and no drag: no text selection inside an input or text area, and no scrollbar dragging.
