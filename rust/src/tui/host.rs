@@ -48,6 +48,9 @@ pub enum Msg {
     Worker(Event),
     Task(Payload),
     Signal(i32),
+    /// A worker or task result from the screen with this id. It is dropped
+    /// when that screen is gone, as Textual drops a message to a removed screen.
+    From(u64, Box<Msg>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,9 +76,11 @@ pub struct Ctx {
     exit_at: Option<Instant>,
     exit_now: bool,
     suspend_job: Option<SuspendJob>,
+    /// The id of the screen the host is calling now.
+    current: u64,
 }
 
-type SuspendJob = Box<dyn FnOnce() -> Payload + Send>;
+type SuspendJob = (Box<dyn FnOnce() -> Payload + Send>, u64);
 
 impl Ctx {
     pub fn notify(&mut self, text: impl Into<String>) {
@@ -117,9 +122,10 @@ impl Ctx {
         F: Future<Output = T> + Send + 'static,
     {
         let sender = self.sender.clone();
+        let from = self.current;
         self.runtime
             .spawn(async move {
-                let _ = sender.send(Msg::Task(Box::new(future.await)));
+                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(future.await)))));
             })
             .abort_handle()
     }
@@ -131,10 +137,11 @@ impl Ctx {
         F: FnOnce() -> T + Send + 'static,
     {
         let sender = self.sender.clone();
+        let from = self.current;
         let spawned = std::thread::Builder::new()
             .name(name.into())
             .spawn(move || {
-                let _ = sender.send(Msg::Task(Box::new(job())));
+                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(job())))));
             });
         if let Err(e) = spawned {
             error!(target: "ltn.app", "Cannot start thread {name}: {e}");
@@ -143,16 +150,20 @@ impl Ctx {
 
     /// A sender a thread keeps to post several results, each as `Msg::Task`.
     pub fn task_sender(&self) -> TaskSender {
-        TaskSender(self.sender.clone())
+        TaskSender(self.sender.clone(), self.current)
     }
 
     /// A poster whose events arrive as `Msg::Worker`.
     pub fn poster(&self) -> Poster {
         let (events, mut received) = unbounded_channel();
         let sender = self.sender.clone();
+        let from = self.current;
         self.runtime.spawn(async move {
             while let Some(event) = received.recv().await {
-                if sender.send(Msg::Worker(event)).is_err() {
+                if sender
+                    .send(Msg::From(from, Box::new(Msg::Worker(event))))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -180,22 +191,24 @@ impl Ctx {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        self.suspend_job = Some(Box::new(move || Box::new(job()) as Payload));
+        self.suspend_job = Some((Box::new(move || Box::new(job()) as Payload), self.current));
     }
 
     /// The job a screen asked to run suspended, for tests.
     pub fn take_suspend_job(&mut self) -> Option<Box<dyn FnOnce() -> Payload + Send>> {
-        self.suspend_job.take()
+        self.suspend_job.take().map(|(job, _)| job)
     }
 }
 
 /// Posts payloads to the loop from any thread. A post after the loop ended is dropped.
 #[derive(Clone)]
-pub struct TaskSender(UnboundedSender<Msg>);
+pub struct TaskSender(UnboundedSender<Msg>, u64);
 
 impl TaskSender {
     pub fn post<T: Send + 'static>(&self, payload: T) {
-        let _ = self.0.send(Msg::Task(Box::new(payload)));
+        let _ = self
+            .0
+            .send(Msg::From(self.1, Box::new(Msg::Task(Box::new(payload)))));
     }
 }
 
@@ -344,6 +357,11 @@ impl ErrorTracker {
 
 pub struct Host {
     stack: Vec<Box<dyn Screen>>,
+    /// One id per screen in `stack`, never reused.
+    ids: Vec<u64>,
+    next_id: u64,
+    /// The screen that started the suspended job.
+    suspended_by: u64,
     ctx: Ctx,
     receiver: UnboundedReceiver<Msg>,
     errors: ErrorTracker,
@@ -356,6 +374,9 @@ impl Host {
         let (sender, receiver) = unbounded_channel();
         Self {
             stack: Vec::new(),
+            ids: Vec::new(),
+            next_id: 1,
+            suspended_by: 0,
             ctx: Ctx {
                 theme: Theme::load(theme),
                 toasts: Vec::new(),
@@ -364,6 +385,7 @@ impl Host {
                 exit_at: None,
                 exit_now: false,
                 suspend_job: None,
+                current: 0,
             },
             receiver,
             errors: ErrorTracker::default(),
@@ -412,6 +434,7 @@ impl Host {
             return Action::None;
         };
         let ctx = &mut self.ctx;
+        ctx.current = self.ids.last().copied().unwrap_or(0);
         match catching(|| body(screen.as_mut(), ctx)) {
             Ok(action) => action,
             Err(message) => {
@@ -424,6 +447,8 @@ impl Host {
 
     pub fn push(&mut self, screen: Box<dyn Screen>) {
         self.stack.push(screen);
+        self.ids.push(self.next_id);
+        self.next_id += 1;
         let action = self.guarded(|screen, ctx| screen.mounted(ctx));
         self.apply(action);
     }
@@ -434,10 +459,12 @@ impl Host {
             Action::Push(screen) => self.push(screen),
             Action::Replace(screen) => {
                 self.stack.pop();
+                self.ids.pop();
                 self.push(screen);
             }
             Action::Pop(result) => {
                 self.stack.pop();
+                self.ids.pop();
                 if self.stack.is_empty() {
                     self.result = result;
                     return;
@@ -457,6 +484,7 @@ impl Host {
         match action {
             Action::Pop(result) if index + 1 < self.stack.len() => {
                 self.stack.truncate(index + 1);
+                self.ids.truncate(index + 1);
                 self.apply(Action::Pop(result));
             }
             Action::Replace(_) if index + 1 < self.stack.len() => {
@@ -521,6 +549,11 @@ impl Host {
             self.on_signal(signum);
             return;
         }
+        let msg = match msg {
+            Msg::From(id, inner) if self.ids.contains(&id) => *inner,
+            Msg::From(..) => return,
+            other => other,
+        };
         let mut pending = Some(msg);
         for index in (0..self.stack.len()).rev() {
             let Some(msg) = pending.take() else {
@@ -532,6 +565,7 @@ impl Host {
                 continue;
             };
             let ctx = &mut self.ctx;
+            ctx.current = self.ids[index];
             let outcome = catching(|| screen.message(msg, ctx));
             let action = match outcome {
                 Ok((back, action)) => {
@@ -555,6 +589,7 @@ impl Host {
         while index < self.stack.len() {
             let screen = &mut self.stack[index];
             let ctx = &mut self.ctx;
+            ctx.current = self.ids[index];
             let outcome = catching(|| screen.tick(ctx));
             match outcome {
                 Ok(action) => self.apply_from(index, action),
@@ -637,7 +672,8 @@ impl Host {
         let mut input = Some(EventStream::new());
         let mut ticks = tokio::time::interval(TICK);
         while !self.finished() {
-            if let Some(job) = self.ctx.suspend_job.take() {
+            if let Some((job, by)) = self.ctx.suspend_job.take() {
+                self.suspended_by = by;
                 // The input reader must stop first, or it takes the editor's keys.
                 drop(input);
                 let payload = terminal::suspended(job)?;
@@ -652,7 +688,7 @@ impl Host {
                 )?;
                 terminal.swap_buffers();
                 terminal.swap_buffers();
-                self.message(Msg::Task(payload));
+                self.message(Msg::From(self.suspended_by, Box::new(Msg::Task(payload))));
                 continue;
             }
             // A closed window fails every write. The session must still stop and save,
