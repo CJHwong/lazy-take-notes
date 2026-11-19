@@ -85,7 +85,7 @@ The two versions must work on the same data, in both directions:
 22. A template that does not load is left out of the template picker, with a warning in `debug.log`. Python crashed the picker.
 23. An editor that fails to start after `e` in the template picker is logged, and the picker stays open. Python crashed.
 24. Home, End, Page Up and Page Down in a list scroll the list and leave the highlight where it is, as Textual's `ListView` does. Earlier Rust builds moved the highlight.
-25. A few colors differ by up to 5 levels per channel: inline code in Markdown, and dim text after Textual's rounding. The left edge of an input's border sits on the theme background, not the terminal's default background.
+25. A few colors differ by up to 5 levels per channel: inline code in Markdown, and dim text after Textual's rounding. For inline code, Python's background is darker than the warning color at 10% over the background, and I have not found the step in Textual that makes it so. The left edge of an input's border sits on the theme background, not the terminal's default background.
 26. `record` without `--headless` shows the preflight screen in the saved theme. Python showed it in Textual's default theme there, and in the saved theme only inside the kiosk shell.
 27. The "Quick actions disabled" warning shows once when a recording starts. Python showed the same toast twice.
 28. A template that the builder saves, and a `config.yaml` that Settings saves, hold the same data as Python's files but not the same bytes. PyYAML writes a multi-line string in single quotes and folds long lines at 80 columns; Rust writes a `|-` block and keeps each line whole. Each version reads the other's files.
@@ -100,3 +100,4 @@ The two versions must work on the same data, in both directions:
 37. When config.yaml cannot be parsed, the toast quotes the Rust YAML parser's message. The sentences around it are the same.
 38. A value that fails validation shows the Rust validator's message, not pydantic's.
 39. The download progress bar is drawn with the same width, colors and percentage, but its partial cells are not Textual's exact glyphs.
+40. In the template builder, Python showed "Unexpected error: ScreenStackError: Can't pop screen; there must be at least one screen on the stack." when Escape came right after a save. Rust shows no error there. The Python bug stays as it is.
