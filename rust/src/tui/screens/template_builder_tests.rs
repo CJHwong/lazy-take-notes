@@ -12,7 +12,7 @@ use crate::adapters::paths::Paths;
 use crate::ports::llm::ChatResponse;
 use crate::tui::host::Host;
 
-/// Replies in order; an `Err` reply fails the call.
+/// Replies in order; an `Err` reply fails the call, and one of kind `panic!` panics.
 struct Scripted(Mutex<VecDeque<Result<String, LlmError>>>);
 
 #[async_trait]
@@ -28,6 +28,11 @@ impl LlmClient for Scripted {
             .unwrap()
             .pop_front()
             .expect("a scripted reply");
+        if let Err(e) = &next
+            && e.kind == "panic!"
+        {
+            panic!("{}", e.message);
+        }
         next.map(|content| ChatResponse {
             content,
             prompt_tokens: 1,
@@ -359,4 +364,20 @@ fn a_setup_error_shows_and_the_next_send_tries_again() {
     run.send("two");
     assert_eq!(*tries.lock().unwrap(), 2);
     assert!(run.screen().contains("AI: Error: Unknown LLM provider 'x'"));
+}
+
+#[test]
+fn a_panicking_call_shows_an_error_and_the_builder_still_works() {
+    let mut run = start(
+        vec![
+            Err(LlmError::new("panic!", "client bug")),
+            Ok("Which language?".into()),
+        ],
+        None,
+    );
+    run.send("first");
+    let screen = run.screen();
+    assert!(screen.contains("client bug"), "{screen}");
+    run.send("second");
+    assert!(run.screen().contains("AI: Which language?"));
 }

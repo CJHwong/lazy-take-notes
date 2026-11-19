@@ -511,13 +511,23 @@ impl TemplateBuilderScreen {
         let ready = self.ready.as_ref().expect("set above");
         let builder = self.builder.take().expect("no call is running");
         let history = std::mem::take(&mut self.history);
-        self.task = Some(ctx.spawn(run_turn(
-            builder,
-            history,
-            ready.llm.clone(),
-            ready.model.clone(),
-            text,
-        )));
+        // A panic in the call gives the builder back as it was, ready for a retry,
+        // as Python's `except Exception` does.
+        let (kept_builder, kept_history) = (builder.clone(), history.clone());
+        self.task = Some(ctx.spawn_or(
+            run_turn(
+                builder,
+                history,
+                ready.llm.clone(),
+                ready.model.clone(),
+                text,
+            ),
+            move |message| TurnDone {
+                builder: kept_builder,
+                history: kept_history,
+                turn: Turn::Failed(LlmError::new("panic", message)),
+            },
+        ));
     }
 
     fn turn_done(&mut self, done: TurnDone) {
