@@ -48,7 +48,21 @@ pub fn load_config(config_path: Option<&Path>, output_dir: Option<&str>) -> Resu
 
 /// The base output folder, with `~` expanded.
 pub fn resolve_base_dir(paths: &Paths, output_dir: Option<&str>, config: &AppConfig) -> PathBuf {
-    paths.expand_user(output_dir.unwrap_or(&config.output.directory))
+    as_python_path(&paths.expand_user(output_dir.unwrap_or(&config.output.directory)))
+}
+
+/// The path as Python's `Path` keeps it: no `.` parts and no trailing slash, so
+/// `./output/` prints as `output`.
+fn as_python_path(path: &Path) -> PathBuf {
+    let kept: PathBuf = path
+        .components()
+        .filter(|part| *part != std::path::Component::CurDir)
+        .collect();
+    if kept.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        kept
+    }
 }
 
 static UNSAFE_LABEL: LazyLock<Regex> =
@@ -136,6 +150,17 @@ pub fn build_mixed_source(config: &AppConfig) -> Arc<MixedAudioSource> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_base_dir_drops_dot_parts_as_python_path_does() {
+        assert_eq!(
+            as_python_path(Path::new("./output/")),
+            PathBuf::from("output")
+        );
+        assert_eq!(as_python_path(Path::new("a/./b")), PathBuf::from("a/b"));
+        assert_eq!(as_python_path(Path::new("./")), PathBuf::from("."));
+        assert_eq!(as_python_path(Path::new("/tmp/x")), PathBuf::from("/tmp/x"));
+    }
 
     #[test]
     fn a_label_keeps_word_characters_and_dashes() {
