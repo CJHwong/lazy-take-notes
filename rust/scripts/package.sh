@@ -29,5 +29,6 @@ cargo build --release --manifest-path "$RUST_DIR/Cargo.toml"
 mkdir -p "$STAGE"
 cp "$RUST_DIR/target/release/lazy-take-notes" "$STAGE/"
 cp "$TAP" "$STAGE/"
-tar -czf "$RUST_DIR/dist/$NAME.tar.gz" -C "$RUST_DIR/dist" "$NAME"
+# COPYFILE_DISABLE: no ._ AppleDouble files for the extended attributes.
+COPYFILE_DISABLE=1 tar -czf "$RUST_DIR/dist/$NAME.tar.gz" -C "$RUST_DIR/dist" "$NAME"
 echo "$RUST_DIR/dist/$NAME.tar.gz"

@@ -27,6 +27,8 @@ The script first warns that a piped script runs as you and asks `[Y/n]`. An agen
 
 Then run `take-note record`.
 
+On a Mac with Apple silicon, every install method runs the native (Rust) build of the app: the first start downloads it once and checks it against a pinned SHA-256. Other systems run the Python version. If the download fails, the app runs the Python version and says why. `LTN_PYTHON=1 take-note` always runs the Python version.
+
 ### Manual install
 
 ```bash
