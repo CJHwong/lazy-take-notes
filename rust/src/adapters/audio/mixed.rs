@@ -21,7 +21,8 @@ use tracing::{info, warn};
 
 use super::buffer::AudioBuffer;
 use super::mic_boost::MicBoost;
-use crate::ports::audio_source::{AudioError, AudioSource};
+use crate::ports::audio_source::{AudioError, AudioSource, QueueSizes};
+pub use crate::ports::audio_source::{Health, SourceHealth};
 
 pub type TestTone = Box<dyn Fn() -> bool + Send + Sync>;
 
@@ -53,19 +54,6 @@ impl Default for MixTiming {
             join_wait: seconds(2.0),
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SourceHealth {
-    Ok,
-    Lost,
-    Silent,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Health {
-    pub mic: SourceHealth,
-    pub system: SourceHealth,
 }
 
 /// A flag that threads can wait on, like Python's `threading.Event`.
@@ -200,46 +188,6 @@ impl MixedAudioSource {
             mix: Mutex::new(mix),
             readers: Mutex::default(),
         }
-    }
-
-    pub fn health(&self) -> Health {
-        let inner = &self.inner;
-        let status = inner.status.lock().expect("status lock");
-        let mic_lost = status.has_error(true) || inner.stalled(&status, true);
-        let system_lost =
-            status.has_error(false) || status.deaf_system || inner.stalled(&status, false);
-        let mic = if mic_lost {
-            SourceHealth::Lost
-        } else if status.silent_mic {
-            SourceHealth::Silent
-        } else {
-            SourceHealth::Ok
-        };
-        Health {
-            mic,
-            system: if system_lost {
-                SourceHealth::Lost
-            } else {
-                SourceHealth::Ok
-            },
-        }
-    }
-
-    /// Current delivery failures, including recovery in progress.
-    pub fn source_errors(&self) -> Vec<String> {
-        self.inner
-            .status
-            .lock()
-            .expect("status lock")
-            .errors
-            .iter()
-            .map(|(_, message)| message.clone())
-            .collect()
-    }
-
-    /// Whether a silent tap is proven with the test tone, so silence alone says nothing.
-    pub fn verifies_system_audio(&self) -> bool {
-        self.inner.test_tone.is_some() && self.inner.system.continuous_capture()
     }
 
     /// The mic level of the newest block, before gain and mute.
@@ -744,6 +692,54 @@ impl AudioSource for MixedAudioSource {
 
     fn device_notice(&self) -> String {
         self.inner.mic.device_notice()
+    }
+
+    fn health(&self) -> Option<Health> {
+        let inner = &self.inner;
+        let status = inner.status.lock().expect("status lock");
+        let mic_lost = status.has_error(true) || inner.stalled(&status, true);
+        let system_lost =
+            status.has_error(false) || status.deaf_system || inner.stalled(&status, false);
+        let mic = if mic_lost {
+            SourceHealth::Lost
+        } else if status.silent_mic {
+            SourceHealth::Silent
+        } else {
+            SourceHealth::Ok
+        };
+        Some(Health {
+            mic,
+            system: if system_lost {
+                SourceHealth::Lost
+            } else {
+                SourceHealth::Ok
+            },
+        })
+    }
+
+    /// Current delivery failures, including recovery in progress.
+    fn source_errors(&self) -> Vec<String> {
+        self.inner
+            .status
+            .lock()
+            .expect("status lock")
+            .errors
+            .iter()
+            .map(|(_, message)| message.clone())
+            .collect()
+    }
+
+    /// Whether a silent tap is proven with the test tone, so silence alone says nothing.
+    fn verifies_system_audio(&self) -> bool {
+        self.inner.test_tone.is_some() && self.inner.system.continuous_capture()
+    }
+
+    fn queue_sizes(&self) -> Option<QueueSizes> {
+        Some(QueueSizes {
+            mic_blocks: self.inner.mic_queue.len(),
+            system_blocks: self.inner.system_queue.len(),
+            system_buffered: self.mix.lock().expect("mix lock").system_buffer.len(),
+        })
     }
 
     fn dropped_frames(&self) -> u64 {
