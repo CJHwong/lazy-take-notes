@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from lazy_take_notes.l3_interface_adapters.gateways._audio_buffer import AudioBuffer
+from lazy_take_notes.l3_interface_adapters.gateways.mic_boost import MicBoost
 
 if TYPE_CHECKING:
     from lazy_take_notes.l2_use_cases.ports.audio_source import AudioSource
@@ -82,14 +83,8 @@ class MixedAudioSource:
         self.mic_muted: bool = False
         # Pre-amplification mic RMS from the most recent read().
         self.last_mic_rms: float = 0.0
-        # Auto-amplification state.
-        self._target_mic_rms = silence_threshold * 2.5
-        self._noise_floor = 0.003
-        self._max_mic_gain = max_mic_gain
-        self._mic_rms_ema: float = 0.0
-        self._sys_rms_ema: float = 0.0
-        self._mic_gain: float = 1.0
-        self._gain_logged: bool = False
+        # Target is the level of speech frames, which sits about twice the average level.
+        self._boost = MicBoost(target_rms=silence_threshold * 5, max_gain=max_mic_gain)
 
     @property
     def system_signal_seen(self) -> bool:
@@ -150,6 +145,7 @@ class MixedAudioSource:
         if self._threads:
             raise RuntimeError('Mixed audio source is already open')
         self._sample_rate = sample_rate
+        self._boost.sample_rate = sample_rate
         self._channels = channels
         self._mic_q = AudioBuffer(
             max_frames=max(1, sample_rate // 4), sample_rate=sample_rate, label='mixed microphone'
@@ -407,66 +403,29 @@ class MixedAudioSource:
         # Pre-mute, pre-mix mic RMS. np.dot avoids a temporary mic**2 allocation.
         self.last_mic_rms = math.sqrt(float(np.dot(mic, mic)) / mic.size) if mic.size else 0.0
 
-        # Update EMA of mic RMS (~2s convergence at 31 Hz with alpha=0.05).
-        if self.last_mic_rms > 0:
-            if self._mic_rms_ema == 0.0:
-                self._mic_rms_ema = self.last_mic_rms  # seed on first non-zero read
-            else:
-                self._mic_rms_ema += 0.05 * (self.last_mic_rms - self._mic_rms_ema)
-
-        # Auto-amplify: when EMA indicates "speaking but below VAD gate" AND the
-        # system audio EMA shows the loopback is silent, boost mic so speech clears
-        # silence_threshold. The sys-quiet gate prevents amplifying acoustic bleed
-        # (speaker → mic) when the user is on speakers — without it, the remote
-        # voice gets doubled in the mix. Peak limiter catches overflow.
-        if (
-            self._mic_rms_ema > self._noise_floor
-            and self._mic_rms_ema < self._target_mic_rms
-            and self._sys_rms_ema <= self._noise_floor
-        ):
-            self._mic_gain = min(self._target_mic_rms / self._mic_rms_ema, self._max_mic_gain)
-            if not self._gain_logged:
-                log.info(
-                    'auto-amplifying mic: ema=%.4f target=%.4f gain=%.1fx',
-                    self._mic_rms_ema,
-                    self._target_mic_rms,
-                    self._mic_gain,
-                )
-                self._gain_logged = True
-        else:
-            self._mic_gain = 1.0
-
-        if self._mic_gain > 1.0:
-            mic = mic * self._mic_gain
+        system = self._take_system_window(mic.size)
+        mic = self._boost.apply(mic, np.zeros_like(mic) if system is None else system)
 
         # Zero mic data when muted — reader threads keep running to preserve
         # stream state; we just silence the mic contribution.
         if self.mic_muted:
             mic *= 0
 
-        if len(self._sys_buf) == 0:
-            return mic  # no system audio yet; pass mic through at full amplitude
+        if system is None:
+            return self._limit_peak(mic)  # no system audio yet; pass mic through at full amplitude
+        return self._limit_peak(mic + system)
 
-        # Consume exactly len(mic) samples from the system buffer so both sides
-        # cover the same time window regardless of their native chunk sizes.
-        n = len(mic)
-        if len(self._sys_buf) >= n:
-            sys = self._sys_buf[:n]
-            self._sys_buf = self._sys_buf[n:]
-        else:
-            # System buffer is shorter than mic chunk; zero-pad the tail.
-            sys = np.pad(self._sys_buf, (0, n - len(self._sys_buf)))
-            self._sys_buf = np.array([], dtype=np.float32)
-
-        # Track system audio activity for next read's amp gate (one-chunk lag is
-        # well below the EMA time constant). Same alpha as mic EMA for symmetry.
-        sys_rms = math.sqrt(float(np.dot(sys, sys)) / sys.size) if sys.size else 0.0
-        if self._sys_rms_ema == 0.0:
-            self._sys_rms_ema = sys_rms
-        else:
-            self._sys_rms_ema += 0.05 * (sys_rms - self._sys_rms_ema)
-
-        return self._limit_peak(mic + sys)
+    def _take_system_window(self, size: int) -> np.ndarray | None:
+        """Take exactly size system samples, zero-padded, so both sides cover the same time window."""
+        if not self._sys_buf.size:
+            return None
+        if self._sys_buf.size >= size:
+            system = self._sys_buf[:size]
+            self._sys_buf = self._sys_buf[size:]
+            return system
+        system = np.pad(self._sys_buf, (0, size - self._sys_buf.size))
+        self._sys_buf = np.array([], dtype=np.float32)
+        return system
 
     @staticmethod
     def _limit_peak(samples: np.ndarray) -> np.ndarray:
@@ -480,10 +439,7 @@ class MixedAudioSource:
             self._discard(source_queue)
         self._sys_buf = np.array([], dtype=np.float32)
         self.last_mic_rms = 0.0
-        self._mic_rms_ema = 0.0
-        self._sys_rms_ema = 0.0
-        self._mic_gain = 1.0
-        self._gain_logged = False
+        self._boost.reset()
 
     def drain(self) -> None:
         self._clear_buffers()
