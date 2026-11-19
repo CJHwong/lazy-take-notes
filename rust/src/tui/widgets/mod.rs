@@ -4,6 +4,7 @@ pub mod button;
 pub mod input;
 pub mod list;
 pub mod scroll;
+pub mod select;
 pub mod status_bar;
 pub mod text_area;
 

@@ -85,6 +85,8 @@ pub enum Command {
     /// Build a custom template with AI assistance.
     #[command(name = "create-template")]
     CreateTemplate,
+    /// Open the configuration editor.
+    Config,
 }
 
 /// Parse the arguments and run the command. Returns the exit code.
@@ -115,6 +117,7 @@ pub fn main() -> i32 {
         Some(Command::Status { session }) => status(config, output_dir, session.as_deref()),
         Some(Command::View) => view(config, output_dir),
         Some(Command::CreateTemplate) => create_template(config),
+        Some(Command::Config) => settings(config),
     };
     result.unwrap_or_else(|message| fail(&message))
 }
@@ -260,6 +263,23 @@ fn create_template(config: Option<&Path>) -> Result<i32, String> {
     )
     .map_err(|e| e.to_string())?;
     // A call still running ends with the builder.
+    runtime.shutdown_background();
+    Ok(0)
+}
+
+/// Settings on its own, as Python's `config` command.
+fn settings(config: Option<&Path>) -> Result<i32, String> {
+    let paths = crate::adapters::paths::Paths::for_user().ok_or("no home folder")?;
+    let runtime = crate::app::headless_run::new_runtime()?;
+    let screen =
+        crate::tui::screens::settings::SettingsScreen::new(paths, config.map(Path::to_path_buf));
+    crate::tui::host::run_screen(
+        Box::new(screen),
+        &crate::tui::system::saved_theme(),
+        runtime.handle().clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    // A download or a probe still running stops with Settings; a .part file stays for resume.
     runtime.shutdown_background();
     Ok(0)
 }

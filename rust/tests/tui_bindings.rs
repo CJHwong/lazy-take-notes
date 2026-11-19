@@ -113,3 +113,13 @@ fn welcome_picker() {
     use lazy_take_notes::tui::screens::welcome::WELCOME_BINDINGS;
     assert_table("pickers.welcome_picker.WelcomePicker", &WELCOME_BINDINGS);
 }
+
+#[test]
+fn settings_and_its_dialogs() {
+    use lazy_take_notes::tui::screens::settings::{DISCARD_BINDINGS, SETTINGS_BINDINGS};
+    assert_table("apps.config.app.ConfigApp", &SETTINGS_BINDINGS);
+    assert_table(
+        "apps.config.dialogs._DiscardChangesModal",
+        &DISCARD_BINDINGS,
+    );
+}

@@ -101,6 +101,20 @@ pub fn check_transcription_provider(infra: &InfraConfig) -> Result<(), String> {
     ))
 }
 
+/// The microphone and the system audio as two sources, for the Settings input test.
+pub fn build_audio_sources(
+    device: Option<String>,
+    ensure_permission: bool,
+) -> (
+    Arc<dyn crate::ports::audio_source::AudioSource>,
+    Arc<dyn crate::ports::audio_source::AudioSource>,
+) {
+    (
+        Arc::new(MicrophoneSource::new(device)),
+        Arc::new(CoreAudioTapSource::new(ensure_permission)),
+    )
+}
+
 /// The microphone and the system audio, mixed. macOS only for now.
 pub fn build_mixed_source(config: &AppConfig) -> Arc<MixedAudioSource> {
     let mic = Arc::new(MicrophoneSource::new(

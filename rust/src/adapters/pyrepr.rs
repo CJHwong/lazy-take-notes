@@ -119,3 +119,67 @@ mod tests {
         assert_eq!(py_str_json(&json!("plain")), "plain");
     }
 }
+
+/// Python's `repr(float)`: the shortest digits that read back the same, in
+/// positional form for exponents -4 to 15 and in `1e-05` form outside them.
+pub fn float_repr(value: f64) -> String {
+    if value.is_nan() {
+        return "nan".into();
+    }
+    if value.is_infinite() {
+        return (if value > 0.0 { "inf" } else { "-inf" }).into();
+    }
+    // `{:e}` gives the shortest round-trip digits: "2.5e1", "-1e-5".
+    let scientific = format!("{value:e}");
+    let (mantissa, exponent) = scientific.split_once('e').expect("{:e} has an exponent");
+    let exponent: i32 = exponent.parse().expect("the exponent is a number");
+    let negative = mantissa.starts_with('-');
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+    let sign = if negative { "-" } else { "" };
+    if !(-4..16).contains(&exponent) {
+        let (first, rest) = digits.split_at(1);
+        let fraction = if rest.is_empty() {
+            String::new()
+        } else {
+            format!(".{rest}")
+        };
+        let exponent_sign = if exponent < 0 { '-' } else { '+' };
+        return format!(
+            "{sign}{first}{fraction}e{exponent_sign}{:02}",
+            exponent.abs()
+        );
+    }
+    let point = exponent + 1;
+    let text = if point <= 0 {
+        format!("0.{}{digits}", "0".repeat(point.unsigned_abs() as usize))
+    } else if point as usize >= digits.len() {
+        format!("{digits}{}.0", "0".repeat(point as usize - digits.len()))
+    } else {
+        let (whole, fraction) = digits.split_at(point as usize);
+        format!("{whole}.{fraction}")
+    };
+    format!("{sign}{text}")
+}
+
+#[cfg(test)]
+mod float_tests {
+    use super::float_repr;
+
+    #[test]
+    fn floats_read_as_python_writes_them() {
+        for (value, text) in [
+            (25.0, "25.0"),
+            (0.01, "0.01"),
+            (1.5, "1.5"),
+            (0.0, "0.0"),
+            (-2.0, "-2.0"),
+            (1e-5, "1e-05"),
+            (0.0001, "0.0001"),
+            (1e16, "1e+16"),
+            (123456789012345.0, "123456789012345.0"),
+            (1.25e20, "1.25e+20"),
+        ] {
+            assert_eq!(float_repr(value), text, "{value}");
+        }
+    }
+}

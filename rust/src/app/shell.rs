@@ -23,6 +23,7 @@ use crate::tui::host::{Action, Ctx, Msg, Payload, Screen, Severity};
 use crate::tui::screens::file_picker::FilePicker;
 use crate::tui::screens::preflight::PreflightOutcome;
 use crate::tui::screens::session_picker::{SessionPicker, picked_dir};
+use crate::tui::screens::settings::SettingsScreen;
 use crate::tui::screens::template_picker::{TemplateChoice, TemplatePicker};
 use crate::tui::screens::view::ViewScreen;
 use crate::tui::screens::welcome::{ChosenMode, WelcomePicker};
@@ -137,6 +138,14 @@ impl Shell {
                 let screen = builder_screen(&paths, self.config_path.as_deref(), None);
                 Action::Push(Box::new(screen))
             }
+            "config" => match crate::adapters::paths::Paths::for_user() {
+                Some(paths) => {
+                    self.waiting = Waiting::Mode;
+                    let screen = SettingsScreen::new(paths, self.config_path.clone());
+                    Action::Push(Box::new(screen))
+                }
+                None => self.failed("open_config", "no home folder", ctx),
+            },
             _ => self.finished(),
         }
     }

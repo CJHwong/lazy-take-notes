@@ -7,6 +7,7 @@ pub mod preflight;
 pub mod record;
 pub mod session;
 pub mod session_picker;
+pub mod settings;
 pub mod template_builder;
 pub mod template_picker;
 pub mod transcribe;

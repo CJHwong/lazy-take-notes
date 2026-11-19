@@ -24,6 +24,11 @@ pub struct Input {
     /// The whole value is selected, as Textual's `select_on_focus` leaves it.
     selected_all: bool,
     blink: crate::tui::widgets::Blink,
+    /// Settings' `Input { height: 1; border: none; padding: 0 1 }`: the
+    /// background variables when blurred and when focused.
+    pub compact: Option<(&'static str, &'static str)>,
+    /// Each character shows as a bullet.
+    pub password: bool,
 }
 
 impl Input {
@@ -201,9 +206,36 @@ impl Input {
     /// The value (or placeholder) and the cursor, scrolled to keep the cursor shown.
     /// `$surface`, tinted 5% toward the foreground while focused (`:focus`).
     fn background(&self, focused: bool, theme: &Theme) -> ratatui::style::Color {
+        if let Some((blurred, focus)) = self.compact {
+            return match focused {
+                true => theme.tinted(focus, "foreground", 0.05),
+                false => theme.color(blurred),
+            };
+        }
         match focused {
             true => theme.tinted("surface", "foreground", 0.05),
             false => theme.color("surface"),
+        }
+    }
+
+    /// One row with `padding: 0 1` on the compact background.
+    pub fn render_compact(&self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
+        let surface = self.background(focused, theme);
+        frame.render_widget(Paragraph::new("").style(Style::default().bg(surface)), area);
+        let inner = Rect::new(
+            area.x + 1,
+            area.y,
+            area.width.saturating_sub(2),
+            1.min(area.height),
+        );
+        self.render_row(frame, inner, focused, theme);
+    }
+
+    /// The characters as shown: bullets for a password.
+    fn shown(&self) -> Vec<char> {
+        match self.password {
+            true => vec!['•'; self.chars.len()],
+            false => self.chars.clone(),
         }
     }
 
@@ -235,18 +267,16 @@ impl Input {
             return;
         }
         // Start far enough left that the cursor fits.
+        let shown = self.shown();
         let mut start = 0;
         let cursor_column =
-            |from: usize| str_width(&self.chars[from..self.cursor].iter().collect::<String>());
+            |from: usize| str_width(&shown[from..self.cursor].iter().collect::<String>());
         while start < self.cursor && cursor_column(start) + 1 > width {
             start += 1;
         }
-        let before: String = self.chars[start..self.cursor].iter().collect();
-        let at: String = self
-            .chars
-            .get(self.cursor)
-            .map_or(" ".into(), |c| c.to_string());
-        let after: String = self.chars.iter().skip(self.cursor + 1).collect();
+        let before: String = shown[start..self.cursor].iter().collect();
+        let at: String = shown.get(self.cursor).map_or(" ".into(), |c| c.to_string());
+        let after: String = shown.iter().skip(self.cursor + 1).collect();
         // `input--selection`: the selected text on `$input-selection-background`.
         let before_style = match self.selected_all && focused {
             true => text_style.bg(theme.on_color("input-selection-background", surface)),
