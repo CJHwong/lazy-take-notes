@@ -90,3 +90,5 @@ The two versions must work on the same data, in both directions:
 31. A mode that cannot start in the kiosk shows `Could not start: <message>`. Python put the exception's class name before the message.
 32. A worker or task result from a screen that has closed is dropped, as Textual drops a message to a removed screen. Before the kiosk shell, each Rust screen ran in its own host, so this could not happen.
 33. In the kiosk, a second Transcribe asks for a file again. Python kept the first file and skipped the file picker, because the shell stored the picked path in its options.
+34. `--help` uses clap's layout, not click's. The commands, flags and their descriptions are the same.
+35. The `ls`, `notes` and `transcript` commands are not ported yet. The `plugin` command is dropped with the plugins.
