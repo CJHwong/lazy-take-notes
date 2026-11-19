@@ -171,35 +171,36 @@ impl Input {
         true
     }
 
-    /// Draw the input in its 3-row `tall` border.
+    /// Draw the input in a 3-row rounded box; its border turns primary while focused.
     pub fn render(&self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
+        self.render_titled(frame, area, "", focused, theme);
+    }
+
+    /// Like `render`, with `title` in the top border in place of a label row.
+    pub fn render_titled(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        title: &str,
+        focused: bool,
+        theme: &Theme,
+    ) {
         if area.height < 3 {
             self.render_row(frame, area, focused, theme);
             return;
         }
-        let border = theme.color(if focused { "border" } else { "border-blurred" });
-        let inner = self.background(focused, theme);
         let outer = theme.color(self.parent_background.unwrap_or("background"));
-        let width = usize::from(area.width.saturating_sub(2));
-        let edges = crate::tui::widgets::tall_edges(border, inner, outer);
-        let rows = [
-            ("▔", edges.fill),
-            (" ", Style::default().bg(inner)),
-            ("▁", edges.fill),
-        ];
-        for (offset, (fill, style)) in rows.into_iter().enumerate() {
-            let line = Line::from(vec![
-                Span::styled("▊", edges.left),
-                Span::styled(fill.repeat(width), style),
-                Span::styled("▎", edges.right),
-            ]);
-            frame.render_widget(
-                Paragraph::new(line),
-                Rect::new(area.x, area.y + offset as u16, area.width, 1),
-            );
-        }
-        // `padding: 0 2` inside the border.
-        let text_area = Rect::new(area.x + 3, area.y + 1, area.width.saturating_sub(6), 1);
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            Rect::new(area.x, area.y, area.width, 3),
+            title,
+            crate::tui::widgets::border_color(focused, theme),
+            outer,
+            theme,
+        );
+        let fill = self.background(focused, theme);
+        frame.render_widget(Paragraph::new("").style(Style::default().bg(fill)), inner);
+        let text_area = Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), 1);
         self.render_row(frame, text_area, focused, theme);
     }
 

@@ -1,9 +1,10 @@
-//! A one-row-per-item list with Textual's `ListView` highlight.
+//! A one-row-per-item list: the selected row carries a `▶` marker and the
+//! highlight colors.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
 use crate::tui::text::wrap_line;
@@ -24,7 +25,13 @@ pub struct ListCursor {
     total_rows: usize,
     /// Rows shown at the last draw, for page keys.
     page: usize,
+    /// The first row of each item at the last draw, and where the rows sat.
+    starts: Vec<usize>,
+    area: Rect,
 }
+
+/// Columns the `▶ ` marker takes before each row.
+const MARKER: u16 = 2;
 
 impl ListCursor {
     /// New items: the highlight moves to the first one, as a rebuilt `ListView` does.
@@ -125,6 +132,23 @@ impl ListCursor {
             .collect()
     }
 
+    /// The item drawn at screen row `y` at the last draw.
+    pub fn item_at(&self, y: u16) -> Option<usize> {
+        if y < self.area.y || y >= self.area.bottom() {
+            return None;
+        }
+        let row = self.offset + usize::from(y - self.area.y);
+        let item = self.starts.windows(2).position(|pair| row >= pair[0] && row < pair[1])?;
+        (!self.disabled.get(item).copied().unwrap_or(false)).then_some(item)
+    }
+
+    /// Scroll by `rows` without moving the highlight, as the wheel does.
+    pub fn scroll_by(&mut self, rows: isize) {
+        self.follow = false;
+        let last = self.total_rows.saturating_sub(self.page);
+        self.offset = self.offset.saturating_add_signed(rows).min(last);
+    }
+
     /// Scroll the least that shows the highlighted item, top first if it is taller.
     fn follow_highlight(&mut self, starts: &[usize], height: usize) {
         let Some(index) = self.index.filter(|_| self.follow) else {
@@ -152,12 +176,14 @@ impl ListCursor {
         self.page = height;
         self.len = rows.len();
         // The scrollbar takes a column only when the rows overflow.
-        let mut items = self.item_lines(rows, area.width);
+        self.area = area;
+        let text_width = area.width.saturating_sub(MARKER);
+        let mut items = self.item_lines(rows, text_width);
         let mut total: usize = items.iter().map(Vec::len).sum();
         let overflow = total > height;
         let row_width = area.width.saturating_sub(u16::from(overflow));
         if overflow && self.wrap {
-            items = self.item_lines(rows, row_width);
+            items = self.item_lines(rows, text_width.saturating_sub(1));
             total = items.iter().map(Vec::len).sum();
         }
         self.total_rows = total;
@@ -167,6 +193,7 @@ impl ListCursor {
         }
         self.offset = self.offset.min(total.saturating_sub(height));
         self.follow_highlight(&starts, height);
+        self.starts = starts.clone();
         let plain = Style::default()
             .bg(background)
             .fg(theme.on("foreground", "surface"));
@@ -199,12 +226,18 @@ impl ListCursor {
             .flat_map(|(index, lines)| lines.iter().map(move |line| (index, line)));
         for (row, (index, line)) in shown.skip(self.offset).take(height).enumerate() {
             let rect = Rect::new(area.x, area.y + row as u16, row_width, 1);
-            let style = if Some(index) == self.index {
-                highlight
-            } else {
-                plain
+            let selected = Some(index) == self.index;
+            let first_row = starts[index] == self.offset + row;
+            let (style, marker) = match (selected, first_row) {
+                (true, true) => (highlight, "▶ "),
+                (true, false) => (highlight, "  "),
+                (false, _) => (plain, "  "),
             };
-            frame.render_widget(Paragraph::new(line.clone()).style(style), rect);
+            let marker_style = style.add_modifier(ratatui::style::Modifier::BOLD);
+            let mut spans = vec![Span::styled(marker, marker_style)];
+            spans.extend(line.spans.iter().cloned());
+            let shown_line = Line::from(spans).style(line.style);
+            frame.render_widget(Paragraph::new(shown_line).style(style), rect);
         }
     }
 }

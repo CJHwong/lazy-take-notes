@@ -11,7 +11,8 @@ use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::event::{
-    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture,
 };
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -67,7 +68,7 @@ pub fn enter() -> io::Result<Term> {
     terminal
 }
 
-/// Raw mode, the alternate screen, bracketed paste, focus reports, no cursor.
+/// Raw mode, the alternate screen, bracketed paste, focus reports, mouse reports, no cursor.
 fn take_over() -> io::Result<()> {
     enable_raw_mode()?;
     ACTIVE.store(true, Ordering::SeqCst);
@@ -77,6 +78,7 @@ fn take_over() -> io::Result<()> {
         EnterAlternateScreen,
         EnableBracketedPaste,
         EnableFocusChange,
+        EnableMouseCapture,
         cursor::Hide
     ) {
         restore();
@@ -105,6 +107,7 @@ pub fn restore() {
         LeaveAlternateScreen,
         DisableBracketedPaste,
         DisableFocusChange,
+        DisableMouseCapture,
         cursor::Show
     );
     let _ = disable_raw_mode();

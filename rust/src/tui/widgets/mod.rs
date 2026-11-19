@@ -1,4 +1,8 @@
-//! Widgets shared by the screens, drawn in Textual's styles.
+//! Widgets shared by the screens.
+//!
+//! The look follows ratatui's idiom over the saved theme's colors: rounded
+//! borders with the title in the border, the focused box's border in the
+//! primary color, one-row buttons, and a `▶` marker on the selected row.
 
 pub mod button;
 pub mod input;
@@ -47,24 +51,42 @@ pub fn panel(
     background: Color,
     theme: &Theme,
 ) -> Rect {
+    rounded(frame, area, title, theme.color(border), background, theme)
+}
+
+/// A rounded box on `background`, its title in the top border. Returns the inside.
+pub fn rounded(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    border: Color,
+    background: Color,
+    theme: &Theme,
+) -> Rect {
     let mut block = Block::default()
         .borders(Borders::ALL)
-        .border_type(BorderType::Plain)
+        .border_type(BorderType::Rounded)
         .style(Style::default().bg(background))
-        .border_style(Style::default().fg(theme.color(border)).bg(background));
+        .border_style(Style::default().fg(border).bg(background));
     if !title.is_empty() {
-        // Textual draws `┌─ Title ──`: one line segment before the title.
         block = block.title(Line::from(vec![
-            Span::styled("─", Style::default().fg(theme.color(border))),
+            Span::styled("─", Style::default().fg(border)),
             Span::styled(
                 format!(" {title} "),
-                Style::default().fg(theme.color("foreground")),
+                Style::default()
+                    .fg(theme.color("foreground"))
+                    .add_modifier(Modifier::BOLD),
             ),
         ]));
     }
     let inner = block.inner(area);
     frame.render_widget(block, area);
     inner
+}
+
+/// The border color of a box: primary while it has the focus.
+pub fn border_color(focused: bool, theme: &Theme) -> Color {
+    theme.color(if focused { "primary" } else { "border-blurred" })
 }
 
 /// A one-row bar: the header (`$primary`, bold, centered) or a footer.
@@ -117,7 +139,8 @@ pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
     )
 }
 
-/// A `border: thick` box filled with `background_var`. Returns the inside.
+/// A dialog's frame: a rounded box in `border_var`, filled with
+/// `background_var`, over whatever is below it. Returns the inside.
 pub fn thick_box(
     frame: &mut Frame,
     area: Rect,
@@ -128,26 +151,16 @@ pub fn thick_box(
     if area.width < 2 || area.height < 2 {
         return Rect::default();
     }
-    let border = theme.color(border_var);
-    let background = theme.color(background_var);
-    let edge = Style::default().fg(border).bg(background);
-    let inner_width = usize::from(area.width - 2);
-    let row = |left: &str, fill: &str, right: &str| {
-        Line::from(vec![
-            Span::styled(left.to_string(), edge),
-            Span::styled(fill.repeat(inner_width), edge),
-            Span::styled(right.to_string(), edge),
-        ])
-    };
-    let mut lines = vec![row("█", "▀", "█")];
-    for _ in 2..area.height {
-        lines.push(row("█", " ", "█"));
-    }
-    lines.push(row("█", "▄", "█"));
-    // A modal covers what is under it; text styles there must not show through.
+    // A dialog covers what is under it; text styles there must not show through.
     frame.render_widget(ratatui::widgets::Clear, area);
-    frame.render_widget(Paragraph::new(lines), area);
-    Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
+    rounded(
+        frame,
+        area,
+        "",
+        theme.color(border_var),
+        theme.color(background_var),
+        theme,
+    )
 }
 
 /// The styles of Textual's `tall` border: the left edge `▊`, the right edge `▎`,
