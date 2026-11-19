@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::adapters::pyrepr::py_repr_json;
 use crate::app::container::{load_config, resolve_base_dir};
 use crate::app::headless_run::{self, HeadlessArgs};
-use crate::app::{diarize_command, session_commands, status_command};
+use crate::app::{diarize_command, plugin_command, session_commands, status_command};
 
 #[derive(Parser)]
 #[command(
@@ -102,6 +102,22 @@ pub enum Command {
     CreateTemplate,
     /// Open the configuration editor.
     Config,
+    /// Manage uvx plugins (add, remove, list).
+    #[command(subcommand)]
+    Plugin(PluginAction),
+    /// A command a plugin adds.
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+pub enum PluginAction {
+    /// Add a plugin by pip/uvx spec (e.g. 'ltn-youtube @ git+https://...').
+    Add { spec: String },
+    /// Remove a plugin by package name (e.g. 'ltn-youtube').
+    Remove { name: String },
+    /// List installed plugins.
+    List,
 }
 
 /// Parse the arguments and run the command. Returns the exit code.
@@ -146,6 +162,10 @@ pub fn main() -> i32 {
         Some(Command::View) => view(config, output_dir),
         Some(Command::CreateTemplate) => create_template(config),
         Some(Command::Config) => settings(config),
+        Some(Command::Plugin(PluginAction::Add { spec })) => plugin_command::add(&spec),
+        Some(Command::Plugin(PluginAction::Remove { name })) => plugin_command::remove(&name),
+        Some(Command::Plugin(PluginAction::List)) => plugin_command::list(),
+        Some(Command::External(argv)) => external(&argv, config, output_dir),
     };
     result.unwrap_or_else(|message| fail(&message))
 }
@@ -400,6 +420,30 @@ fn shell(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String>
 }
 
 /// A bad argument: click prints it and exits 2.
+/// A command no built-in has: a plugin's, or click's "No such command".
+fn external(
+    argv: &[String],
+    config: Option<&Path>,
+    output_dir: Option<&str>,
+) -> Result<i32, String> {
+    let options = plugin_command::Options {
+        config_path: config,
+        output_dir,
+    };
+    match plugin_command::run(argv, &options) {
+        Ok(Some(code)) => return Ok(code),
+        Ok(None) => {}
+        // The command may be a plugin's that could not load: say why, then fail as unknown.
+        Err(error) => eprintln!("Warning: plugins are unavailable: {error}\n"),
+    }
+    let name = argv.first().map(String::as_str).unwrap_or("");
+    eprintln!(
+        "Usage: lazy-take-notes [OPTIONS] COMMAND [ARGS]...\nTry 'lazy-take-notes -h' for help.\n"
+    );
+    let quoted = py_repr_json(&serde_json::Value::String(name.into()));
+    Ok(usage_error(&format!("No such command {quoted}.")))
+}
+
 fn usage_error(message: &str) -> i32 {
     eprintln!("Error: {message}");
     2

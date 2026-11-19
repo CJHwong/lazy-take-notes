@@ -9,6 +9,7 @@ pub mod headless;
 pub mod headless_run;
 pub mod keep_awake;
 pub mod logging;
+pub mod plugin_command;
 pub mod preflight;
 pub mod session_commands;
 pub mod shell;

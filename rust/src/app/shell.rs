@@ -260,7 +260,10 @@ impl Shell {
         let Some(audio_path) = self.audio_path.clone() else {
             return self.failed("start_transcribe", "no audio file", ctx);
         };
-        match start.screen(&audio_path, missing) {
+        match start.screen(
+            &crate::app::tui_run::TranscribeSource::Audio(audio_path),
+            missing,
+        ) {
             Ok(screen) => {
                 self.logging = true;
                 self.waiting = Waiting::Mode;

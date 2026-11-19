@@ -125,3 +125,24 @@ fn publish(poster: &Poster, new: Vec<TranscriptSegment>, segments: &mut Vec<Tran
     segments.extend_from_slice(&new);
     poster.post(Event::TranscriptChunk(new));
 }
+
+/// Replay a plugin's subtitle segments as transcript chunks, one by one, with no
+/// whisper (Python's `run_subtitle_replay`). The panels and the digest buffer
+/// take them as they take a live transcript.
+pub fn run_subtitle_replay(
+    poster: &Poster,
+    cancel: &Cancel,
+    segments: Vec<TranscriptSegment>,
+) -> Vec<TranscriptSegment> {
+    poster.post(Event::status(WorkerState::Recording));
+    let mut replayed = Vec::new();
+    for segment in segments {
+        if cancel.is_cancelled() {
+            break;
+        }
+        replayed.push(segment.clone());
+        poster.post(Event::TranscriptChunk(vec![segment]));
+    }
+    poster.post(Event::status(WorkerState::Stopped));
+    replayed
+}

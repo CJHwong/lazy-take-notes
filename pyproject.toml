@@ -47,6 +47,7 @@ dependencies = [
 [project.scripts]
 take-note = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
 lazy-take-notes = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
+lazy-take-notes-plugin-host = "lazy_take_notes.plugin_host:main"
 
 [project.urls]
 Homepage = "https://github.com/CJHwong/lazy-take-notes"
