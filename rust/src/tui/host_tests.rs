@@ -483,3 +483,126 @@ fn a_thread_that_panics_posts_its_fallback_result() {
     assert_eq!(seen, ["done", "fallback: thread boom"]);
     assert!(!host.finished());
 }
+
+/// Draws "MIC LOST" in its last row, but panics on its first render.
+struct FlakyRender(usize);
+
+impl Screen for FlakyRender {
+    fn render(&mut self, frame: &mut Frame, area: Rect, _ctx: &Ctx) {
+        self.0 += 1;
+        if self.0 == 1 {
+            panic!("render bug");
+        }
+        let bar = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+        frame.render_widget(Paragraph::new("MIC LOST"), bar);
+    }
+
+    fn key(&mut self, _key: &KeyEvent, _name: &str, _ctx: &mut Ctx) -> Action {
+        Action::None
+    }
+
+    fn hosts_session(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_render_that_panics_once_does_not_freeze_the_screen() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    host.push(Box::new(FlakyRender(0)));
+    let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+    terminal.draw(|frame| host.draw(frame)).unwrap();
+    terminal.draw(|frame| host.draw(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let last_row: String = (0..60).map(|x| buffer[(x, 9)].symbol()).collect();
+    assert!(last_row.starts_with("MIC LOST"), "{last_row:?}");
+    let toasts = host.ctx().toast_texts();
+    assert_eq!(toasts.len(), 1, "{toasts:?}");
+    assert!(
+        toasts[0].starts_with("Unexpected error: render bug"),
+        "{toasts:?}"
+    );
+    assert!(!host.finished());
+}
+
+// --- Signals and the exit watchdog, in a child process: they end the process. ---
+
+const CHILD_CASE: &str = "LTN_HOST_CHILD_CASE";
+
+/// Run `signal_child` in a fresh copy of this test binary, with `case` set.
+fn run_child(case: &str) -> (std::process::ExitStatus, Duration) {
+    let started = Instant::now();
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["tui::host::tests::signal_child", "--exact", "--nocapture"])
+        .env(CHILD_CASE, case)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    (status, started.elapsed())
+}
+
+/// The child's body. Without `LTN_HOST_CHILD_CASE` it does nothing.
+#[test]
+fn signal_child() {
+    use signal_hook::consts::SIGTERM;
+    let Ok(case) = std::env::var(CHILD_CASE) else {
+        return;
+    };
+    // The receiver lives on and nobody reads it: the event loop is hung.
+    let (sender, _receiver) = unbounded_channel();
+    let armed = Arc::new(AtomicBool::new(false));
+    let watch = watch_shutdown_signals(sender.clone(), armed).expect("handlers installed");
+    let _second = match case.as_str() {
+        "restored" => {
+            watch.close();
+            std::thread::sleep(Duration::from_millis(200));
+            None
+        }
+        "second" => {
+            // A picker's host ended; the session's host listens now.
+            watch.close();
+            let armed = Arc::new(AtomicBool::new(false));
+            Some(watch_shutdown_signals(sender, armed).expect("handlers installed again"))
+        }
+        _ => Some(watch),
+    };
+    signal_hook::low_level::raise(SIGTERM).unwrap();
+    std::thread::sleep(SHUTDOWN_GRACE + FORCE_EXIT_AFTER + Duration::from_secs(5));
+}
+
+#[test]
+fn a_hung_loop_still_exits_through_the_watchdog_after_sigterm() {
+    use std::os::unix::process::ExitStatusExt;
+    let (status, elapsed) = run_child("hung");
+    assert_eq!(status.code(), Some(128 + 15), "{status:?}");
+    assert_eq!(status.signal(), None, "the watchdog exited, not the signal");
+    assert!(
+        elapsed >= SHUTDOWN_GRACE + FORCE_EXIT_AFTER - Duration::from_millis(500),
+        "the watchdog waited for the grace period: {elapsed:?}"
+    );
+}
+
+#[test]
+fn closing_the_handlers_gives_sigterm_its_default_action_back() {
+    use std::os::unix::process::ExitStatusExt;
+    let (status, elapsed) = run_child("restored");
+    assert_eq!(status.signal(), Some(15), "{status:?}");
+    assert!(elapsed < SHUTDOWN_GRACE, "{elapsed:?}");
+}
+
+#[test]
+fn a_signal_the_os_refuses_leaves_the_host_without_handlers() {
+    let (sender, _receiver) = unbounded_channel();
+    let armed = Arc::new(AtomicBool::new(false));
+    // No such signal: sigaction fails with EINVAL, as an OS that refuses a handler does.
+    assert!(watch_signals(&[100], sender, armed.clone()).is_none());
+    assert!(!armed.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_second_host_in_the_same_process_still_catches_sigterm() {
+    let (status, _elapsed) = run_child("second");
+    assert_eq!(status.code(), Some(128 + 15), "{status:?}");
+}
