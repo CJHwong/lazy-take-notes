@@ -29,6 +29,7 @@ The two versions must work on the same data, in both directions:
 
 - `scripts/gen_fixtures.py` records Python outputs into `tests/fixtures/`. `tests/parity.rs` asserts the Rust output is byte-equal. Rerun the script when the Python side changes.
 - `scripts/llm_parity.py` drives both versions' LLM clients against one failing local server and compares the shown text and the request count.
+- `scripts/whisper_parity.py` transcribes the start of a real recording in both versions the way the file worker does, with a template's hints, and compares every segment's text and times.
 - `scripts/cross_check.py` compares both versions on copies of the real config, templates, sessions and model cache.
 - Each fixed bug listed in AGENTS.md gets a named Rust test.
 - Before a step is done: a real run (headless record of a call, transcribe of a saved file, Rust `view` of a session Python recorded, and the reverse).

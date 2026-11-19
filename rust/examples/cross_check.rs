@@ -98,6 +98,7 @@ fn main() {
         "llm" => llm_case(&args[1], &args[2], &args[3]),
         "llm-real" => llm_real(&paths),
         "whisper" => whisper_chunk(&args[1..]),
+        "transcribe-file" => transcribe_file(&args[1..]),
         "decode" => {
             let samples = lazy_take_notes::adapters::audio_file::load_audio_file(&arg(1)).unwrap();
             let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
@@ -214,4 +215,37 @@ fn whisper_chunk(args: &[String]) -> serde_json::Value {
     let chunk_seconds = started.elapsed().as_secs_f64();
     whisper.close();
     serde_json::json!({"load_s": loaded, "chunk_s": chunk_seconds, "segments": segments})
+}
+
+/// Transcribe the start of a file the way the file worker does: one second per feed,
+/// a chunk when the use case triggers, a flush at the end.
+/// Args: program, model, audio file, language, seconds, template file (for its hints).
+fn transcribe_file(args: &[String]) -> serde_json::Value {
+    use lazy_take_notes::adapters::whisper::{WORKER_COMMAND, transcriber::SubprocessWhisperTranscriber};
+    use lazy_take_notes::ports::transcriber::Transcriber;
+    use lazy_take_notes::usecases::transcribe_audio::{TranscribeAudio, TranscribeSettings};
+    const SAMPLE_RATE: usize = 16_000;
+    let audio = lazy_take_notes::adapters::audio_file::load_audio_file(Path::new(&args[2])).unwrap();
+    let audio = &audio[..(args[4].parse::<usize>().unwrap() * SAMPLE_RATE).min(audio.len())];
+    let hints = read_template(Path::new(&args[5])).recognition_hints;
+    let mut whisper = SubprocessWhisperTranscriber::with_program(PathBuf::from(&args[0]), vec![WORKER_COMMAND.into()]);
+    whisper.load_model(&args[1]).unwrap();
+    let mut use_case = TranscribeAudio::new(args[3].clone(), TranscribeSettings::default(), hints);
+    let mut segments = Vec::new();
+    let started = std::time::Instant::now();
+    let mut offset = 0;
+    while offset < audio.len() {
+        let chunk = &audio[offset..(offset + SAMPLE_RATE).min(audio.len())];
+        offset += chunk.len();
+        use_case.feed_audio(chunk);
+        use_case.set_session_offset(offset as f64 / SAMPLE_RATE as f64);
+        if use_case.should_trigger() {
+            segments.extend(use_case.process_buffer(&mut whisper, false).unwrap());
+        }
+    }
+    segments.extend(use_case.flush(&mut whisper).unwrap());
+    let total = started.elapsed().as_secs_f64();
+    let started = std::time::Instant::now();
+    whisper.close();
+    serde_json::json!({"segments": segments, "total_s": total, "close_s": started.elapsed().as_secs_f64()})
 }
