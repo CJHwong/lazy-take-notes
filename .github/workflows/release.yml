@@ -1,0 +1,38 @@
+name: Release
+
+# A tag v* builds the Rust app and publishes it as a GitHub Release. The Python
+# launcher runs a release only after scripts/pin_rust_release.py pins it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos-arm64:
+    name: Build (macOS arm64)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build the package
+        run: bash rust/scripts/package.sh
+      - name: Check that the package starts
+        run: |
+          tar -xzf rust/dist/lazy-take-notes-arm64-macos.tar.gz -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --version
+          "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --help
+          test -x "$RUNNER_TEMP/lazy-take-notes-arm64-macos/coreaudio-tap"
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd rust/dist
+          shasum -a 256 lazy-take-notes-arm64-macos.tar.gz > lazy-take-notes-arm64-macos.tar.gz.sha256
+          prerelease=()
+          [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
+            --title "lazy-take-notes $GITHUB_REF_NAME" \
+            --notes "The Rust build for macOS on Apple silicon. The Python launcher downloads it once the tag is pinned in src/lazy_take_notes/rust_release.py." \
+            lazy-take-notes-arm64-macos.tar.gz lazy-take-notes-arm64-macos.tar.gz.sha256

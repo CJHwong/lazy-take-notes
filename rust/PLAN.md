@@ -81,6 +81,17 @@ The two versions must work on the same data, in both directions:
    - Real runs from the extracted package outside the repo: preflight captured the test tone, and with the mic muted (SIGUSR1) a spoken sentence came through the tap into `transcript.txt` word for word. With the helper removed, preflight fails and names the missing path. The same recording also passed with the repo folder hidden by `sandbox-exec`, so the package needs nothing from the build tree.
    - In one home: Python Settings saved After lines 7, Rust Settings showed it and saved Wait seconds 45, and Python Settings showed both. Each version transcribed the same file headless with an identical `transcript.txt`, `status` printed the same lines in both, and each `view` opened the other's session.
 
+## The switch
+
+Existing installs keep their command: setup.sh's `take-note` wrapper runs `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes` on every start, and that file is on users' disks. So the Python package's `lazy-take-notes` and `take-note` scripts are `launcher.py`. It runs the Rust build pinned in `rust_release.py`, else the Python app.
+
+- A tag `v*` runs `.github/workflows/release.yml`: macOS arm64 only, `rust/scripts/package.sh`, a start check, and a GitHub Release with the tarball and its SHA-256.
+- `uv run scripts/pin_rust_release.py <tag>` writes the tag and hashes into `rust_release.py`. The pin is always a commit after the release: `main` must never pin a release that does not exist.
+- The launcher downloads into `<cache>/bin/<tag>/` (the model cache's root), checks the SHA-256, unpacks into a temp folder and renames it into place, under a file lock. It then `execv`s the binary, so signals and the terminal reach the Rust app directly.
+- Any failure (no build for the machine, no network, a hash mismatch, a bad archive, an exec error) runs the Python app with one note on stderr. `LTN_PYTHON=1` forces the Python app.
+- No data migration: both versions use the same config folder, cache, sessions and plugins.txt. The wrapper is not rewritten: it keeps fetching `main`, which is how users get updates.
+- The plugin host stays a Python script outside the launcher, and `plugin_api` imports no launcher code.
+
 ## Plugins
 
 Python plugins keep working: the Rust app runs them in a separate Python process, the plugin host, and talks to it in JSON. Nothing in a plugin changes.
