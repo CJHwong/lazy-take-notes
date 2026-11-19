@@ -14,7 +14,6 @@ use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::file_persistence::FilePersistence;
 use crate::adapters::pyrepr::py_repr_json;
 use crate::adapters::session_controller::SessionController;
-use crate::adapters::session_status::STATUS_FILE;
 use crate::adapters::templates::YamlTemplates;
 use crate::adapters::whisper::transcriber::SubprocessWhisperTranscriber;
 use crate::app::container::{
@@ -23,7 +22,7 @@ use crate::app::container::{
 };
 use crate::app::events::{Event, Poster, WorkerState};
 use crate::app::headless::{
-    HeadlessSession, Launcher, StatusWriter, banner_lines, holds_only_status, summary_lines,
+    HeadlessSession, Launcher, StatusWriter, banner_lines, drop_empty_session, summary_lines,
 };
 use crate::app::keep_awake::keep_awake;
 use crate::app::logging::{close_file_logging, setup_file_logging};
@@ -389,8 +388,8 @@ async fn warn_missing_models(llm: &dyn crate::ports::llm::LlmClient, config: &Ap
 /// Run the session, print the summary, and return 1 when it ended in an error.
 ///
 /// With `drop_if_empty`, a failed run whose folder holds only the status file
-/// removes the folder: a script retrying a bad file would otherwise leave one
-/// empty folder per try.
+/// and the debug log removes the folder: a script retrying a bad file would
+/// otherwise leave one empty folder per try.
 fn run_session(
     runtime: &tokio::runtime::Runtime,
     out_dir: &Path,
@@ -404,11 +403,8 @@ fn run_session(
     close_file_logging();
     eprint_lines(&summary_lines(out_dir, session.status()));
     let failed = session.status().state == st::ERROR;
-    let dropped = failed
-        && drop_if_empty
-        && holds_only_status(out_dir)
-        && std::fs::remove_file(out_dir.join(STATUS_FILE)).is_ok()
-        && std::fs::remove_dir(out_dir).is_ok();
+    // The log file was closed above, so nothing writes it again.
+    let dropped = failed && drop_if_empty && drop_empty_session(out_dir);
     if dropped {
         eprintln!("Removed {}: the run saved nothing.", out_dir.display());
     } else {
