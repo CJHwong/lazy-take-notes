@@ -183,6 +183,20 @@ impl Ctx {
         }
     }
 
+    /// Like `spawn_thread`, but a panic inside `job` comes back as
+    /// `on_panic(message)`, as `spawn_or` does for a task. The panic hook logs
+    /// the stack.
+    pub fn spawn_thread_or<T, F, P>(&self, name: &str, job: F, on_panic: P)
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+        P: FnOnce(String) -> T + Send + 'static,
+    {
+        self.spawn_thread(name, move || {
+            crate::tui::terminal::catching(job).unwrap_or_else(on_panic)
+        });
+    }
+
     /// A sender a thread keeps to post several results, each as `Msg::Task`.
     pub fn task_sender(&self) -> TaskSender {
         TaskSender(self.sender.clone(), self.current)

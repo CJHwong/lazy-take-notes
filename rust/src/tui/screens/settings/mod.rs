@@ -422,12 +422,19 @@ impl SettingsScreen {
             "",
         );
         let provider = infra.llm_provider.clone();
-        ctx.spawn(async move {
-            let mut check = Check::new("ai", "AI", true);
-            crate::app::preflight::check_ai(&mut check, &*client, &provider, &models, &|_| {})
-                .await;
-            Task::AiTested(check)
-        });
+        ctx.spawn_or(
+            async move {
+                let mut check = Check::new("ai", "AI", true);
+                crate::app::preflight::check_ai(&mut check, &*client, &provider, &models, &|_| {})
+                    .await;
+                Task::AiTested(check)
+            },
+            |message| {
+                let mut check = Check::new("ai", "AI", true);
+                check.set(Status::Fail, format!("panic: {message}"), "");
+                Task::AiTested(check)
+            },
+        );
     }
 
     fn ai_tested(&mut self, check: Check, ctx: &mut Ctx) {
@@ -456,28 +463,31 @@ impl SettingsScreen {
             return;
         };
         self.set_models_text("Loading...");
-        ctx.spawn(async move {
-            let text = match infra.llm_provider.as_str() {
-                "ollama" => {
-                    let client =
-                        crate::adapters::llm::ollama::OllamaLlmClient::new(&infra.ollama.host);
-                    match client.list_models().await {
-                        Ok(models) if models.is_empty() => "No models installed.".to_string(),
-                        Ok(models) => models
-                            .into_iter()
-                            .map(|(name, _)| name)
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        Err(e) => format!("Cannot list models: {e}"),
+        ctx.spawn_or(
+            async move {
+                let text = match infra.llm_provider.as_str() {
+                    "ollama" => {
+                        let client =
+                            crate::adapters::llm::ollama::OllamaLlmClient::new(&infra.ollama.host);
+                        match client.list_models().await {
+                            Ok(models) if models.is_empty() => "No models installed.".to_string(),
+                            Ok(models) => models
+                                .into_iter()
+                                .map(|(name, _)| name)
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            Err(e) => format!("Cannot list models: {e}"),
+                        }
                     }
-                }
-                _ => match crate::app::container::build_llm_client(&infra) {
-                    Ok(_) => "This provider does not list models.".to_string(),
-                    Err(e) => format!("Cannot list models: {e}"),
-                },
-            };
-            Task::OllamaText(text)
-        });
+                    _ => match crate::app::container::build_llm_client(&infra) {
+                        Ok(_) => "This provider does not list models.".to_string(),
+                        Err(e) => format!("Cannot list models: {e}"),
+                    },
+                };
+                Task::OllamaText(text)
+            },
+            |message| Task::OllamaText(format!("Cannot list models: {message}")),
+        );
     }
 
     fn pull_ollama(&mut self, input_id: &str, ctx: &mut Ctx) {
@@ -491,36 +501,40 @@ impl SettingsScreen {
         };
         self.set_models_text(&format!("Pulling {model}..."));
         let sender = ctx.task_sender();
-        ctx.spawn(async move {
-            if infra.llm_provider != "ollama" {
-                let error = match crate::app::container::build_llm_client(&infra) {
-                    Ok(_) => "This provider cannot pull models.".to_string(),
-                    Err(e) => e,
+        let failed_model = model.clone();
+        ctx.spawn_or(
+            async move {
+                if infra.llm_provider != "ollama" {
+                    let error = match crate::app::container::build_llm_client(&infra) {
+                        Ok(_) => "This provider cannot pull models.".to_string(),
+                        Err(e) => e,
+                    };
+                    return Task::PullFailed(model, error);
+                }
+                let client = crate::adapters::llm::ollama::OllamaLlmClient::new(&infra.ollama.host);
+                let name = model.clone();
+                let mut report = |event: crate::adapters::llm::ollama::PullProgress| {
+                    let total = event.total.unwrap_or(0);
+                    let completed = event.completed.unwrap_or(0);
+                    // Ollama names a layer by its hash; the bytes say how far the pull is.
+                    // A layer of a few KB would read "0 MB of 0 MB", so it keeps the status.
+                    let text = match total >= MEGABYTE {
+                        true => describe(&AssetProgress {
+                            downloaded: completed,
+                            total,
+                            bytes_per_second: 0.0,
+                        }),
+                        false => event.status.clone(),
+                    };
+                    sender.post(Task::OllamaText(format!("Pulling {name}: {text}")));
                 };
-                return Task::PullFailed(model, error);
-            }
-            let client = crate::adapters::llm::ollama::OllamaLlmClient::new(&infra.ollama.host);
-            let name = model.clone();
-            let mut report = |event: crate::adapters::llm::ollama::PullProgress| {
-                let total = event.total.unwrap_or(0);
-                let completed = event.completed.unwrap_or(0);
-                // Ollama names a layer by its hash; the bytes say how far the pull is.
-                // A layer of a few KB would read "0 MB of 0 MB", so it keeps the status.
-                let text = match total >= MEGABYTE {
-                    true => describe(&AssetProgress {
-                        downloaded: completed,
-                        total,
-                        bytes_per_second: 0.0,
-                    }),
-                    false => event.status.clone(),
-                };
-                sender.post(Task::OllamaText(format!("Pulling {name}: {text}")));
-            };
-            match client.pull_model(&model, &mut report).await {
-                Ok(()) => Task::PullDone(model),
-                Err(e) => Task::PullFailed(model, e.to_string()),
-            }
-        });
+                match client.pull_model(&model, &mut report).await {
+                    Ok(()) => Task::PullDone(model),
+                    Err(e) => Task::PullFailed(model, e.to_string()),
+                }
+            },
+            move |message| Task::PullFailed(failed_model, message),
+        );
     }
 
     // --- Raw editor -----------------------------------------------------
@@ -758,21 +772,26 @@ impl SettingsScreen {
         let store = self.store.clone();
         let sender: TaskSender = ctx.task_sender();
         let id = asset_id.to_string();
-        ctx.spawn_thread(&format!("model-{id}"), move || {
-            let mut report =
-                |progress: AssetProgress| sender.post(Task::Progress(id.clone(), progress));
-            match store.install(&id, &mut report, Some(&cancel)) {
-                Ok(_) => Task::Installed(id),
-                Err(StoreError::Download(DownloadError::Cancelled(_))) => {
-                    info!(target: "ltn.config", "download of {id} cancelled");
-                    Task::Cancelled(id)
+        let failed_id = id.clone();
+        ctx.spawn_thread_or(
+            &format!("model-{id}"),
+            move || {
+                let mut report =
+                    |progress: AssetProgress| sender.post(Task::Progress(id.clone(), progress));
+                match store.install(&id, &mut report, Some(&cancel)) {
+                    Ok(_) => Task::Installed(id),
+                    Err(StoreError::Download(DownloadError::Cancelled(_))) => {
+                        info!(target: "ltn.config", "download of {id} cancelled");
+                        Task::Cancelled(id)
+                    }
+                    Err(e) => {
+                        error!(target: "ltn.config", "download of {id} failed: {e}");
+                        Task::Failed(id, e.to_string())
+                    }
                 }
-                Err(e) => {
-                    error!(target: "ltn.config", "download of {id} failed: {e}");
-                    Task::Failed(id, e.to_string())
-                }
-            }
-        });
+            },
+            move |message| Task::Failed(failed_id, message),
+        );
     }
 
     fn cancel_download(&mut self, asset_id: &str) {
@@ -813,21 +832,29 @@ impl SettingsScreen {
 
     fn remove(&mut self, asset_id: String, delete_legacy: bool, ctx: &mut Ctx) {
         let store = self.store.clone();
-        ctx.spawn_thread(&format!("remove-{asset_id}"), move || {
-            // The speaker pair is one thing to the user: one worker and one toast.
-            let ids: Vec<&str> = match asset_id.as_str() {
-                "speaker" => SPEAKER_IDS.to_vec(),
-                id => vec![id],
-            };
-            let mut freed = 0;
-            for id in &ids {
-                match store.remove(id, delete_legacy) {
-                    Ok(bytes) => freed += bytes,
-                    Err(e) => return Task::Failed(id.to_string(), e.to_string()),
+        let failed_id = match asset_id.as_str() {
+            "speaker" => SPEAKER_IDS[0].to_string(),
+            id => id.to_string(),
+        };
+        ctx.spawn_thread_or(
+            &format!("remove-{asset_id}"),
+            move || {
+                // The speaker pair is one thing to the user: one worker and one toast.
+                let ids: Vec<&str> = match asset_id.as_str() {
+                    "speaker" => SPEAKER_IDS.to_vec(),
+                    id => vec![id],
+                };
+                let mut freed = 0;
+                for id in &ids {
+                    match store.remove(id, delete_legacy) {
+                        Ok(bytes) => freed += bytes,
+                        Err(e) => return Task::Failed(id.to_string(), e.to_string()),
+                    }
                 }
-            }
-            Task::Removed(ids[0].to_string(), freed)
-        });
+                Task::Removed(ids[0].to_string(), freed)
+            },
+            move |message| Task::Failed(failed_id, message),
+        );
     }
 
     // --- Audio probe ----------------------------------------------------
@@ -1128,9 +1155,11 @@ impl Screen for SettingsScreen {
             );
         }
         let store = self.store.clone();
-        ctx.spawn_thread("models-load", move || {
-            Task::Loaded(store.list_assets().map_err(|e| e.to_string()))
-        });
+        ctx.spawn_thread_or(
+            "models-load",
+            move || Task::Loaded(store.list_assets().map_err(|e| e.to_string())),
+            |message| Task::Loaded(Err(message)),
+        );
         Action::None
     }
 

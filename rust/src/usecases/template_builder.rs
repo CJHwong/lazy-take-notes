@@ -118,6 +118,7 @@ pub struct BuilderResult {
 
 /// Creates a template, or edits `base_template` when it is set. Each valid
 /// version the LLM returns becomes the template the next edit turn starts from.
+#[derive(Clone)]
 pub struct TemplateBuilder {
     system_prompt: String,
     base_template: Option<SessionTemplate>,

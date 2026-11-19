@@ -435,3 +435,51 @@ fn a_thread_never_waits_for_the_loop() {
     );
     assert_eq!(host.pump(), 10_000);
 }
+
+/// Keeps every `String` task result it receives.
+struct Collector(Arc<Mutex<Vec<String>>>);
+
+impl Screen for Collector {
+    fn render(&mut self, _frame: &mut Frame, _area: Rect, _ctx: &Ctx) {}
+
+    fn key(&mut self, _key: &KeyEvent, _name: &str, _ctx: &mut Ctx) -> Action {
+        Action::None
+    }
+
+    fn message(&mut self, msg: Msg, _ctx: &mut Ctx) -> (Option<Msg>, Action) {
+        if let Msg::Task(payload) = msg
+            && let Ok(text) = payload.downcast::<String>()
+        {
+            self.0.lock().unwrap().push(*text);
+        }
+        (None, Action::None)
+    }
+}
+
+fn wait_for_results(host: &mut Host, results: &Mutex<Vec<String>>, count: usize) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while results.lock().unwrap().len() < count && Instant::now() < deadline {
+        host.pump();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_thread_that_panics_posts_its_fallback_result() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let results = Arc::new(Mutex::new(Vec::new()));
+    host.push(Box::new(Collector(results.clone())));
+    host.ctx().spawn_thread_or(
+        "panics",
+        || -> String { panic!("thread boom") },
+        |message| format!("fallback: {message}"),
+    );
+    host.ctx()
+        .spawn_thread_or("works", || "done".to_string(), |_| "unused".to_string());
+    wait_for_results(&mut host, &results, 2);
+    let mut seen = results.lock().unwrap().clone();
+    seen.sort();
+    assert_eq!(seen, ["done", "fallback: thread boom"]);
+    assert!(!host.finished());
+}
