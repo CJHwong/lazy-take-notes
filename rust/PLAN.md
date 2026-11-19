@@ -49,7 +49,7 @@ The two versions must work on the same data, in both directions:
 6. [ ] TUI: shell, pickers, record, transcribe, view, preflight screen, settings, template builder
    - Done: pickers, record (with the preflight screen), transcribe, view, template builder, the kiosk shell (bare `lazy-take-notes`, `LTN_KIOSK=1`). Left: settings.
    - Real runs: each screen next to Python's in tmux, the same keys sent to both. The builder ran against a stub OpenAI-compatible server: both sent the same requests, and the screens matched through generate, auto-fix, save, edit and the quit confirm.
-   - The kiosk ran a recording, stopped it, and came back to the welcome picker with no whisper, `coreaudio-tap` or `caffeinate` child left and the WAV closed. A cancelled preflight also leaves no child.
+   - The kiosk ran a recording, stopped it, and came back to the welcome picker with no whisper, `coreaudio-tap` or `caffeinate` child left and the WAV closed. A cancelled preflight also leaves no child. The kiosk routes match Python's screens: each mode from welcome and back, the builder from the template picker and back to it, View into a session and back, and a full Transcribe. SIGTERM during a kiosk recording exits in 2 s with the spoken words in `transcript.txt`.
    - A closed window (SIGHUP) during a recording: the audio flushes and the transcript is saved; failed draws are dropped.
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
 7. [ ] Cross-version run: each version opens the other's sessions and config
@@ -89,3 +89,4 @@ The two versions must work on the same data, in both directions:
 30. The template builder's "Thinking" dots step every 0.5 s. Python stepped every 0.4 s; the Rust screen updates four times a second.
 31. A mode that cannot start in the kiosk shows `Could not start: <message>`. Python put the exception's class name before the message.
 32. A worker or task result from a screen that has closed is dropped, as Textual drops a message to a removed screen. Before the kiosk shell, each Rust screen ran in its own host, so this could not happen.
+33. In the kiosk, a second Transcribe asks for a file again. Python kept the first file and skipped the file picker, because the shell stored the picked path in its options.
