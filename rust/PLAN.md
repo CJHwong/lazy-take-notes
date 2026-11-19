@@ -95,7 +95,7 @@ The two versions must work on the same data, in both directions:
 32. A worker or task result from a screen that has closed is dropped, as Textual drops a message to a removed screen. Before the kiosk shell, each Rust screen ran in its own host, so this could not happen.
 33. In the kiosk, a second Transcribe asks for a file again. Python kept the first file and skipped the file picker, because the shell stored the picked path in its options.
 34. `--help` uses clap's layout, not click's. The commands, flags and their descriptions are the same.
-35. The `plugin` command is dropped with the plugins. `ls`, `notes` and `transcript` are ported: on 99 real sessions, `ls`, `ls -a`, `ls --json`, both readers by name and by default, a labeled transcript, and each error print the same bytes and exit code as Python.
+35. The `plugin` command is dropped with the plugins. `ls`, `notes` and `transcript` are ported: on 99 real sessions, `ls`, `ls -a`, `ls --json`, both readers by name and by default, a labeled transcript, and each error print the same bytes and exit code as Python. Piped into `head`, `transcript` and `notes` end with exit 1 and no message, as click does; a plain `print!` panicked there with exit 101. `ls` and `status` write through the same path.
 36. In Settings, a model row is a Tab stop and Enter chooses it. Python chose a row only with the mouse, so Tab went from one row's buttons to the next row's.
 37. When config.yaml cannot be parsed, the toast quotes the Rust YAML parser's message. The sentences around it are the same.
 38. A value that fails validation shows the Rust validator's message, not pydantic's.
