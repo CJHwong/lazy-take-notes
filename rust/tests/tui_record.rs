@@ -14,9 +14,9 @@ use lazy_take_notes::app::events::{AudioHealthReport, Cancel, Event, WorkerState
 use lazy_take_notes::config::build_app_config;
 use lazy_take_notes::domain::speaker_turn::SpeakerTurn;
 use lazy_take_notes::ports::audio_source::{AudioError, AudioSource};
-use lazy_take_notes::tui::host::Host;
+use lazy_take_notes::tui::host::{Action, Host};
 use lazy_take_notes::tui::screens::record::{RecordScreen, RecordWorkers};
-use lazy_take_notes::tui::screens::session::Session;
+use lazy_take_notes::tui::screens::session::{Mode, Session};
 
 /// Remembers the last mute the screen set.
 #[derive(Default)]
@@ -52,6 +52,15 @@ struct Run {
 }
 
 fn start(consent_seen: bool) -> Run {
+    start_with(consent_seen, false)
+}
+
+/// The audio worker's body when a test makes it crash.
+fn raising_worker_body() {
+    panic!("worker bug");
+}
+
+fn start_with(consent_seen: bool, audio_panics: bool) -> Run {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -82,6 +91,9 @@ fn start(consent_seen: bool) -> Run {
         // The worker keeps its cancel so a test can see the stop; each test posts events.
         audio: Box::new(move |_poster, cancel| {
             *seen.lock().unwrap() = Some(cancel);
+            if audio_panics {
+                raising_worker_body();
+            }
         }),
         diarization: None,
         paused: paused.clone(),
@@ -413,4 +425,102 @@ fn a_failed_rename_keeps_the_session() {
         1.0,
     )]));
     assert!(!run.host.finished());
+}
+
+#[test]
+fn a_lost_mic_stays_on_the_status_bar_until_it_returns() {
+    let mut run = start(true);
+    run.recording();
+    let bar = |run: &mut Run| run.screen_text().lines().last().unwrap_or("").to_string();
+    run.post(health("lost", "ok", "ok"));
+    assert!(bar(&mut run).contains("MIC LOST"), "{}", bar(&mut run));
+    run.post(health("ok", "lost", "ok"));
+    let text = bar(&mut run);
+    assert!(
+        !text.contains("MIC LOST") && text.contains("SYS LOST"),
+        "{text}"
+    );
+    run.post(health("silent", "ok", "ok"));
+    let text = bar(&mut run);
+    assert!(
+        text.contains("MIC SILENT") && !text.contains("SYS LOST"),
+        "{text}"
+    );
+    run.post(health("ok", "ok", "error"));
+    assert!(bar(&mut run).contains("AUDIO ERROR"), "{}", bar(&mut run));
+    run.post(health("ok", "ok", "ok"));
+    let text = bar(&mut run);
+    for alert in ["LOST", "SILENT", "AUDIO ERROR"] {
+        assert!(!text.contains(alert), "{text}");
+    }
+}
+
+/// A mode whose worker has finished.
+struct Idle;
+
+impl Mode for Idle {
+    fn hints(&self, _state: &str) -> &'static str {
+        ""
+    }
+    fn help_rows(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn worker_busy(&self) -> bool {
+        false
+    }
+    fn move_folder(
+        &mut self,
+        _from: &std::path::Path,
+        _to: &std::path::Path,
+    ) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn it_closes_once_even_when_called_again() {
+    // A second q and the label task's end both reach close_session.
+    let raw = yaml_serde::from_str("output: {auto_label: false}").unwrap();
+    let controller = SessionController::new(
+        build_app_config(&raw).unwrap(),
+        built_in_template("default_en"),
+        Arc::new(FakeLlm::new(Reply::Text("## Notes".into(), 10))),
+        Box::new(FakePersistence::new().0),
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::new(controller, dir.path().to_path_buf(), "", vec![], vec![]);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    assert!(matches!(session.close_session(), Action::Pop(None)));
+    assert!(matches!(session.close_session(), Action::None));
+    session.flow.pending_quit = true;
+    session.flow.final_attempted = true;
+    assert!(matches!(
+        session.continue_pending_quit(&Idle, host.ctx()),
+        Action::None
+    ));
+}
+
+#[test]
+fn a_worker_crash_logs_the_stack_and_the_session_continues() {
+    let logs = tempfile::tempdir().unwrap();
+    lazy_take_notes::app::logging::setup_file_logging(logs.path(), true);
+    let mut run = start_with(true, true);
+    run.recording();
+    run.press("s");
+    assert!(!run.host.finished());
+    assert!(
+        run.toasts()
+            .contains(&"Recording stopped. You can still browse and run quick actions.".into()),
+        "{:?}",
+        run.toasts()
+    );
+    lazy_take_notes::app::logging::close_file_logging();
+    let log = std::fs::read_to_string(logs.path().join("debug.log")).unwrap();
+    assert!(log.contains("CRITICAL panic in thread audio"), "{log}");
+    assert!(log.contains("worker bug"), "{log}");
+    assert!(log.contains("raising_worker_body"), "{log}");
 }

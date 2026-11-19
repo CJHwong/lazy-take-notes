@@ -710,8 +710,8 @@ impl Host {
         let signals = watch_shutdown_signals(self.ctx.sender.clone(), self.watchdog_armed.clone());
         let runtime = self.ctx.runtime.clone();
         let outcome = runtime.block_on(self.event_loop(terminal));
-        if let Some(handle) = signals {
-            handle.close();
+        if let Some(watch) = signals {
+            watch.close();
         }
         outcome
     }
@@ -822,9 +822,20 @@ fn signal_name(signum: i32) -> &'static str {
 fn watch_shutdown_signals(
     sender: UnboundedSender<Msg>,
     armed: Arc<AtomicBool>,
-) -> Option<signal_hook::iterator::Handle> {
+) -> Option<SignalWatch> {
     use signal_hook::consts::{SIGHUP, SIGTERM};
-    let mut signals = match signal_hook::iterator::Signals::new([SIGTERM, SIGHUP]) {
+    watch_signals(&[SIGTERM, SIGHUP], sender, armed)
+}
+
+/// No handler (a signal the OS refuses) logs a warning and returns None: the
+/// session runs on, as Python's host does when `signal.signal` raises.
+fn watch_signals(
+    list: &[i32],
+    sender: UnboundedSender<Msg>,
+    armed: Arc<AtomicBool>,
+) -> Option<SignalWatch> {
+    keep_default_actions(list);
+    let mut signals = match signal_hook::iterator::Signals::new(list) {
         Ok(signals) => signals,
         Err(e) => {
             warn!(target: "ltn.app", "No handler for SIGTERM and SIGHUP: {e}");
@@ -846,7 +857,55 @@ fn watch_shutdown_signals(
         warn!(target: "ltn.app", "No signal thread: {e}");
         return None;
     }
-    Some(handle)
+    NO_HOST_LISTENS.store(false, Ordering::SeqCst);
+    Some(SignalWatch(handle))
+}
+
+/// The host's signal handlers. `close` gives each signal its old action back.
+struct SignalWatch(signal_hook::iterator::Handle);
+
+impl SignalWatch {
+    fn close(self) {
+        self.0.close();
+        NO_HOST_LISTENS.store(true, Ordering::SeqCst);
+    }
+}
+
+/// While true, a signal whose action was the default before any host takes that
+/// action again: Python's host restores the handlers it replaced. signal-hook
+/// keeps its own handler installed for the next host in the process, so the
+/// default comes back through this flag instead.
+static NO_HOST_LISTENS: std::sync::LazyLock<Arc<AtomicBool>> =
+    std::sync::LazyLock::new(|| Arc::new(AtomicBool::new(true)));
+
+/// Before the first host replaces a signal's handler, note whether its action
+/// was the default. A signal that was ignored (SIGHUP under nohup) stays ignored.
+fn keep_default_actions(list: &[i32]) {
+    static SEEN: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
+    let mut seen = SEEN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for &signum in list {
+        if seen.contains(&signum) {
+            continue;
+        }
+        seen.push(signum);
+        if has_default_action(signum)
+            && let Err(e) =
+                signal_hook::flag::register_conditional_default(signum, NO_HOST_LISTENS.clone())
+        {
+            warn!(target: "ltn.app", "Cannot restore the default action of signal {signum}: {e}");
+        }
+    }
+}
+
+fn has_default_action(signum: i32) -> bool {
+    // SAFETY: a null new action only reads the current one into `current`.
+    unsafe {
+        let mut current: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(signum, std::ptr::null(), &mut current) == 0
+            && current.sa_sigaction == libc::SIG_DFL
+    }
 }
 
 /// End the process if the clean shutdown hangs. By then the audio flush and the
