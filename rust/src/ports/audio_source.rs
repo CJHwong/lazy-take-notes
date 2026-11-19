@@ -6,6 +6,38 @@ use thiserror::Error;
 #[error("{0}")]
 pub struct AudioError(pub String);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceHealth {
+    Ok,
+    Lost,
+    Silent,
+}
+
+impl SourceHealth {
+    /// The name the status bar and the logs use, as in Python.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Lost => "lost",
+            Self::Silent => "silent",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Health {
+    pub mic: SourceHealth,
+    pub system: SourceHealth,
+}
+
+/// How much audio waits inside a mixing source, for the stats log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QueueSizes {
+    pub mic_blocks: usize,
+    pub system_blocks: usize,
+    pub system_buffered: usize,
+}
+
 /// A mono float32 audio input stream.
 ///
 /// Every method takes `&self`: the mixer reads a source on one thread while it
@@ -48,6 +80,25 @@ pub trait AudioSource: Send + Sync {
     /// Set when the configured device is missing and another one records.
     fn device_notice(&self) -> String {
         String::new()
+    }
+
+    /// Each part's state, for a source that mixes and recovers parts. None otherwise.
+    fn health(&self) -> Option<Health> {
+        None
+    }
+
+    /// Current delivery failures, including recovery in progress.
+    fn source_errors(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Whether a silent system stream is proven with a test tone, so silence alone says nothing.
+    fn verifies_system_audio(&self) -> bool {
+        false
+    }
+
+    fn queue_sizes(&self) -> Option<QueueSizes> {
+        None
     }
 
     /// Samples dropped to keep capture delay bounded.

@@ -317,7 +317,7 @@ fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> se
             delivered += block.len();
             sender.send(Some(block)).unwrap();
         }
-        let now = source.health();
+        let now = source.health().expect("the mixer reports health");
         if health != Some(now) {
             eprintln!(
                 "HEALTH {:.1}s {now:?} errors={:?}",

@@ -223,7 +223,7 @@ fn a_source_that_stays_away_is_retried_until_close() {
     source.open(16_000, 1).unwrap();
     assert!(wait_until(|| mic.opens() > 10 && system.opens() > 10));
     assert!(!source.exhausted());
-    let health = source.health();
+    let health = source.health().unwrap();
     assert_eq!(
         (health.mic, health.system),
         (SourceHealth::Lost, SourceHealth::Lost)
@@ -236,9 +236,9 @@ fn a_source_that_returns_after_many_failures_is_back_in_the_mix() {
     let mic = Arc::new(FakeSource::flaky(8, vec![0.1; 512]));
     let source = mixer(&mic, &Arc::new(FakeSource::idle()), None, fast());
     source.open(16_000, 1).unwrap();
-    assert!(wait_until(
-        || source.health().mic == SourceHealth::Ok && mic.opens() > 8
-    ));
+    assert!(wait_until(|| source.health().unwrap().mic
+        == SourceHealth::Ok
+        && mic.opens() > 8));
     assert!(source.source_errors().is_empty());
     assert!(wait_until(|| source
         .read(Duration::from_millis(50))
@@ -311,7 +311,9 @@ fn a_mic_that_sends_exact_zeros_is_reported_silent_and_not_restarted() {
     };
     let source = mixer(&mic, &Arc::new(FakeSource::idle()), None, timing);
     source.open(16_000, 1).unwrap();
-    assert!(wait_until(|| source.health().mic == SourceHealth::Silent));
+    assert!(wait_until(
+        || source.health().unwrap().mic == SourceHealth::Silent
+    ));
     assert_eq!(mic.opens(), 1);
     source.close().unwrap();
 }
@@ -329,7 +331,7 @@ fn a_quiet_live_mic_and_a_muted_mic_are_not_silent() {
         source.open(16_000, 1).unwrap();
         thread::sleep(Duration::from_millis(200));
         assert_eq!(
-            source.health().mic,
+            source.health().unwrap().mic,
             SourceHealth::Ok,
             "level {level}, muted {muted}"
         );
@@ -366,7 +368,7 @@ fn a_live_tap_returns_the_tone_and_stays_ok() {
     );
     source.open(16_000, 1).unwrap();
     assert!(wait_until(|| played.load(Ordering::SeqCst) >= 2));
-    assert_eq!(source.health().system, SourceHealth::Ok);
+    assert_eq!(source.health().unwrap().system, SourceHealth::Ok);
     assert_eq!(system.opens(), 1);
     source.close().unwrap();
 }
@@ -386,12 +388,14 @@ fn a_deaf_tap_is_restarted_and_stays_lost_until_it_hears_again() {
     assert!(wait_until(|| system.opens() >= 2));
     thread::sleep(Duration::from_millis(30));
     assert_eq!(
-        source.health().system,
+        source.health().unwrap().system,
         SourceHealth::Lost,
         "a restarted tap that sends zeros is not proven"
     );
     system.alive.store(true, Ordering::SeqCst);
-    assert!(wait_until(|| source.health().system == SourceHealth::Ok));
+    assert!(wait_until(
+        || source.health().unwrap().system == SourceHealth::Ok
+    ));
     source.close().unwrap();
 }
 
@@ -409,7 +413,7 @@ fn a_tone_that_cannot_play_or_no_player_never_flags_the_tap() {
         source.open(16_000, 1).unwrap();
         thread::sleep(Duration::from_millis(300));
         assert_eq!(system.opens(), 1);
-        assert_eq!(source.health().system, SourceHealth::Ok);
+        assert_eq!(source.health().unwrap().system, SourceHealth::Ok);
         source.close().unwrap();
     }
 }
@@ -437,7 +441,9 @@ fn a_hung_reader_is_reported_lost_and_close_does_not_wait_for_it() {
     };
     let source = mixer(&mic, &Arc::new(FakeSource::idle()), None, timing);
     source.open(16_000, 1).unwrap();
-    assert!(wait_until(|| source.health().mic == SourceHealth::Lost));
+    assert!(wait_until(
+        || source.health().unwrap().mic == SourceHealth::Lost
+    ));
     let started = Instant::now();
     assert_eq!(
         source.close(),

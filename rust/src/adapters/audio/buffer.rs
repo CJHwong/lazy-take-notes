@@ -89,6 +89,11 @@ impl AudioBuffer {
         *self.state.lock().expect("audio buffer lock") = State::default();
     }
 
+    /// Blocks waiting.
+    pub fn len(&self) -> usize {
+        self.state.lock().expect("audio buffer lock").blocks.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.state
             .lock()
