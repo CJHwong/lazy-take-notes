@@ -81,6 +81,44 @@ The two versions must work on the same data, in both directions:
    - Real runs from the extracted package outside the repo: preflight captured the test tone, and with the mic muted (SIGUSR1) a spoken sentence came through the tap into `transcript.txt` word for word. With the helper removed, preflight fails and names the missing path. The same recording also passed with the repo folder hidden by `sandbox-exec`, so the package needs nothing from the build tree.
    - In one home: Python Settings saved After lines 7, Rust Settings showed it and saved Wait seconds 45, and Python Settings showed both. Each version transcribed the same file headless with an identical `transcript.txt`, `status` printed the same lines in both, and each `view` opened the other's session.
 
+## Plugins
+
+Python plugins keep working: the Rust app runs them in a separate Python process, the plugin host, and talks to it in JSON. Nothing in a plugin changes.
+
+**Launch.** The host is the Python package's `lazy-take-notes-plugin-host` script, started as `uvx --from <host> --with <each line of plugins.txt> lazy-take-notes-plugin-host`. `<host>` is `lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git`; `LTN_PLUGIN_HOST_FROM` replaces it (a local checkout while developing). uv supplies Python, so the user needs only uv. If the launch fails, it runs again with `--offline` to use uv's cache. With no plugins.txt lines, no host starts.
+
+**Transport.** One JSON-RPC 2.0 object per line on the host's stdin and stdout, UTF-8. A message with `method` is a request (with `id`) or a notification (no `id`); a message with `result` or `error` answers the receiver's own request. Each side numbers its own requests. The host's stderr goes to the terminal (a plugin's `click.echo(err=True)` and tracebacks); the host moves Python's `sys.stdout` to stderr, so a plugin's print never breaks the stream.
+
+**Messages.**
+
+| From | Method | Params | Result |
+|---|---|---|---|
+| host | `hello` (notification, first line) | `protocol: 1`, `llm_providers: [name]`, `commands: [{name, help}]`, `load_errors: [{plugin, group, error}]` | |
+| app | `llm.create` | `provider`, `config_path`, `output_dir` (null when not given) | `{client}` |
+| app | `llm.chat` | `client`, `model`, `messages: [{role, content}]` | `{content, prompt_tokens}` |
+| app | `llm.chat_single` | `client`, `model`, `prompt` | `{content}` |
+| app | `llm.check_connectivity` | `client` | `{ok, message}` |
+| app | `llm.check_models` | `client`, `models` | `{missing: [name]}` |
+| app | `command.run` | `name`, `argv`, `config_path`, `output_dir` | `{exit_code}` |
+| host | `session.transcribe` (only during `command.run`) | `audio_path`, `segments: [{text, wall_start, wall_end}]`, `label`, `template_name`, `language` (each may be null) | `{session_dir, notes_path}`, or null when the user cancelled the template picker |
+| app | `shutdown` | | `{}`, then the host exits |
+
+An error is `{code, message, data: {type}}`, where `type` is the Python exception class; the app shows it as `type: message`, as Python showed a plugin's exception. Codes: -32601 unknown method, -32602 bad params, -32000 the plugin raised.
+
+**Inside the host.** Before it loads any entry point, the host replaces `run_transcribe` in `lazy_take_notes.plugin_api` with one that sends `session.transcribe` and waits for the answer, then returns `SessionArtifacts`. `run_record` raises a `RuntimeError` saying the Rust app does not run it yet. LLM calls run on one asyncio loop, so a digest and a quick action can run at once. `command.run` calls the click command with `standalone_mode=False` and `obj={config_path, output_dir}`; `SystemExit` becomes the exit code, any other exception prints its traceback to stderr and gives 1.
+
+**Errors in the app.** A plugin never stops the app. Each failure says what happened and what to do:
+
+- uv not installed: the plugin needs uv, with the install command.
+- The host exits before `hello` (a bad spec, no network and no cache): the last stderr lines.
+- No `hello` within the start limit (120 s; the first start installs Python and packages, and the app says so).
+- A `protocol` the app does not know: update the plugins or the app.
+- A plugin in `load_errors`: one warning line, as Python printed.
+- The host dies or sends a line that is not JSON during a call: that call fails with the host's last stderr lines; later calls fail at once with the same text.
+- An unknown provider lists the built-in and plugin providers.
+
+**Not in the first version:** transcription providers, `run_record`, and the `llm_client=` and `transcriber=` overrides. No known plugin uses them.
+
 ## Known differences from the Python version
 
 1. A template field with a conversion (`!r`), a format spec (`:>5`), an attribute or an index is a format error. Python accepts most of these. No built-in or known user template uses one. Python's `{name.attr}` raised an uncaught AttributeError; Rust reports a format error.
@@ -125,3 +163,4 @@ The two versions must work on the same data, in both directions:
 40. In the template builder, Python showed "Unexpected error: ScreenStackError: Can't pop screen; there must be at least one screen on the stack." when Escape came right after a save. Rust shows no error there. The Python bug stays as it is.
 41. The look follows ratatui's idiom, not Textual's (see "Look and mouse"). The words, the key bindings and what each key does are the same; boxes, buttons, inputs, lists, scrollbars, dialogs and toasts are drawn differently, and most screens use fewer rows.
 42. Textual handled the mouse on every widget, drag included. Rust handles clicks and the wheel as in "Look and mouse", and no drag: no text selection inside an input or text area, and no scrollbar dragging.
+43. Started with no command, the app always comes back to the welcome menu when a mode ends; Esc on the menu quits. Python did this only with `LTN_KIOSK=1` and otherwise exited after one mode. `LTN_KIOSK=1` still asks for the system audio permission at start, as before.

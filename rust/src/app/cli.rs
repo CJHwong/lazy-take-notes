@@ -381,10 +381,10 @@ fn diarize(session_dir: &Path, device: &str, timeout_s: f64) -> i32 {
     }
 }
 
-/// No command: the welcome picker, as Python's `ShellApp`. `LTN_KIOSK=1` loops
-/// back to it after each mode.
+/// No command: the welcome picker, as Python's `ShellApp`. Each mode comes back
+/// to it when it ends, as Python did only with `LTN_KIOSK=1`; Esc on the picker quits.
 fn shell(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> {
-    let kiosk = std::env::var("LTN_KIOSK").is_ok_and(|value| value == "1");
+    let kiosk = true;
     let runtime = crate::app::headless_run::new_runtime()?;
     crate::tui::terminal::clear_normal_screen();
     let root = Box::new(crate::app::shell::Shell::new(config, output_dir, kiosk));
