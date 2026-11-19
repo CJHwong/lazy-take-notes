@@ -6,7 +6,6 @@
 
 pub mod ollama;
 pub mod openai;
-mod pyrepr;
 #[cfg(test)]
 mod test_server;
 
