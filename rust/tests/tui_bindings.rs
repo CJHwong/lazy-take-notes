@@ -55,3 +55,13 @@ fn view_screen_and_panels() {
 fn searchable_pickers() {
     assert_table("pickers.base.SearchablePicker", &PICKER_BINDINGS);
 }
+
+#[test]
+fn transcribe_screen_and_its_modals() {
+    use lazy_take_notes::tui::screens::modals::{HELP_BINDINGS, LABEL_BINDINGS, QUERY_BINDINGS};
+    use lazy_take_notes::tui::screens::transcribe::TRANSCRIBE_BINDINGS;
+    assert_table("apps.transcribe.TranscribeApp", &TRANSCRIBE_BINDINGS);
+    assert_table("widgets.help_modal.HelpModal", &HELP_BINDINGS);
+    assert_table("widgets.query_modal.QueryModal", &QUERY_BINDINGS);
+    assert_table("widgets.label_modal.LabelModal", &LABEL_BINDINGS);
+}

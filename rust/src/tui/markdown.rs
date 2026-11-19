@@ -2,7 +2,7 @@
 //!
 //! Vertical margins between blocks collapse to the larger one, as in Textual.
 
-use pulldown_cmark::{Alignment, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::layout::Alignment as LineAlignment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -20,7 +20,6 @@ struct ListState {
 }
 
 struct Table {
-    alignments: Vec<Alignment>,
     rows: Vec<Vec<Vec<Span<'static>>>>,
     in_header: bool,
     header_rows: usize,
@@ -232,10 +231,9 @@ impl<'t> Builder<'t> {
             Tag::Link { .. } => {
                 self.push_style(Style::default().add_modifier(Modifier::UNDERLINED))
             }
-            Tag::Table(alignments) => {
+            Tag::Table(_) => {
                 self.flush_text(LineAlignment::Left);
                 self.table = Some(Table {
-                    alignments,
                     rows: Vec::new(),
                     in_header: false,
                     header_rows: 0,
@@ -348,6 +346,8 @@ impl<'t> Builder<'t> {
         self.gap(1);
     }
 
+    /// Textual's `MarkdownTableContent`: a grid with `keyline: thin`, columns
+    /// sized by `resolve_columns`, cells padded `0 1` and wrapped.
     fn end_table(&mut self) {
         let Some(table) = self.table.take() else {
             return;
@@ -356,74 +356,87 @@ impl<'t> Builder<'t> {
         if columns == 0 {
             return;
         }
-        let cell_width = |cell: &Vec<Span<'static>>| {
-            cell.iter()
-                .map(|span| str_width(&span.content))
-                .sum::<usize>()
+        let cell_line = |row: &Vec<Vec<Span<'static>>>, index: usize| -> Line<'static> {
+            Line::from(row.get(index).cloned().unwrap_or_default())
         };
-        let mut widths = vec![0; columns];
+        let mut natural = vec![0usize; columns];
+        let mut minimums = vec![1usize; columns];
         for row in &table.rows {
-            for (index, cell) in row.iter().enumerate() {
-                widths[index] = widths[index].max(cell_width(cell));
+            for index in 0..columns {
+                let line = cell_line(row, index);
+                let text: String = line
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect();
+                natural[index] = natural[index].max(str_width(&text) + 2);
+                let longest_word = text.split_whitespace().map(str_width).max().unwrap_or(0);
+                minimums[index] = minimums[index].max(longest_word + 2);
             }
         }
-        // Shrink the widest columns until the row fits, then cut the cells.
-        let budget = usize::from(self.width).saturating_sub(self.indent() + 3 * columns);
-        while widths.iter().sum::<usize>() > budget && widths.iter().any(|w| *w > 3) {
-            let widest = widths
-                .iter()
-                .enumerate()
-                .max_by_key(|(_, w)| **w)
-                .map(|(i, _)| i)
-                .unwrap_or(0);
-            widths[widest] -= 1;
-        }
+        let indent = self.indent();
+        // The outer keylines take one column on each side.
+        let grid = usize::from(self.width).saturating_sub(indent + 2);
+        let widths = resolve_columns(&natural, &minimums, grid, 1);
         let keyline = Style::default().fg(tint(
             self.theme.color("foreground"),
             self.theme.color("background"),
             0.2,
         ));
-        let header = Style::default()
+        let header_style = Style::default()
             .fg(self.theme.color("primary"))
             .add_modifier(Modifier::BOLD);
+        let rule = |left: &str, middle: &str, right: &str| {
+            let parts: Vec<String> = widths.iter().map(|width| "─".repeat(*width)).collect();
+            Line::from(vec![
+                Span::raw(" ".repeat(indent)),
+                Span::styled(format!("{left}{}{right}", parts.join(middle)), keyline),
+            ])
+        };
+        self.emit(rule("┌", "┬", "┐"));
         for (row_index, row) in table.rows.iter().enumerate() {
             let is_header = row_index < table.header_rows;
-            let mut spans = vec![Span::raw(" ".repeat(self.indent()))];
-            for (index, width) in widths.iter().enumerate() {
-                if index > 0 {
+            let cells: Vec<Vec<Line<'static>>> = widths
+                .iter()
+                .enumerate()
+                .map(|(index, width)| {
+                    let mut line = cell_line(row, index);
+                    if is_header {
+                        line = Line::from(
+                            line.spans
+                                .into_iter()
+                                .map(|span| Span::styled(span.content, header_style))
+                                .collect::<Vec<_>>(),
+                        );
+                    }
+                    wrap_line(&line, (*width as u16).saturating_sub(2).max(1))
+                })
+                .collect();
+            let height = cells.iter().map(Vec::len).max().unwrap_or(1).max(1);
+            for line_index in 0..height {
+                let mut spans = vec![Span::raw(" ".repeat(indent)), Span::styled("│", keyline)];
+                for (index, width) in widths.iter().enumerate() {
+                    // A header sits at the bottom of its row (`content-align: left bottom`).
+                    let lines = &cells[index];
+                    let shift = if is_header { height - lines.len() } else { 0 };
+                    let line = line_index
+                        .checked_sub(shift)
+                        .and_then(|at| lines.get(at))
+                        .cloned()
+                        .unwrap_or_default();
+                    let used = line.width();
+                    spans.push(Span::raw(" "));
+                    spans.extend(line.spans);
+                    spans.push(Span::raw(" ".repeat(width.saturating_sub(used + 1))));
                     spans.push(Span::styled("│", keyline));
                 }
-                let text: String = row
-                    .get(index)
-                    .map(|cell| cell.iter().map(|s| s.content.as_ref()).collect())
-                    .unwrap_or_default();
-                let shown = if str_width(&text) > *width {
-                    format!("{}…", truncate(&text, width.saturating_sub(1)))
-                } else {
-                    text
-                };
-                let pad = width.saturating_sub(str_width(&shown));
-                let aligned = match table.alignments.get(index) {
-                    Some(Alignment::Right) => format!("{}{shown}", " ".repeat(pad)),
-                    Some(Alignment::Center) => format!(
-                        "{}{shown}{}",
-                        " ".repeat(pad / 2),
-                        " ".repeat(pad - pad / 2)
-                    ),
-                    _ => format!("{shown}{}", " ".repeat(pad)),
-                };
-                let style = if is_header { header } else { self.style() };
-                spans.push(Span::styled(format!(" {aligned} "), style));
+                self.emit(Line::from(spans));
             }
-            self.emit(Line::from(spans));
-            if is_header && row_index + 1 == table.header_rows {
-                let rule: Vec<String> = widths.iter().map(|w| "─".repeat(w + 2)).collect();
-                self.emit(Line::from(vec![
-                    Span::raw(" ".repeat(self.indent())),
-                    Span::styled(rule.join("┼"), keyline),
-                ]));
+            if row_index + 1 < table.rows.len() {
+                self.emit(rule("├", "┼", "┤"));
             }
         }
+        self.emit(rule("└", "┴", "┘"));
         self.gap(1);
     }
 
@@ -496,8 +509,66 @@ pub fn render(markdown: &str, width: u16, theme: &Theme) -> Vec<Line<'static>> {
     builder.out
 }
 
+/// Textual's `resolve` for a grid with `expand` and `shrink`: grow the columns
+/// in proportion to fill `total`, or take the whole excess from each column in
+/// turn, down to its minimum, then in proportion if still too wide.
+pub fn resolve_columns(
+    natural: &[usize],
+    minimums: &[usize],
+    total: usize,
+    gutter: usize,
+) -> Vec<usize> {
+    let count = natural.len();
+    let space = total as f64 - (gutter * count.saturating_sub(1)) as f64;
+    let mut widths: Vec<f64> = natural.iter().map(|w| *w as f64).collect();
+    let mut used: f64 = widths.iter().sum();
+    if used < space && used > 0.0 {
+        let remaining = space - used;
+        widths = widths.iter().map(|w| w + w / used * remaining).collect();
+    }
+    let mut excess = used - space;
+    if excess > 0.0 {
+        for (index, minimum) in minimums.iter().enumerate() {
+            let width = widths[index];
+            let updated = (*minimum as f64).max(width - excess);
+            widths[index] = updated;
+            used = used - width + updated;
+            excess = used - space;
+            if excess <= 0.0 {
+                break;
+            }
+        }
+        used = widths.iter().sum();
+        excess = used - space;
+        if excess > 0.0 {
+            widths = widths.iter().map(|w| w - w / used * excess).collect();
+        }
+    }
+    // Offsets are the floors of the running sums, gutters included.
+    let mut offsets = vec![0usize];
+    let mut sum = 0.0;
+    for width in &widths {
+        sum += width;
+        offsets.push((sum + 1e-9).floor() as usize);
+        sum += gutter as f64;
+        offsets.push((sum + 1e-9).floor() as usize);
+    }
+    (0..count)
+        .map(|index| offsets[index * 2 + 1] - offsets[index * 2])
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn table_columns_shrink_and_grow_as_textual_resolves_them() {
+        // The help table: natural widths 34 and 49 in 52 columns, one gutter.
+        assert_eq!(resolve_columns(&[34, 49], &[15, 16], 52, 1), [15, 36]);
+        // A narrow table grows in proportion to fill the width.
+        assert_eq!(resolve_columns(&[10, 20], &[3, 3], 61, 1), [20, 40]);
+    }
+
     use super::*;
 
     fn plain(lines: &[Line<'_>]) -> Vec<String> {

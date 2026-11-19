@@ -4,7 +4,8 @@
 #
 # Usage, from the repo root:
 #   rust/scripts/tui_compare.sh "ARGS" KEY... [-- KEY...]
-# ARGS are the lazy-take-notes arguments, the same for both versions. Each KEY
+# ARGS are the lazy-take-notes arguments, the same for both versions; "{side}"
+# in ARGS becomes py or rs, so each side can write its own folder. Each KEY
 # is a tmux send-keys key name (Enter, Escape, Down, q). "wait:N" waits N
 # seconds; "snap" saves both screens and prints their diff.
 # Env: COLS, ROWS (default 110x32), OUT (default /tmp/tui-compare), RUST_BIN.
@@ -19,8 +20,8 @@ mkdir -p "$OUT"
 for side in py rs; do
   tmux kill-session -t "cmp-$side" 2>/dev/null
 done
-tmux new-session -d -s cmp-py -x "$COLS" -y "$ROWS" "uv run lazy-take-notes $args; sleep 600"
-tmux new-session -d -s cmp-rs -x "$COLS" -y "$ROWS" "$RUST_BIN $args; sleep 600"
+tmux new-session -d -s cmp-py -x "$COLS" -y "$ROWS" "uv run lazy-take-notes ${args//\{side\}/py}; sleep 600"
+tmux new-session -d -s cmp-rs -x "$COLS" -y "$ROWS" "$RUST_BIN ${args//\{side\}/rs}; sleep 600"
 sleep 4
 snap=0
 for key in "$@"; do

@@ -30,8 +30,15 @@ pub struct ScrollView {
     pub padding_y: u16,
     /// Padding of the content inside the container, inside the scrollbar.
     pub content_padding: u16,
+    /// Lines that scroll above the content, outside the Markdown's padding.
+    pub prefix: Vec<Line<'static>>,
+    /// The Markdown widget's own `padding: 0 N`, inside `content_padding`.
+    pub markdown_padding: u16,
     /// `overflow-y: scroll`: the scrollbar column is there even when nothing overflows.
     always_bar: bool,
+    /// Columns the vertical scrollbar takes: 1 where the CSS says `scrollbar-size: 1 1`,
+    /// Textual's default 2 elsewhere.
+    pub bar_width: u16,
     rows: usize,
     height: usize,
 }
@@ -46,7 +53,10 @@ impl ScrollView {
             padding: 0,
             padding_y: 0,
             content_padding: 0,
+            prefix: Vec::new(),
+            markdown_padding: 0,
             always_bar: true,
+            bar_width: 1,
             rows: 0,
             height: 0,
         }
@@ -83,6 +93,11 @@ impl ScrollView {
         self.content = Content::Markdown(text.to_string());
     }
 
+    /// True when the last render had more rows than fit.
+    pub fn overflows(&self) -> bool {
+        self.rows > self.height
+    }
+
     pub fn is_at_end(&self) -> bool {
         self.offset + self.height >= self.rows
     }
@@ -107,11 +122,29 @@ impl ScrollView {
         true
     }
 
+    /// Rows the content takes in a container `width` columns wide, without a scrollbar.
+    pub fn content_rows(&self, width: u16, theme: &Theme) -> usize {
+        let text_width = width
+            .saturating_sub((self.padding + self.content_padding) * 2)
+            .max(1);
+        self.lines_at(text_width, theme).len()
+    }
+
     fn lines_at(&self, width: u16, theme: &Theme) -> Vec<Line<'static>> {
+        let mut all = wrap_lines(&self.prefix, width);
         match &self.content {
-            Content::Lines(lines) => wrap_lines(lines, width),
-            Content::Markdown(text) => markdown::render(text, width, theme),
+            Content::Lines(lines) => all.extend(wrap_lines(lines, width)),
+            Content::Markdown(text) => {
+                let pad = self.markdown_padding;
+                let rendered = markdown::render(text, width.saturating_sub(pad * 2).max(1), theme);
+                all.extend(rendered.into_iter().map(|line| {
+                    let mut spans = vec![ratatui::text::Span::raw(" ".repeat(usize::from(pad)))];
+                    spans.extend(line.spans);
+                    Line::from(spans).style(line.style)
+                }));
+            }
         }
+        all
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, style: Style, theme: &Theme) {
@@ -128,7 +161,7 @@ impl ScrollView {
         let mut lines = self.lines_at(full, theme);
         let bar_column = lines.len() > height || self.always_bar;
         if bar_column {
-            lines = self.lines_at(full.saturating_sub(1).max(1), theme);
+            lines = self.lines_at(full.saturating_sub(self.bar_width).max(1), theme);
         }
         self.rows = lines.len();
         self.height = height;
@@ -143,13 +176,16 @@ impl ScrollView {
             region.y,
             region
                 .width
-                .saturating_sub(u16::from(bar_column) + self.content_padding * 2),
+                .saturating_sub(u16::from(bar_column) * self.bar_width + self.content_padding * 2),
             region.height,
         );
         let shown: Vec<Line<'static>> = lines.into_iter().skip(self.offset).take(height).collect();
         frame.render_widget(Paragraph::new(shown).style(style), text_area);
         if self.rows > height {
-            draw_scrollbar(frame, region, self.offset, self.rows, height, theme);
+            for column in 0..self.bar_width.min(region.width) {
+                let strip = Rect::new(region.x, region.y, region.width - column, region.height);
+                draw_scrollbar(frame, strip, self.offset, self.rows, height, theme);
+            }
         }
     }
 }

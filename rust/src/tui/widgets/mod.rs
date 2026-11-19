@@ -4,6 +4,7 @@ pub mod input;
 pub mod list;
 pub mod scroll;
 pub mod status_bar;
+pub mod text_area;
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -91,4 +92,35 @@ pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
         width,
         height,
     )
+}
+
+/// A `border: thick` box filled with `background_var`. Returns the inside.
+pub fn thick_box(
+    frame: &mut Frame,
+    area: Rect,
+    border_var: &str,
+    background_var: &str,
+    theme: &Theme,
+) -> Rect {
+    if area.width < 2 || area.height < 2 {
+        return Rect::default();
+    }
+    let border = theme.color(border_var);
+    let background = theme.color(background_var);
+    let edge = Style::default().fg(border).bg(background);
+    let inner_width = usize::from(area.width - 2);
+    let row = |left: &str, fill: &str, right: &str| {
+        Line::from(vec![
+            Span::styled(left.to_string(), edge),
+            Span::styled(fill.repeat(inner_width), edge),
+            Span::styled(right.to_string(), edge),
+        ])
+    };
+    let mut lines = vec![row("█", "▀", "█")];
+    for _ in 2..area.height {
+        lines.push(row("█", " ", "█"));
+    }
+    lines.push(row("█", "▄", "█"));
+    frame.render_widget(Paragraph::new(lines), area);
+    Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
 }

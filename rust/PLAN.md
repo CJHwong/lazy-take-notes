@@ -71,3 +71,6 @@ The two versions must work on the same data, in both directions:
 15. A fenced code block shows no horizontal scrollbar glyph; Textual drew one even when it had no size.
 16. An unexpected error toast reads `Unexpected error: <panic message>`. Python named the exception class (`Unexpected error: KeyError: 'x'`).
 17. No mouse: click and wheel do nothing. The terminal's own selection copies text, in place of Textual's `ctrl+c` on selected text.
+18. The session context box has no selection, undo, redo, cut, copy or paste keys of its own. The terminal's paste still works. Up and down move by logical lines, not by wrapped rows.
+19. A speaker chip cannot be clicked to rename the speaker, because there is no mouse (see 17).
+20. Python's Textual highlighted numbers and strings in plain text (Rich `repr` highlighting). The Rust TUI does not.

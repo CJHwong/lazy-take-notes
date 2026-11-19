@@ -11,4 +11,5 @@ pub mod keep_awake;
 pub mod logging;
 pub mod preflight;
 pub mod status_command;
+pub mod tui_run;
 pub mod workers;
