@@ -82,6 +82,9 @@ pub enum Command {
     Status { session: Option<String> },
     /// Browse a previously saved session (transcript + digest, read-only).
     View,
+    /// Build a custom template with AI assistance.
+    #[command(name = "create-template")]
+    CreateTemplate,
 }
 
 /// Parse the arguments and run the command. Returns the exit code.
@@ -111,6 +114,7 @@ pub fn main() -> i32 {
         }) => return diarize(&session_dir, &device, timeout_s),
         Some(Command::Status { session }) => status(config, output_dir, session.as_deref()),
         Some(Command::View) => view(config, output_dir),
+        Some(Command::CreateTemplate) => create_template(config),
     };
     result.unwrap_or_else(|message| fail(&message))
 }
@@ -241,6 +245,22 @@ fn view(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> 
         runtime.handle().clone(),
     )
     .map_err(|e| e.to_string())?;
+    Ok(0)
+}
+
+/// The template builder on its own, as Python's `_launch_template_builder`.
+fn create_template(config: Option<&Path>) -> Result<i32, String> {
+    let paths = crate::adapters::paths::Paths::for_user().ok_or("no home folder")?;
+    let runtime = crate::app::headless_run::new_runtime()?;
+    let screen = crate::app::tui_run::builder_screen(&paths, config, None);
+    crate::tui::host::run_screen(
+        Box::new(screen),
+        &crate::tui::system::saved_theme(),
+        runtime.handle().clone(),
+    )
+    .map_err(|e| e.to_string())?;
+    // A call still running ends with the builder.
+    runtime.shutdown_background();
     Ok(0)
 }
 
