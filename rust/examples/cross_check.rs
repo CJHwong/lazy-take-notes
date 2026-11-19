@@ -283,7 +283,7 @@ fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> se
 
     use lazy_take_notes::adapters::audio::coreaudio_tap::CoreAudioTapSource;
     use lazy_take_notes::adapters::audio::microphone::{MicrophoneSource, play_test_tone};
-    use lazy_take_notes::adapters::audio::mixed::{MixTiming, MixedAudioSource};
+    use lazy_take_notes::adapters::audio::mixed::{MAX_MIC_GAIN, MixTiming, MixedAudioSource};
     use lazy_take_notes::adapters::audio::session_folder::SessionFolder;
     use lazy_take_notes::adapters::audio::wav::start_processed_recorder;
     use lazy_take_notes::ports::audio_source::AudioSource;
@@ -301,7 +301,7 @@ fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> se
         mic,
         tap.clone(),
         app.transcription.silence_threshold,
-        10.0,
+        MAX_MIC_GAIN,
         Some(Box::new(play_test_tone)),
         MixTiming::default(),
     );
