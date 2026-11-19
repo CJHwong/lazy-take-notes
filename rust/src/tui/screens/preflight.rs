@@ -331,10 +331,10 @@ impl PreflightScreen {
         for check in &self.checks {
             lines.extend(Self::check_lines(check, text));
         }
-        // `#preflight-summary { margin-top: 1 }`, empty or not.
+        // `#preflight-summary { margin-top: 1 }`. An empty `Static` is still one row high.
         lines.push(Line::default());
         match &self.summary {
-            Summary::None => {}
+            Summary::None => lines.push(Line::default()),
             Summary::Red(message) => lines.push(Line::styled(message.clone(), text.fg(RED))),
             Summary::Yellow(message) => lines.push(Line::styled(message.clone(), text.fg(YELLOW))),
         }

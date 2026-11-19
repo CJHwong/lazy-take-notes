@@ -23,12 +23,3 @@ fn a_bad_model_fails_to_init_with_the_python_text() {
         error.0
     );
 }
-
-#[test]
-fn the_program_without_a_command_is_not_usable_yet() {
-    let status = std::process::Command::new(program())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .unwrap();
-    assert_eq!(status.code(), Some(2));
-}

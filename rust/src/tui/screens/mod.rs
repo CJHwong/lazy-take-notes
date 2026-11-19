@@ -11,3 +11,4 @@ pub mod template_builder;
 pub mod template_picker;
 pub mod transcribe;
 pub mod view;
+pub mod welcome;

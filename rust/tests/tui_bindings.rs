@@ -107,3 +107,9 @@ fn template_builder_and_its_modals() {
         &CONFIRM_QUIT_BINDINGS,
     );
 }
+
+#[test]
+fn welcome_picker() {
+    use lazy_take_notes::tui::screens::welcome::WELCOME_BINDINGS;
+    assert_table("pickers.welcome_picker.WelcomePicker", &WELCOME_BINDINGS);
+}

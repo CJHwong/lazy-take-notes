@@ -236,3 +236,64 @@ fn tab_closes_a_notice_and_still_moves_the_focus_below() {
     assert_eq!(host.depth(), 1);
     assert_eq!(keys.lock().unwrap().len(), 1);
 }
+
+/// Keeps a sender to post later, and records the numbers it receives.
+struct LateSender {
+    got: Arc<Mutex<Vec<i32>>>,
+    sender: Arc<Mutex<Option<TaskSender>>>,
+}
+
+impl Screen for LateSender {
+    fn render(&mut self, _frame: &mut Frame, _area: Rect, _ctx: &Ctx) {}
+
+    fn key(&mut self, _key: &KeyEvent, _name: &str, _ctx: &mut Ctx) -> Action {
+        Action::Pop(None)
+    }
+
+    fn mounted(&mut self, ctx: &mut Ctx) -> Action {
+        *self.sender.lock().unwrap() = Some(ctx.task_sender());
+        Action::None
+    }
+
+    fn message(&mut self, msg: Msg, _ctx: &mut Ctx) -> (Option<Msg>, Action) {
+        match msg {
+            Msg::Task(payload) => match payload.downcast::<i32>() {
+                Ok(value) => {
+                    self.got.lock().unwrap().push(*value);
+                    (None, Action::None)
+                }
+                Err(payload) => (Some(Msg::Task(payload)), Action::None),
+            },
+            other => (Some(other), Action::None),
+        }
+    }
+}
+
+#[test]
+fn a_result_from_a_closed_screen_never_reaches_the_next_one() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    host.push(Box::new(KeyLog(Arc::default())));
+    let (old_sender, new_sender) = (Arc::default(), Arc::default());
+    let (old_got, new_got) = (
+        Arc::new(Mutex::new(Vec::new())),
+        Arc::new(Mutex::new(Vec::new())),
+    );
+    host.push(Box::new(LateSender {
+        got: old_got.clone(),
+        sender: Arc::clone(&old_sender),
+    }));
+    host.key(&KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
+    host.push(Box::new(LateSender {
+        got: new_got.clone(),
+        sender: Arc::clone(&new_sender),
+    }));
+    old_sender.lock().unwrap().as_ref().unwrap().post(1_i32);
+    new_sender.lock().unwrap().as_ref().unwrap().post(2_i32);
+    host.pump();
+    assert_eq!(*new_got.lock().unwrap(), vec![2]);
+    assert!(old_got.lock().unwrap().is_empty());
+}

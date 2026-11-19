@@ -96,7 +96,7 @@ pub fn main() -> i32 {
     let config = cli.config.as_deref();
     let output_dir = cli.output_dir.as_deref();
     let result = match cli.command {
-        None => return not_ported("the TUI"),
+        None => shell(config, output_dir),
         Some(Command::Record { options, mute_mic }) => {
             record(config, output_dir, &options, mute_mic)
         }
@@ -261,9 +261,22 @@ fn diarize(session_dir: &Path, device: &str, timeout_s: f64) -> i32 {
     }
 }
 
-fn not_ported(what: &str) -> i32 {
-    eprintln!("lazy-take-notes (Rust): {what} is not usable yet; use --headless");
-    2
+/// No command: the welcome picker, as Python's `ShellApp`. `LTN_KIOSK=1` loops
+/// back to it after each mode.
+fn shell(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> {
+    let kiosk = std::env::var("LTN_KIOSK").is_ok_and(|value| value == "1");
+    let runtime = crate::app::headless_run::new_runtime()?;
+    crate::tui::terminal::clear_normal_screen();
+    let root = Box::new(crate::app::shell::Shell::new(config, output_dir, kiosk));
+    let outcome = crate::tui::host::run_screen(
+        root,
+        &crate::tui::system::saved_theme(),
+        runtime.handle().clone(),
+    );
+    crate::app::logging::close_file_logging();
+    // A session's workers flushed before its screen closed; the rest ends with the process.
+    runtime.shutdown_background();
+    outcome.map(|_| 0).map_err(|e| e.to_string())
 }
 
 /// A bad argument: click prints it and exits 2.

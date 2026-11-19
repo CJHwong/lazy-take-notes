@@ -42,11 +42,17 @@ use crate::tui::screens::transcribe::TranscribeScreen;
 use crate::tui::system::saved_theme;
 
 /// Python's `preflight_llm`: (missing digest models, missing interactive models).
-/// An unreachable provider only warns; the digests then fail in the session.
-pub async fn preflight_llm(llm: &dyn LlmClient, config: &AppConfig) -> (Vec<String>, Vec<String>) {
+/// An unreachable provider only warns, through `warn`; the digests then fail in the session.
+pub async fn preflight_llm(
+    llm: &dyn LlmClient,
+    config: &AppConfig,
+    warn: impl Fn(&str),
+) -> (Vec<String>, Vec<String>) {
     if let Err(error) = llm.check_connectivity().await {
-        eprintln!("Warning: LLM provider not reachable ({error}). Digests will fail.");
-        eprintln!("Transcript-only mode: audio capture will still work.");
+        warn(&format!(
+            "Warning: LLM provider not reachable ({error}). Digests will fail."
+        ));
+        warn("Transcript-only mode: audio capture will still work.");
         return (Vec::new(), Vec::new());
     }
     let (digest, interactive) = (&config.digest.model, &config.interactive.model);
@@ -132,11 +138,25 @@ fn run_builder(
     config_path: Option<&Path>,
     base: Option<(SessionTemplate, String)>,
 ) -> Result<(), String> {
+    let runtime = new_runtime()?;
+    let screen = builder_screen(paths, config_path, base);
+    run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
+        .map_err(|e| e.to_string())?;
+    // A call still running ends with the builder.
+    runtime.shutdown_background();
+    Ok(())
+}
+
+/// The template builder screen. It reads config.yaml on the first send, as
+/// Python does, so an edit made in Settings meanwhile counts.
+pub fn builder_screen(
+    paths: &Paths,
+    config_path: Option<&Path>,
+    base: Option<(SessionTemplate, String)>,
+) -> crate::tui::screens::template_builder::TemplateBuilderScreen {
     use crate::tui::screens::template_builder::{BuilderSetup, TemplateBuilderScreen};
     let config_path = config_path.map(Path::to_path_buf);
     let example_paths = paths.clone();
-    // Read config.yaml on the first send, as Python does, so an edit made in
-    // Settings meanwhile counts.
     let setup = Box::new(move || {
         let loaded = load_config(config_path.as_deref(), None)?;
         let example = YamlTemplates::new(&example_paths)
@@ -149,13 +169,7 @@ fn run_builder(
             example,
         })
     });
-    let runtime = new_runtime()?;
-    let screen = TemplateBuilderScreen::new(setup, YamlTemplates::new(paths), base);
-    run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
-        .map_err(|e| e.to_string())?;
-    // A call still running ends with the builder.
-    runtime.shutdown_background();
-    Ok(())
+    TemplateBuilderScreen::new(setup, YamlTemplates::new(paths), base)
 }
 
 /// The file picker, from the current folder. None when the user cancels.
@@ -181,32 +195,85 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
         Ok(template) => template,
         Err(code) => return Ok(code),
     };
-    check_transcription_provider(&infra)?;
-    let base_dir = resolve_base_dir(&paths, args.output_dir, &config);
-    let out_dir = make_session_dir(&base_dir, args.label).map_err(|e| e.to_string())?;
+    let loaded = Loaded {
+        config,
+        infra,
+        paths,
+    };
+    let start = TranscribeStart::new(&loaded, &template, args.output_dir, args.label)?;
     let runtime = new_runtime()?;
-    let llm = build_llm_client(&infra)?;
-    let (missing_digest, missing_interactive) =
-        runtime.block_on(preflight_llm(llm.as_ref(), &config));
-    let persistence = FilePersistence::new(out_dir.clone()).map_err(|e| e.to_string())?;
-    let controller =
-        SessionController::new(config.clone(), template.clone(), llm, Box::new(persistence));
-    let store = Arc::new(CachedModelStore::new(&paths));
-    let launcher = file_launcher(store, &config, &template, audio_path)?;
-    setup_file_logging(&out_dir, config.output.save_debug_log);
-    let session = Session::new(
-        controller,
-        out_dir,
-        args.label.unwrap_or(""),
-        missing_digest,
-        missing_interactive,
-    );
-    let screen = TranscribeScreen::new(session, config.transcription.silence_threshold, launcher);
+    let missing = runtime.block_on(preflight_llm(start.llm.as_ref(), &start.config, |line| {
+        eprintln!("{line}")
+    }));
+    let screen = start.screen(audio_path, missing)?;
     let outcome = run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone());
     close_file_logging();
     // The file worker and any LLM call end with the process; do not wait for them.
     runtime.shutdown_background();
     outcome.map(|_| 0).map_err(|e| e.to_string())
+}
+
+/// A transcription session up to its LLM preflight, as Python's
+/// `build_transcribe_session`. The preflight runs between `new` and `screen`.
+pub struct TranscribeStart {
+    pub llm: Arc<dyn LlmClient>,
+    pub config: AppConfig,
+    template: SessionTemplate,
+    paths: Paths,
+    out_dir: std::path::PathBuf,
+    label: String,
+}
+
+impl TranscribeStart {
+    pub fn new(
+        loaded: &Loaded,
+        template: &SessionTemplate,
+        output_dir: Option<&str>,
+        label: Option<&str>,
+    ) -> Result<Self, String> {
+        check_transcription_provider(&loaded.infra)?;
+        let base_dir = resolve_base_dir(&loaded.paths, output_dir, &loaded.config);
+        let out_dir = make_session_dir(&base_dir, label).map_err(|e| e.to_string())?;
+        Ok(Self {
+            llm: build_llm_client(&loaded.infra)?,
+            config: loaded.config.clone(),
+            template: template.clone(),
+            paths: loaded.paths.clone(),
+            out_dir,
+            label: label.unwrap_or("").to_string(),
+        })
+    }
+
+    /// The screen, given the missing (digest, interactive) models. Opens `debug.log`.
+    pub fn screen(
+        self,
+        audio_path: &Path,
+        (missing_digest, missing_interactive): (Vec<String>, Vec<String>),
+    ) -> Result<TranscribeScreen, String> {
+        let config = self.config;
+        let persistence = FilePersistence::new(self.out_dir.clone()).map_err(|e| e.to_string())?;
+        let controller = SessionController::new(
+            config.clone(),
+            self.template.clone(),
+            self.llm,
+            Box::new(persistence),
+        );
+        let store = Arc::new(CachedModelStore::new(&self.paths));
+        let launcher = file_launcher(store, &config, &self.template, audio_path)?;
+        setup_file_logging(&self.out_dir, config.output.save_debug_log);
+        let session = Session::new(
+            controller,
+            self.out_dir,
+            &self.label,
+            missing_digest,
+            missing_interactive,
+        );
+        Ok(TranscribeScreen::new(
+            session,
+            config.transcription.silence_threshold,
+            launcher,
+        ))
+    }
 }
 
 /// The preflight plan, as Python's `build_preflight_plan`. The checks and the
@@ -239,34 +306,16 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
         Ok(template) => template,
         Err(code) => return Ok(code),
     };
-    check_transcription_provider(&loaded.infra)?;
     let runtime = new_runtime()?;
-    let plan = build_plan(
+    let screen = preflight_screen(
         &loaded,
         &template,
+        args.config_path,
         args.output_dir,
         runtime.handle().clone(),
         mute_mic,
     )?;
-    let transcriber: Box<dyn Transcriber> =
-        Box::new(SubprocessWhisperTranscriber::new().map_err(|e| e.to_string())?);
-    let reload: Reload = {
-        let config_path = args.config_path.map(Path::to_path_buf);
-        let output_dir = args.output_dir.map(str::to_string);
-        let (template, handle) = (template.clone(), runtime.handle().clone());
-        Box::new(move || {
-            let loaded = load_config(config_path.as_deref(), output_dir.as_deref())?;
-            build_plan(
-                &loaded,
-                &template,
-                output_dir.as_deref(),
-                handle.clone(),
-                mute_mic,
-            )
-        })
-    };
     crate::tui::terminal::clear_normal_screen();
-    let screen = PreflightScreen::new(plan, transcriber, Some(reload));
     let result = run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
         .map_err(|e| e.to_string())?;
     let Some(outcome) = result.and_then(|payload| payload.downcast::<PreflightOutcome>().ok())
@@ -274,11 +323,62 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
         runtime.shutdown_background();
         return Ok(0);
     };
+    let screen = record_screen(*outcome, &loaded.paths, args.label, mute_mic)?;
+    let outcome = {
+        let _awake = keep_awake();
+        run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
+    };
+    close_file_logging();
+    // The audio worker flushed before the screen closed; the rest ends with the process.
+    runtime.shutdown_background();
+    outcome.map(|_| 0).map_err(|e| e.to_string())
+}
+
+/// The preflight screen for `template`, as Python's `PreflightScreen(build_preflight_plan(...),
+/// reload=plan_reloader(...))`.
+pub fn preflight_screen(
+    loaded: &Loaded,
+    template: &SessionTemplate,
+    config_path: Option<&Path>,
+    output_dir: Option<&str>,
+    runtime: tokio::runtime::Handle,
+    mute_mic: bool,
+) -> Result<PreflightScreen, String> {
+    check_transcription_provider(&loaded.infra)?;
+    let plan = build_plan(loaded, template, output_dir, runtime.clone(), mute_mic)?;
+    let transcriber: Box<dyn Transcriber> =
+        Box::new(SubprocessWhisperTranscriber::new().map_err(|e| e.to_string())?);
+    let reload: Reload = {
+        let config_path = config_path.map(Path::to_path_buf);
+        let output_dir = output_dir.map(str::to_string);
+        let template = template.clone();
+        Box::new(move || {
+            let loaded = load_config(config_path.as_deref(), output_dir.as_deref())?;
+            build_plan(
+                &loaded,
+                &template,
+                output_dir.as_deref(),
+                runtime.clone(),
+                mute_mic,
+            )
+        })
+    };
+    Ok(PreflightScreen::new(plan, transcriber, Some(reload)))
+}
+
+/// The record screen after a passed preflight, as Python's `build_record_session`.
+/// Opens `debug.log`; the caller closes it when the screen ends.
+pub fn record_screen(
+    outcome: PreflightOutcome,
+    paths: &Paths,
+    label: Option<&str>,
+    mute_mic: bool,
+) -> Result<RecordScreen, String> {
     let PreflightOutcome {
         report,
         plan,
         transcriber,
-    } = *outcome;
+    } = outcome;
     let config = plan.config.clone();
     // An overridden AI check starts the session in transcript-only mode.
     let (missing_digest, missing_interactive) = match report.llm_ok() {
@@ -288,32 +388,28 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
             vec![config.interactive.model.clone()],
         ),
     };
-    let out_dir = make_session_dir(&plan.base_dir, args.label).map_err(|e| e.to_string())?;
+    let out_dir = make_session_dir(&plan.base_dir, label).map_err(|e| e.to_string())?;
     let persistence = FilePersistence::new(out_dir.clone()).map_err(|e| e.to_string())?;
     let controller = SessionController::new(
         config.clone(),
-        template.clone(),
+        plan.template.clone(),
         plan.llm_client.clone(),
         Box::new(persistence),
     );
-    let workers = record_workers(&plan, &loaded.paths, &out_dir, transcriber, mute_mic);
+    let workers = record_workers(&plan, paths, &out_dir, transcriber, mute_mic);
     setup_file_logging(&out_dir, config.output.save_debug_log);
     let session = Session::new(
         controller,
         out_dir,
-        args.label.unwrap_or(""),
+        label.unwrap_or(""),
         missing_digest,
         missing_interactive,
     );
-    let screen = RecordScreen::new(session, config.transcription.silence_threshold, workers);
-    let outcome = {
-        let _awake = keep_awake();
-        run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
-    };
-    close_file_logging();
-    // The audio worker flushed before the screen closed; the rest ends with the process.
-    runtime.shutdown_background();
-    outcome.map(|_| 0).map_err(|e| e.to_string())
+    Ok(RecordScreen::new(
+        session,
+        config.transcription.silence_threshold,
+        workers,
+    ))
 }
 
 /// The audio and diarization workers for a session in `out_dir`, as Python's

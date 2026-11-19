@@ -46,10 +46,10 @@ The two versions must work on the same data, in both directions:
 5. [x] Session controller, headless record, preflight, shutdown signals, diarization (existing NeMo runtime)
    - CLI in this step: the `--config` and `--output-dir` options, `record --headless`, `transcribe --headless`, `status` and `diarize`. `ls`, `transcript` and `notes` are not in any step yet.
    - Real runs: `transcribe --headless` on a 95 s recording gives a byte-identical `transcript.txt` and the same stderr lines. A blocked preflight (dead Ollama port, unwritable folder) prints the same report. A live `record --headless` muted and unmuted on SIGUSR1, ran a periodic digest, and on SIGTERM ran the final digest and exited 0. A SIGINT to the whole process group (a terminal Ctrl-C) reaches only the main process: the whisper and tap children run in their own sessions, so the last sentence was transcribed before the final digest. `transcribe --headless` prints the same provider and missing-model warnings. Each version's `status` reads the other's sessions.
-   - Bare `record` and `transcribe` (the TUI) say "not usable yet" and exit 2 until step 6.
 6. [ ] TUI: shell, pickers, record, transcribe, view, preflight screen, settings, template builder
-   - Done: pickers, record (with the preflight screen), transcribe, view, template builder. Left: the kiosk shell (bare `lazy-take-notes`) and settings.
+   - Done: pickers, record (with the preflight screen), transcribe, view, template builder, the kiosk shell (bare `lazy-take-notes`, `LTN_KIOSK=1`). Left: settings.
    - Real runs: each screen next to Python's in tmux, the same keys sent to both. The builder ran against a stub OpenAI-compatible server: both sent the same requests, and the screens matched through generate, auto-fix, save, edit and the quit confirm.
+   - The kiosk ran a recording, stopped it, and came back to the welcome picker with no whisper, `coreaudio-tap` or `caffeinate` child left and the WAV closed. A cancelled preflight also leaves no child.
    - A closed window (SIGHUP) during a recording: the audio flushes and the transcript is saved; failed draws are dropped.
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
 7. [ ] Cross-version run: each version opens the other's sessions and config
@@ -87,3 +87,5 @@ The two versions must work on the same data, in both directions:
 28. A template that the builder saves, and a `config.yaml` that Settings saves, hold the same data as Python's files but not the same bytes. PyYAML writes a multi-line string in single quotes and folds long lines at 80 columns; Rust writes a `|-` block and keeps each line whole. Each version reads the other's files.
 29. A setup error in the template builder (an unreadable `config.yaml`, an unknown provider) shows as `Error: <message>`. Python put the exception's class name before the message.
 30. The template builder's "Thinking" dots step every 0.5 s. Python stepped every 0.4 s; the Rust screen updates four times a second.
+31. A mode that cannot start in the kiosk shows `Could not start: <message>`. Python put the exception's class name before the message.
+32. A worker or task result from a screen that has closed is dropped, as Textual drops a message to a removed screen. Before the kiosk shell, each Rust screen ran in its own host, so this could not happen.
