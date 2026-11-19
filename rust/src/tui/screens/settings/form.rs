@@ -75,7 +75,8 @@ pub trait Custom {
         Vec::new()
     }
     /// The open select list: where it sits on screen and its option labels.
-    fn open_select(&self, _origin: (u16, u16), _screen: Rect) -> Option<(Rect, Vec<String>)> {
+    /// The open list's drawn rows with their options, and the option count.
+    fn open_select(&self) -> Option<(Vec<(Rect, usize)>, usize)> {
         None
     }
     fn as_any(&mut self) -> &mut dyn Any;
@@ -252,15 +253,6 @@ pub struct Page {
     open_rows: Vec<(Rect, usize)>,
     /// The options in the open list, for the keys that pick one.
     open_count: usize,
-}
-
-/// Where a select's open list sits, as `Select::render_overlay` places it.
-pub fn overlay_area(below: Rect, height: u16, screen: Rect) -> Rect {
-    let mut y = below.y;
-    if y + height > screen.bottom() {
-        y = screen.bottom().saturating_sub(height);
-    }
-    Rect::new(below.x, y, below.width, height)
 }
 
 impl Page {
@@ -612,23 +604,17 @@ impl Page {
             let below = Rect::new(left + x, y, list_width, 1);
             if let Kind::Select { select, .. } = &mut self.items[index].kind {
                 select.render_overlay(frame, below, screen, "surface-lighten-1", theme);
-                let labels: Vec<String> = select
-                    .options()
-                    .iter()
-                    .map(|(label, _)| label.clone())
-                    .collect();
-                let rect = overlay_area(below, select.overlay_height(), screen);
-                self.open_rows = option_rows(frame, rect, &labels);
-                self.open_count = labels.len();
+                self.open_rows = select.drawn_rows();
+                self.open_count = select.options().len();
             }
         }
         if let Some((index, top)) = custom_overlay {
             let y = (i32::from(area.y) + i32::from(top) - self.offset as i32).max(0) as u16;
             if let Kind::Custom(custom) = &mut self.items[index].kind {
                 custom.render_overlay(frame, (left, y), theme);
-                if let Some((rect, labels)) = custom.open_select((left, y), screen) {
-                    self.open_rows = option_rows(frame, rect, &labels);
-                    self.open_count = labels.len();
+                if let Some((rows, count)) = custom.open_select() {
+                    self.open_rows = rows;
+                    self.open_count = count;
                 }
             }
         }
@@ -1000,30 +986,4 @@ fn shown_targets(
             })
         })
         .collect()
-}
-
-/// The rows of an open list as drawn. The list scrolls itself, so the text on
-/// each row, after the `▶ ` marker, names the option it shows.
-fn option_rows(frame: &mut Frame, rect: Rect, labels: &[String]) -> Vec<(Rect, usize)> {
-    let inner = Rect::new(
-        rect.x + 1,
-        rect.y + 1,
-        rect.width.saturating_sub(2),
-        rect.height.saturating_sub(2),
-    );
-    let buffer = frame.buffer_mut();
-    let mut rows = Vec::new();
-    for y in inner.top()..inner.bottom() {
-        let text: String = (inner.left()..inner.right())
-            .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
-            .collect();
-        // The marker leads the row; the list's own scrollbar may end it.
-        let text = text
-            .trim_start_matches(['▶', ' '])
-            .trim_end_matches(['┃', '│', ' ']);
-        if let Some(option) = labels.iter().position(|label| label.trim_end() == text) {
-            rows.push((Rect::new(inner.x, y, inner.width, 1), option));
-        }
-    }
-    rows
 }

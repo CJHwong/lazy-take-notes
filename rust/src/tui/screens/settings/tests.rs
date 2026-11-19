@@ -305,22 +305,22 @@ fn a_click_on_a_switch_turns_it_on() {
         driven.mouse(MouseEventKind::ScrollDown, page);
     }
     let (_, row) = driven.find("Label speakers");
-    let was = driven.switch_color();
+    assert_eq!(driven.switch_glyphs(), " ●━━ ");
     // The switch sits in the control column, after the 24-column label.
     let (label_x, _) = driven.find("Label speakers");
     driven.mouse(
         MouseEventKind::Down(MouseButton::Left),
         (label_x + super::form::LABEL_WIDTH + 2, row),
     );
-    assert_ne!(driven.switch_color(), was);
+    assert_eq!(driven.switch_glyphs(), " ━━● ");
 }
 
 impl Driven {
-    /// The thumb's cell color of the speaker switch: its right half is the
-    /// success color while on.
-    fn switch_color(&self) -> ratatui::style::Color {
+    /// The speaker switch as drawn: the knob sits right while on.
+    fn switch_glyphs(&self) -> String {
         let (x, y) = self.find("Label speakers");
         let buffer = self.terminal.backend().buffer();
-        buffer[(x + super::form::LABEL_WIDTH + 4, y)].bg
+        let start = x + super::form::LABEL_WIDTH;
+        (start..start + 5).map(|x| buffer[(x, y)].symbol()).collect()
     }
 }

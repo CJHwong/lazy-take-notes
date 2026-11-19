@@ -179,30 +179,36 @@ impl Select {
             .render(frame, inner, &rows, true, background, theme);
     }
 
+    /// Each row of the open list as last drawn, with the option it shows.
+    pub fn drawn_rows(&self) -> Vec<(Rect, usize)> {
+        match self.expanded {
+            true => self.list.drawn_rows(),
+            false => Vec::new(),
+        }
+    }
+
     /// Rows the open list takes, borders included.
     pub fn overlay_height(&self) -> u16 {
         (self.options.len() as u16 + 2).min(OVERLAY_MAX_HEIGHT)
     }
 }
 
-/// Textual's `Switch` with `height: 1; border: none`: `padding: 0 2` around a
-/// 4-column slider. The thumb sits left when off, right when on.
+/// A switch in one row: `━━●` in the success color when on, `●━━` in the
+/// quiet line color when off, bold while focused. It keeps the 8-column slot.
 pub fn draw_switch(frame: &mut Frame, area: Rect, on: bool, focused: bool, theme: &Theme) {
-    let surface = match focused {
-        true => theme.tinted("surface", "foreground", 0.05),
-        false => theme.color("surface"),
+    let color = match on {
+        true => theme.color("success"),
+        false => crate::tui::widgets::quiet_line(theme),
     };
-    let track = theme.color("panel-darken-2");
-    let thumb = theme.color(if on { "success" } else { "panel" });
-    let (left, right) = if on { (track, thumb) } else { (thumb, track) };
-    let line = Line::from(vec![
-        Span::styled("  ", Style::default().bg(surface)),
-        Span::styled("  ", Style::default().bg(left)),
-        Span::styled("  ", Style::default().bg(right)),
-        Span::styled("  ", Style::default().bg(surface)),
-    ]);
+    let mut style = Style::default().fg(color);
+    if focused {
+        style = style
+            .fg(if on { color } else { theme.color("primary") })
+            .add_modifier(ratatui::style::Modifier::BOLD);
+    }
+    let glyphs = if on { " ━━● " } else { " ●━━ " };
     frame.render_widget(
-        Paragraph::new(line),
+        Paragraph::new(Line::from(Span::styled(glyphs, style))),
         Rect::new(area.x, area.y, 8.min(area.width), 1),
     );
 }
