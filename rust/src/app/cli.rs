@@ -1,4 +1,4 @@
-//! The command line. Commands that are not ported yet say so and exit 2.
+//! The command line.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::adapters::pyrepr::py_repr_json;
 use crate::app::container::{load_config, resolve_base_dir};
 use crate::app::headless_run::{self, HeadlessArgs};
-use crate::app::{diarize_command, status_command};
+use crate::app::{diarize_command, session_commands, status_command};
 
 #[derive(Parser)]
 #[command(
@@ -80,6 +80,21 @@ pub enum Command {
     },
     /// Show a headless session's status (newest by default).
     Status { session: Option<String> },
+    /// List saved sessions, newest first (newest 20 by default).
+    Ls {
+        /// Output as JSON for scripting (all sessions).
+        #[arg(long = "json")]
+        as_json: bool,
+        /// Show every session instead of the newest 20.
+        #[arg(short = 'a', long = "all")]
+        show_all: bool,
+    },
+    /// Print a session's transcript (newest session by default).
+    ///
+    /// A session with speaker labels prints the labeled transcript.
+    Transcript { session: Option<String> },
+    /// Print a session's notes (newest session by default).
+    Notes { session: Option<String> },
     /// Browse a previously saved session (transcript + digest, read-only).
     View,
     /// Build a custom template with AI assistance.
@@ -115,6 +130,19 @@ pub fn main() -> i32 {
             timeout_s,
         }) => return diarize(&session_dir, &device, timeout_s),
         Some(Command::Status { session }) => status(config, output_dir, session.as_deref()),
+        Some(Command::Ls { as_json, show_all }) => ls(config, output_dir, as_json, show_all),
+        Some(Command::Transcript { session }) => print_text(
+            config,
+            output_dir,
+            session.as_deref(),
+            session_commands::transcript,
+        ),
+        Some(Command::Notes { session }) => print_text(
+            config,
+            output_dir,
+            session.as_deref(),
+            session_commands::notes,
+        ),
         Some(Command::View) => view(config, output_dir),
         Some(Command::CreateTemplate) => create_template(config),
         Some(Command::Config) => settings(config),
@@ -231,6 +259,38 @@ fn status(
     for line in status_command::status_lines(&session_dir)? {
         println!("{line}");
     }
+    Ok(0)
+}
+
+fn base_dir(config: Option<&Path>, output_dir: Option<&str>) -> Result<PathBuf, String> {
+    let loaded = load_config(config, output_dir)?;
+    Ok(resolve_base_dir(&loaded.paths, output_dir, &loaded.config))
+}
+
+fn ls(
+    config: Option<&Path>,
+    output_dir: Option<&str>,
+    as_json: bool,
+    show_all: bool,
+) -> Result<i32, String> {
+    let listing = session_commands::list(&base_dir(config, output_dir)?, as_json, show_all);
+    for line in listing.stdout {
+        println!("{line}");
+    }
+    if let Some(note) = listing.stderr {
+        eprintln!("{note}");
+    }
+    Ok(0)
+}
+
+/// Print a session file as it is, with no newline added, as `click.echo(nl=False)`.
+fn print_text(
+    config: Option<&Path>,
+    output_dir: Option<&str>,
+    session: Option<&str>,
+    read: fn(&Path, Option<&str>) -> Result<String, String>,
+) -> Result<i32, String> {
+    print!("{}", read(&base_dir(config, output_dir)?, session)?);
     Ok(0)
 }
 

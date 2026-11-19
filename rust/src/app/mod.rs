@@ -10,6 +10,7 @@ pub mod headless_run;
 pub mod keep_awake;
 pub mod logging;
 pub mod preflight;
+pub mod session_commands;
 pub mod shell;
 pub mod status_command;
 pub mod tui_run;

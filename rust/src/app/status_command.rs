@@ -40,18 +40,29 @@ pub fn resolve_status_dir(base_dir: &Path, name: Option<&str>) -> Result<PathBuf
     let Some(name) = name else {
         return Ok(candidates.swap_remove(0));
     };
-    if let Some(exact) = candidates.iter().find(|path| name_of(path) == name) {
-        return Ok(exact.clone());
+    match_by_name(candidates, name, "headless session", |path| name_of(path))
+}
+
+/// The item whose name is `name`, else the only one whose name contains it, as
+/// Python's `_match_by_name`. `noun` names the kind in the "no match" error.
+pub fn match_by_name<T>(
+    items: Vec<T>,
+    name: &str,
+    noun: &str,
+    name_of: impl Fn(&T) -> String,
+) -> Result<T, String> {
+    if let Some(index) = items.iter().position(|item| name_of(item) == name) {
+        return Ok(items.into_iter().nth(index).expect("index is in range"));
     }
-    let matches: Vec<&PathBuf> = candidates
-        .iter()
-        .filter(|path| name_of(path).contains(name))
+    let mut matches: Vec<T> = items
+        .into_iter()
+        .filter(|item| name_of(item).contains(name))
         .collect();
-    match matches.as_slice() {
-        [only] => Ok((*only).clone()),
-        [] => Err(format!("No headless session matching {}.", quoted(name))),
-        many => {
-            let names: Vec<String> = many.iter().map(|path| name_of(path)).collect();
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(format!("No {noun} matching {}.", quoted(name))),
+        _ => {
+            let names: Vec<String> = matches.iter().map(&name_of).collect();
             Err(format!(
                 "{} matches multiple sessions: {}",
                 quoted(name),
