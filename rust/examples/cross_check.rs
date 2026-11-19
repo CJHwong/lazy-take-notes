@@ -95,6 +95,15 @@ fn main() {
             let state = store.status(&args[2]).unwrap();
             serde_json::json!({"path": path, "status": state.status, "bytes": state.installed_bytes, "progress_reports": reports})
         }
+        "llm" => llm_case(&args[1], &args[2], &args[3]),
+        "llm-real" => llm_real(&paths),
+        "whisper" => whisper_chunk(&args[1..]),
+        "decode" => {
+            let samples = lazy_take_notes::adapters::audio_file::load_audio_file(&arg(1)).unwrap();
+            let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+            std::fs::write(arg(2), bytes).unwrap();
+            serde_json::json!(samples.len())
+        }
         other => panic!("unknown command {other}"),
     };
     println!("{out}");
@@ -106,4 +115,103 @@ fn read_template(path: &Path) -> lazy_take_notes::domain::template::SessionTempl
         &path.display().to_string(),
     )
     .unwrap()
+}
+
+/// One LLM client call against a test server, as JSON: {"ok": ...} or {"err": "..."}.
+fn llm_case(provider: &str, operation: &str, base: &str) -> serde_json::Value {
+    use lazy_take_notes::adapters::llm::{ollama::OllamaLlmClient, openai::OpenAiCompatClient};
+    use lazy_take_notes::ports::llm::LlmClient;
+    let client: Box<dyn LlmClient> = match provider {
+        "ollama" => Box::new(OllamaLlmClient::new(base)),
+        _ => Box::new(OpenAiCompatClient::new(
+            std::env::var("LTN_TEST_KEY").ok(),
+            &format!("{base}/v1"),
+        )),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        match operation {
+            "chat" => match client.chat_single("m", "p").await {
+                Ok(text) => serde_json::json!({"ok": text}),
+                Err(error) => serde_json::json!({"err": error.to_string()}),
+            },
+            "conn" => match client.check_connectivity().await {
+                Ok(()) => serde_json::json!({"ok": null}),
+                Err(text) => serde_json::json!({"err": text}),
+            },
+            _ => serde_json::json!({"ok": client.check_models(&["x".to_string()]).await}),
+        }
+    })
+}
+
+/// One tiny request to the provider in the user's real config. Prints no secret.
+fn llm_real(paths: &Paths) -> serde_json::Value {
+    use lazy_take_notes::adapters::llm::{ollama::OllamaLlmClient, openai::OpenAiCompatClient};
+    use lazy_take_notes::ports::llm::LlmClient;
+    let raw = load_raw(paths, None, None).unwrap();
+    let (app, infra) = (
+        build_app_config(&raw).unwrap(),
+        build_infra_config(&raw).unwrap(),
+    );
+    // LTN_VIA_OPENAI=1 drives the OpenAI client against Ollama's OpenAI-compatible /v1 API.
+    let via_openai = std::env::var("LTN_VIA_OPENAI").is_ok() && infra.llm_provider == "ollama";
+    let client: Box<dyn LlmClient> = match infra.llm_provider.as_str() {
+        _ if via_openai => {
+            let base = format!("{}/v1", OllamaLlmClient::new(&infra.ollama.host).base_url());
+            Box::new(OpenAiCompatClient::new(Some("ollama".into()), &base))
+        }
+        "ollama" => Box::new(OllamaLlmClient::new(&infra.ollama.host)),
+        _ => Box::new(OpenAiCompatClient::new(
+            infra.openai.api_key.clone(),
+            &infra.openai.base_url,
+        )),
+    };
+    let model = app.interactive.model.clone();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let started = std::time::Instant::now();
+        let connectivity = client.check_connectivity().await;
+        let missing = client.check_models(std::slice::from_ref(&model)).await;
+        let reply = client.chat(&model, &[lazy_take_notes::domain::chat::ChatMessage::user("Reply with the word ok.")]).await;
+        serde_json::json!({
+            "provider": if via_openai { "openai client on ollama /v1" } else { infra.llm_provider.as_str() },
+            "connectivity": connectivity.is_ok(),
+            "model_missing": !missing.is_empty(),
+            "chat": reply.as_ref().map(|_| "ok").unwrap_or("fail"),
+            "error_kind": reply.as_ref().err().map(|e| e.kind.clone()),
+            "reply_chars": reply.as_ref().map(|r| r.content.len()).unwrap_or(0),
+            "prompt_tokens": reply.as_ref().map(|r| r.prompt_tokens).unwrap_or(0),
+            "seconds": started.elapsed().as_secs_f64(),
+        })
+    })
+}
+
+/// Transcribe 25 s of a file from an offset: program, model, file, language, offset seconds.
+fn whisper_chunk(args: &[String]) -> serde_json::Value {
+    use lazy_take_notes::adapters::whisper::{
+        WORKER_COMMAND, transcriber::SubprocessWhisperTranscriber,
+    };
+    use lazy_take_notes::ports::transcriber::Transcriber;
+    let audio =
+        lazy_take_notes::adapters::audio_file::load_audio_file(Path::new(&args[2])).unwrap();
+    let start = args[4].parse::<usize>().unwrap() * 16_000;
+    let chunk = &audio[start..(start + 25 * 16_000).min(audio.len())];
+    let mut whisper = SubprocessWhisperTranscriber::with_program(
+        PathBuf::from(&args[0]),
+        vec![WORKER_COMMAND.into()],
+    );
+    let started = std::time::Instant::now();
+    whisper.load_model(&args[1]).unwrap();
+    let loaded = started.elapsed().as_secs_f64();
+    let started = std::time::Instant::now();
+    let segments = whisper.transcribe(chunk, &args[3], &[]).unwrap();
+    let chunk_seconds = started.elapsed().as_secs_f64();
+    whisper.close();
+    serde_json::json!({"load_s": loaded, "chunk_s": chunk_seconds, "segments": segments})
 }
