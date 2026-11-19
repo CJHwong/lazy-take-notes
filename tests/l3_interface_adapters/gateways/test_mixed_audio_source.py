@@ -10,6 +10,7 @@ import pytest
 
 from lazy_take_notes.l3_interface_adapters.gateways.mixed_audio_source import MixedAudioSource
 from tests.conftest import FakeAudioSource
+from tests.l3_interface_adapters.gateways.test_mic_boost import room, voice
 
 
 class RestartableSource:
@@ -558,30 +559,6 @@ class TestMixedAudioSource:
         # sys is all zeros → combined = mic, peak 0.05 < 0.99, no scale.
         np.testing.assert_allclose(result, [0.04, 0.05, 0.03], atol=1e-5)
 
-    def test_auto_amplify_quiet_mic(self):
-        """Mic below silence_threshold target is amplified so speech clears VAD gate.
-        White-box: push chunks into _mic_q directly to control timing per-read."""
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01)
-        src.open(16000, 1)
-
-        quiet = np.full(100, 0.005, dtype=np.float32)
-
-        # Feed several reads to let EMA converge to ~0.005.
-        for _ in range(10):
-            src._mic_q.put(quiet.copy())  # noqa: SLF001
-            src.read(timeout=0.5)
-
-        # Next read with converged EMA: gain ≈ 0.025 / 0.005 = 5x.
-        src._mic_q.put(quiet.copy())  # noqa: SLF001
-        result = src.read(timeout=0.5)
-        src.close()
-
-        assert result is not None
-        result_rms = float(np.sqrt(np.mean(result**2)))
-        assert result_rms > 0.02, f'Expected amplified RMS > 0.02, got {result_rms}'
-
     def test_no_amplify_normal_mic(self):
         """Mic above target RMS should not be amplified."""
         mic = FakeAudioSource()
@@ -616,56 +593,41 @@ class TestMixedAudioSource:
         assert result is not None
         np.testing.assert_allclose(result, 0.0001, atol=1e-6)
 
-    def test_amplify_gain_capped(self):
-        """Gain must not exceed max_mic_gain even when uncapped gain would be higher."""
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        # mic at 0.005, target 0.025 → uncapped gain = 5x, but cap at 3x.
-        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01, max_mic_gain=3.0)
-        src.open(16000, 1)
+    @staticmethod
+    def _mix_through(src: MixedAudioSource, mic: np.ndarray, system: np.ndarray) -> np.ndarray:
+        out = []
+        for i in range(0, mic.size, 512):
+            src._mic_q.put(mic[i : i + 512].copy())  # noqa: SLF001 -- drive one read per block
+            src._sys_q.put(system[i : i + 512].copy())  # noqa: SLF001 -- drive one read per block
+            block = src.read(timeout=0.5)
+            assert block is not None
+            out.append(block)
+        return np.concatenate(out)
 
-        quiet = np.full(100, 0.005, dtype=np.float32)
-        for _ in range(10):
-            src._mic_q.put(quiet.copy())  # noqa: SLF001
-            src.read(timeout=0.5)
+    def test_quiet_voice_is_boosted_while_the_call_plays(self):
+        """Regression: the old gain switched off whenever the call made a sound,
+        so a quiet built-in mic lost every turn to the call audio."""
+        src = MixedAudioSource(FakeAudioSource(), FakeAudioSource(), silence_threshold=0.01)
+        mic = room(8) + voice(8, 0.008, seed=1)
+        call = voice(8, 0.08, seed=2)
 
-        src._mic_q.put(quiet.copy())  # noqa: SLF001
-        result = src.read(timeout=0.5)
-        src.close()
+        mixed = self._mix_through(src, mic, call)
 
-        assert result is not None
-        result_rms = float(np.sqrt(np.mean(result**2)))
-        # Capped at 3x: output ~0.015, not 5x = ~0.025.
-        assert result_rms < 0.018, f'Expected capped RMS < 0.018, got {result_rms}'
-        assert result_rms > 0.012, f'Expected amplified RMS > 0.012, got {result_rms}'
+        boosted_voice = mixed - call  # the system side passes through unchanged
+        tail = slice(5 * 16_000, None)
+        assert np.sqrt(np.mean(boosted_voice[tail] ** 2)) > 4 * np.sqrt(np.mean(mic[tail] ** 2))
 
-    def test_no_amplify_when_system_audio_is_active(self):
-        """When system audio is playing, mic must NOT be auto-amplified — otherwise
-        speaker-to-mic acoustic bleed gets boosted and the remote voice ends up in
-        the mix twice (once via the loopback tap, once via the amplified mic copy).
-        That doubling/phasing was the original 'voice tracks mix together' bug."""
-        mic = FakeAudioSource()
-        sys_audio = FakeAudioSource()
-        src = MixedAudioSource(mic, sys_audio, silence_threshold=0.01)
-        src.open(16000, 1)
+    def test_speaker_bleed_is_not_boosted(self):
+        """On speakers the mic hears the call. Boosting it puts the remote voice in the mix twice."""
+        src = MixedAudioSource(FakeAudioSource(), FakeAudioSource(), silence_threshold=0.01)
+        call = voice(8, 0.08, seed=2)
+        delay = int(0.1 * 16_000)
+        mic = room(8) + np.concatenate([np.zeros(delay, dtype=np.float32), call[:-delay]]) * 0.1
 
-        # mic carries quiet acoustic bleed (in the [noise_floor, target] band that
-        # would normally trigger amp), sys carries the actual playing voice.
-        bleed = np.full(100, 0.005, dtype=np.float32)
-        sys_active = np.full(100, 0.05, dtype=np.float32)
+        mixed = self._mix_through(src, mic, call)
 
-        for _ in range(20):  # let both EMAs converge
-            src._mic_q.put(bleed.copy())  # noqa: SLF001
-            src._sys_q.put(sys_active.copy())  # noqa: SLF001
-            src.read(timeout=0.5)
-
-        src._mic_q.put(bleed.copy())  # noqa: SLF001
-        src._sys_q.put(sys_active.copy())  # noqa: SLF001
-        src.read(timeout=0.5)
-        src.close()
-
-        # Without the sys-active gate the gain would be ~5x. The gate must hold it at 1x.
-        assert src._mic_gain == 1.0, f'Expected gain held at 1.0x, got {src._mic_gain}x'  # noqa: SLF001
+        tail = slice(5 * 16_000, None)
+        np.testing.assert_allclose(mixed[tail], (mic + call)[tail], atol=1e-6)
 
     def test_system_backlog_retains_recent_sample_order(self):
         source = MixedAudioSource(FakeAudioSource(), FakeAudioSource())
