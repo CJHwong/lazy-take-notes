@@ -24,6 +24,8 @@ pub struct DigestRequest {
     /// The whole history to send, ending with this digest's prompt.
     pub messages: Vec<ChatMessage>,
     prompt: ChatMessage,
+    /// How many buffer lines this digest covers. Lines added later wait for the next one.
+    consumed: usize,
 }
 
 /// What the digest prompt is built from.
@@ -71,6 +73,7 @@ pub fn begin(
     Ok(DigestRequest {
         messages: state.messages.clone(),
         prompt,
+        consumed: state.buffer.len(),
     })
 }
 
@@ -93,8 +96,10 @@ pub fn finish(
     state.consecutive_failures = 0;
     state.digest_count += 1;
     state.prompt_tokens = response.prompt_tokens;
-    // Lines that arrived during the call are dropped too. The Python version does the same.
-    state.buffer.clear();
+    // Only the lines this digest covered. The Python version cleared all of them,
+    // so a line that arrived during the call never reached a periodic digest.
+    let covered = request.consumed.min(state.buffer.len());
+    state.buffer.drain(..covered);
     state.last_digest_time = Instant::now();
     info!(target: "ltn.llm", "Digest #{} succeeded (prompt_tokens={})", state.digest_count, state.prompt_tokens);
     Ok(raw.trim().to_string())

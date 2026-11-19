@@ -46,7 +46,4 @@ The two versions must work on the same data, in both directions:
 1. A template field with a conversion (`!r`), a format spec (`:>5`), an attribute or an index is a format error. Python accepts most of these. No built-in or known user template uses one. Python's `{name.attr}` raised an uncaught AttributeError; Rust reports a format error.
 2. `Invalid JSON` and `Schema validation failed` messages in the template builder carry serde's text, not pydantic's.
 3. The LLM error kind in `LLM error: <kind>: <message>` comes from the Rust HTTP client.
-
-## Python bugs kept on purpose
-
-1. A successful digest clears the whole buffer, including lines that arrived during the LLM call. The next periodic digest never sees them; the final digest does. Fix in both versions, or in Rust after the swap.
+4. A successful digest removes only the buffer lines it covered. Python cleared the whole buffer, so a line that arrived during the LLM call never reached a periodic digest.

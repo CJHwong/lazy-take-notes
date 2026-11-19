@@ -229,3 +229,13 @@ fn trigger_rules() {
         now
     ));
 }
+
+#[test]
+fn lines_that_arrive_during_the_call_wait_for_the_next_digest() {
+    let (mut state, template) = setup();
+    let request = digest::begin(&mut state, &template, DigestInput::default()).unwrap();
+    state.buffer.push("late line".into());
+    let reply = Ok(ChatResponse { content: REPLY.into(), prompt_tokens: 0 });
+    digest::finish(&mut state, &request, reply).unwrap();
+    assert_eq!(state.buffer, ["late line"]);
+}
