@@ -7,6 +7,7 @@ a real SessionController wired to FakeLLMClient + FakePersistence.
 from __future__ import annotations
 
 import asyncio
+import faulthandler
 import signal
 import time
 from collections.abc import Callable
@@ -32,6 +33,7 @@ from lazy_take_notes.l4_frameworks_and_drivers.headless import (
     _summary_lines,  # noqa: PLC2701 -- testing module-private formatter
     _warn_missing_models,  # noqa: PLC2701 -- testing module-private helper
 )
+from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import close_file_logging
 from lazy_take_notes.l4_frameworks_and_drivers.messages import (
     AudioWorkerStatus,
     ModelDownloadProgress,
@@ -705,6 +707,15 @@ class TestHeadlessFormatters:
 
 
 class TestAFailedRun:
+    @pytest.fixture
+    def real_log(self):
+        """Close the session log a test opened, and give pytest its faulthandler back."""
+        was_enabled = faulthandler.is_enabled()
+        yield
+        close_file_logging()
+        if was_enabled:
+            faulthandler.enable()
+
     def _session(self, state):
         class _FakeSession:
             status = st.SessionStatus(
@@ -746,6 +757,7 @@ class TestAFailedRun:
 
         assert (out_dir / 'recording.wav').exists()
 
+    @pytest.mark.usefixtures('real_log')
     def test_an_error_drops_a_folder_with_only_the_status_and_its_debug_log(self, tmp_path, monkeypatch, capsys):
         # A debug log is no record to recover: stderr already has the error, and the
         # same file run again writes the log again.
@@ -763,6 +775,7 @@ class TestAFailedRun:
         assert not captured.out
         assert f'Removed {out_dir}: the run saved nothing.' in captured.err
 
+    @pytest.mark.usefixtures('real_log')
     def test_an_error_keeps_a_folder_whose_debug_log_sits_next_to_a_transcript(self, tmp_path):
         out_dir = tmp_path / 'session'
         out_dir.mkdir()
@@ -792,6 +805,7 @@ class TestAFailedRun:
         assert exited.value.code == 1
         assert capsys.readouterr().out.strip() == str(out_dir)
 
+    @pytest.mark.usefixtures('real_log')
     def test_a_clean_stop_with_a_debug_log_keeps_its_folder(self, tmp_path):
         out_dir = tmp_path / 'session'
         out_dir.mkdir()
