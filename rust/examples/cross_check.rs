@@ -99,6 +99,24 @@ fn main() {
         "llm-real" => llm_real(&paths),
         "whisper" => whisper_chunk(&args[1..]),
         "transcribe-file" => transcribe_file(&args[1..]),
+        "tone" => tone_reaches_tap(),
+        "list-devices" => {
+            // Print the input list every 0.5 s, to see devices that appear while running.
+            let started = std::time::Instant::now();
+            while started.elapsed().as_secs_f64() < args[1].parse::<f64>().unwrap() {
+                let names = lazy_take_notes::adapters::audio::microphone::list_input_devices();
+                eprintln!("{:5.1}s {names:?}", started.elapsed().as_secs_f64());
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            serde_json::Value::Null
+        }
+        "mic-levels" => mic_levels(&args[1], args[2].parse().unwrap()),
+        "record" => record(
+            &paths,
+            &arg(1),
+            args[2].parse().unwrap(),
+            args.get(3).cloned(),
+        ),
         "decode" => {
             let samples = lazy_take_notes::adapters::audio_file::load_audio_file(&arg(1)).unwrap();
             let bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
@@ -221,14 +239,20 @@ fn whisper_chunk(args: &[String]) -> serde_json::Value {
 /// a chunk when the use case triggers, a flush at the end.
 /// Args: program, model, audio file, language, seconds, template file (for its hints).
 fn transcribe_file(args: &[String]) -> serde_json::Value {
-    use lazy_take_notes::adapters::whisper::{WORKER_COMMAND, transcriber::SubprocessWhisperTranscriber};
+    use lazy_take_notes::adapters::whisper::{
+        WORKER_COMMAND, transcriber::SubprocessWhisperTranscriber,
+    };
     use lazy_take_notes::ports::transcriber::Transcriber;
     use lazy_take_notes::usecases::transcribe_audio::{TranscribeAudio, TranscribeSettings};
     const SAMPLE_RATE: usize = 16_000;
-    let audio = lazy_take_notes::adapters::audio_file::load_audio_file(Path::new(&args[2])).unwrap();
+    let audio =
+        lazy_take_notes::adapters::audio_file::load_audio_file(Path::new(&args[2])).unwrap();
     let audio = &audio[..(args[4].parse::<usize>().unwrap() * SAMPLE_RATE).min(audio.len())];
     let hints = read_template(Path::new(&args[5])).recognition_hints;
-    let mut whisper = SubprocessWhisperTranscriber::with_program(PathBuf::from(&args[0]), vec![WORKER_COMMAND.into()]);
+    let mut whisper = SubprocessWhisperTranscriber::with_program(
+        PathBuf::from(&args[0]),
+        vec![WORKER_COMMAND.into()],
+    );
     whisper.load_model(&args[1]).unwrap();
     let mut use_case = TranscribeAudio::new(args[3].clone(), TranscribeSettings::default(), hints);
     let mut segments = Vec::new();
@@ -248,4 +272,143 @@ fn transcribe_file(args: &[String]) -> serde_json::Value {
     let started = std::time::Instant::now();
     whisper.close();
     serde_json::json!({"segments": segments, "total_s": total, "close_s": started.elapsed().as_secs_f64()})
+}
+
+/// Record the real mic and system audio into DIR for SECONDS, as a session does.
+/// Prints the health on each change and the delivered samples against wall time.
+/// DEVICE, when given, replaces the configured mic.
+fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> serde_json::Value {
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    use lazy_take_notes::adapters::audio::coreaudio_tap::CoreAudioTapSource;
+    use lazy_take_notes::adapters::audio::microphone::{MicrophoneSource, play_test_tone};
+    use lazy_take_notes::adapters::audio::mixed::{MixTiming, MixedAudioSource};
+    use lazy_take_notes::adapters::audio::session_folder::SessionFolder;
+    use lazy_take_notes::adapters::audio::wav::start_processed_recorder;
+    use lazy_take_notes::ports::audio_source::AudioSource;
+
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_target(true)
+        .init();
+    let app = build_app_config(&load_raw(paths, None, None).unwrap()).unwrap();
+    let tap = Arc::new(CoreAudioTapSource::new(false));
+    let mic = Arc::new(MicrophoneSource::new(
+        device.or(app.transcription.input_device.clone()),
+    ));
+    let source = MixedAudioSource::new(
+        mic,
+        tap.clone(),
+        app.transcription.silence_threshold,
+        10.0,
+        Some(Box::new(play_test_tone)),
+        MixTiming::default(),
+    );
+    std::fs::create_dir_all(dir).unwrap();
+    let folder = Arc::new(SessionFolder::new(dir));
+    let notice = Box::new(|message: String| eprintln!("NOTICE {message}"));
+    let (sender, writer) = start_processed_recorder(folder, 16_000, Some(notice), None).unwrap();
+    source.open(16_000, 1).unwrap();
+    let started = Instant::now();
+    let (mut delivered, mut health, mut pid) = (0usize, None, None);
+    while started.elapsed().as_secs_f64() < seconds {
+        if let Some(block) = source.read(Duration::from_millis(100)).unwrap() {
+            delivered += block.len();
+            sender.send(Some(block)).unwrap();
+        }
+        let now = source.health();
+        if health != Some(now) {
+            eprintln!(
+                "HEALTH {:.1}s {now:?} errors={:?}",
+                started.elapsed().as_secs_f64(),
+                source.source_errors()
+            );
+            health = Some(now);
+        }
+        if tap.pid() != pid {
+            pid = tap.pid();
+            eprintln!("TAP PID {pid:?}");
+        }
+    }
+    let wall = started.elapsed().as_secs_f64();
+    source.close().unwrap();
+    sender.send(None).unwrap();
+    writer.join().unwrap();
+    serde_json::json!({
+        "wall_s": wall,
+        "delivered_s": delivered as f64 / 16_000.0,
+        "pace": delivered as f64 / 16_000.0 / wall,
+        "dropped_frames": source.dropped_frames(),
+        "mic_notice": source.device_notice(),
+    })
+}
+
+/// Play the test tone and measure 997 Hz in the tap before and during it.
+fn tone_reaches_tap() -> serde_json::Value {
+    use std::time::{Duration, Instant};
+
+    use lazy_take_notes::adapters::audio::coreaudio_tap::CoreAudioTapSource;
+    use lazy_take_notes::adapters::audio::microphone::play_test_tone;
+    use lazy_take_notes::ports::audio_source::AudioSource;
+
+    // Amplitude of one frequency (Goertzel), robust to other sound in the mix.
+    fn level(samples: &[f32], hz: f64) -> f64 {
+        let w = std::f64::consts::TAU * hz / 16_000.0;
+        let (mut s1, mut s2) = (0.0f64, 0.0f64);
+        for &x in samples {
+            let s0 = f64::from(x) + 2.0 * w.cos() * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        (s1 * s1 + s2 * s2 - 2.0 * w.cos() * s1 * s2).sqrt() * 2.0 / samples.len() as f64
+    }
+    let collect = |tap: &CoreAudioTapSource, seconds: f64| {
+        let (started, mut out) = (Instant::now(), Vec::new());
+        while started.elapsed().as_secs_f64() < seconds {
+            if let Some(block) = tap.read(Duration::from_millis(50)).unwrap() {
+                out.extend(block);
+            }
+        }
+        out
+    };
+    let tap = CoreAudioTapSource::new(false);
+    tap.open(16_000, 1).unwrap();
+    collect(&tap, 1.0);
+    let before = collect(&tap, 0.6);
+    let player = std::thread::spawn(play_test_tone);
+    let during = collect(&tap, 0.6);
+    let played = player.join().unwrap();
+    tap.close().unwrap();
+    serde_json::json!({
+        "played": played,
+        "before_997hz": level(&before, 997.0),
+        "during_997hz": level(&during, 997.0),
+        "expected": 0.0005,
+    })
+}
+
+/// RMS of SECONDS from one input device through MicrophoneSource, with channels=1.
+fn mic_levels(device: &str, seconds: f64) -> serde_json::Value {
+    use std::time::{Duration, Instant};
+
+    use lazy_take_notes::adapters::audio::microphone::MicrophoneSource;
+    use lazy_take_notes::ports::audio_source::AudioSource;
+
+    let mic = MicrophoneSource::new(Some(device.to_string()));
+    mic.open(16_000, 1).unwrap();
+    let (started, mut samples) = (Instant::now(), Vec::new());
+    while started.elapsed().as_secs_f64() < seconds {
+        if let Some(block) = mic.read(Duration::from_millis(50)).unwrap() {
+            samples.extend(block);
+        }
+    }
+    mic.close().unwrap();
+    let rms = (samples
+        .iter()
+        .map(|&s| f64::from(s) * f64::from(s))
+        .sum::<f64>()
+        / samples.len().max(1) as f64)
+        .sqrt();
+    serde_json::json!({"samples": samples.len(), "rms": rms, "notice": mic.device_notice()})
 }

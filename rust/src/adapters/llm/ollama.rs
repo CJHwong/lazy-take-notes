@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use super::http_client;
-use super::pyrepr::py_str_json;
+use crate::adapters::pyrepr::py_str_json;
 use crate::domain::chat::ChatMessage;
 use crate::ports::llm::{ChatResponse, LLM_REQUEST_TIMEOUT, LlmClient, LlmError};
 
