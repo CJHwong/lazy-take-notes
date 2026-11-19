@@ -40,6 +40,9 @@ const READ_STEP: Duration = Duration::from_millis(100);
 
 const MIC_PERMISSION_FIX: &str = "Allow microphone access in System Settings > Privacy & Security > Microphone, then check the input volume in System Settings > Sound.";
 const SYSTEM_PERMISSION_FIX: &str = "Allow this app in System Settings > Privacy & Security > Screen & System Audio Recording, then press Retry.";
+/// The tap opens before macOS asks for any permission, so a failed open means the
+/// helper is missing or cannot start.
+const SYSTEM_HELPER_FIX: &str = "Reinstall lazy-take-notes to restore its coreaudio-tap helper, or build it with: bash scripts/build_native.sh";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -494,13 +497,17 @@ fn check_system_audio(
     _plan: &PreflightPlan,
     _transcriber: &mut dyn Transcriber,
 ) -> Result<(), String> {
-    let system = CoreAudioTapSource::new(false);
-    running.check.fix = SYSTEM_PERMISSION_FIX.into();
+    check_system_source(running, &CoreAudioTapSource::new(false))
+}
+
+fn check_system_source(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
+    running.check.fix = SYSTEM_HELPER_FIX.into();
     running.update("Starting capture");
     system
         .open(SAMPLE_RATE as u32, 1)
         .map_err(|e| format!("RuntimeError: {e}"))?;
-    let result = verify_system_capture(running, &system);
+    running.check.fix = SYSTEM_PERMISSION_FIX.into();
+    let result = verify_system_capture(running, system);
     let _ = system.close();
     result
 }
