@@ -166,3 +166,91 @@ pub fn built_in_template(name: &str) -> SessionTemplate {
 pub fn segment(text: &str, start: f64, end: f64) -> TranscriptSegment {
     TranscriptSegment::new(text, start, end)
 }
+
+/// What the fake persistence was asked to write. Shared, because the controller owns the fake.
+#[derive(Default)]
+pub struct Saved {
+    pub transcript: Vec<(Vec<TranscriptSegment>, bool)>,
+    pub digest: Vec<(String, u32)>,
+    pub history: Vec<(String, u32, bool)>,
+    pub context: Vec<String>,
+}
+
+/// Records each write. A method named in `failing` fails like a full disk instead.
+pub struct FakePersistence {
+    pub saved: std::sync::Arc<Mutex<Saved>>,
+    pub failing: Vec<&'static str>,
+}
+
+impl FakePersistence {
+    pub fn new() -> (Self, std::sync::Arc<Mutex<Saved>>) {
+        Self::failing(&[])
+    }
+
+    pub fn failing(methods: &[&'static str]) -> (Self, std::sync::Arc<Mutex<Saved>>) {
+        let saved = std::sync::Arc::new(Mutex::new(Saved::default()));
+        let fake = Self {
+            saved: saved.clone(),
+            failing: methods.to_vec(),
+        };
+        (fake, saved)
+    }
+
+    fn check(&self, method: &str) -> std::io::Result<std::path::PathBuf> {
+        if self.failing.contains(&method) {
+            return Err(std::io::Error::other("[Errno 28] No space left on device"));
+        }
+        Ok(std::path::PathBuf::from("/fake/output"))
+    }
+}
+
+impl lazy_take_notes::ports::persistence::Persistence for FakePersistence {
+    fn save_transcript_lines(
+        &mut self,
+        segments: &[TranscriptSegment],
+        append: bool,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let path = self.check("save_transcript_lines")?;
+        self.saved
+            .lock()
+            .unwrap()
+            .transcript
+            .push((segments.to_vec(), append));
+        Ok(path)
+    }
+
+    fn save_digest_md(
+        &mut self,
+        markdown: &str,
+        number: u32,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let path = self.check("save_digest_md")?;
+        self.saved
+            .lock()
+            .unwrap()
+            .digest
+            .push((markdown.into(), number));
+        Ok(path)
+    }
+
+    fn save_history(
+        &mut self,
+        markdown: &str,
+        number: u32,
+        is_final: bool,
+    ) -> std::io::Result<std::path::PathBuf> {
+        let path = self.check("save_history")?;
+        self.saved
+            .lock()
+            .unwrap()
+            .history
+            .push((markdown.into(), number, is_final));
+        Ok(path)
+    }
+
+    fn save_session_context(&mut self, context: &str) -> std::io::Result<std::path::PathBuf> {
+        let path = self.check("save_session_context")?;
+        self.saved.lock().unwrap().context.push(context.into());
+        Ok(path)
+    }
+}

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 async-trait = "0.1.92"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
 cpal = "0.18.2"
 dirs = "7.0.0"
 fancy-regex = "0.20.2"

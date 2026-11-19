@@ -1,7 +1,6 @@
 //! The session WAV: processed 16 kHz int16 mono, kept going through a failing disk.
 
 use std::collections::VecDeque;
-use std::fmt;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
@@ -11,73 +10,16 @@ use std::sync::mpsc::{self, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
 use tracing::{debug, error, info, warn};
 
 use super::session_folder::SessionFolder;
-use crate::adapters::pyrepr::py_repr_json;
+pub use crate::adapters::os_error::OsError;
 
 /// A failing disk: retry this often, and hold at most this much audio in memory (about 19 MB).
 pub const WAV_RETRY: Duration = Duration::from_secs(5);
 pub const WAV_BACKLOG_S: f64 = 600.0;
 
 const ENOENT: i32 = 2;
-
-/// An OS error, printed as Python prints `str(OSError)`, because the user reads it in a notice.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OsError {
-    errno: Option<i32>,
-    text: String,
-    path: Option<PathBuf>,
-    path2: Option<PathBuf>,
-}
-
-impl OsError {
-    pub fn new(errno: i32, text: &str, path: Option<&Path>) -> Self {
-        Self {
-            errno: Some(errno),
-            text: text.to_string(),
-            path: path.map(Path::to_path_buf),
-            path2: None,
-        }
-    }
-
-    pub fn from_io(error: &io::Error, path: Option<&Path>, path2: Option<&Path>) -> Self {
-        let text = error.to_string();
-        let text = match error.raw_os_error() {
-            Some(code) => text
-                .strip_suffix(&format!(" (os error {code})"))
-                .unwrap_or(&text)
-                .to_string(),
-            None => text,
-        };
-        Self {
-            errno: error.raw_os_error(),
-            text,
-            path: path.map(Path::to_path_buf),
-            path2: path2.map(Path::to_path_buf),
-        }
-    }
-}
-
-impl fmt::Display for OsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let quote = |path: &Path| py_repr_json(&Value::String(path.to_string_lossy().into_owned()));
-        match self.errno {
-            Some(code) => write!(f, "[Errno {code}] {}", self.text)?,
-            None => write!(f, "{}", self.text)?,
-        }
-        if let Some(path) = &self.path {
-            write!(f, ": {}", quote(path))?;
-            if let Some(path2) = &self.path2 {
-                write!(f, " -> {}", quote(path2))?;
-            }
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for OsError {}
 
 /// A WAV writer that keeps the RIFF sizes current after every chunk.
 ///
