@@ -24,7 +24,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use tracing::{error, info};
 use yaml_serde::Value;
 
@@ -42,7 +42,9 @@ use crate::app::download_progress::{describe, megabytes};
 use crate::app::preflight::{Check, Status};
 use crate::config::{InfraConfig, build_app_config, build_infra_config};
 use crate::domain::model_asset::{AssetGroup, AssetProgress, AssetState, AssetStatus};
-use crate::tui::host::{Action, Ctx, Msg, Payload, Screen, Severity, TaskSender};
+use crate::tui::host::{
+    Action, Ctx, MouseInput, MouseKind, Msg, Payload, Screen, Severity, TaskSender,
+};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::template_picker::resolve_editor;
 use crate::tui::theme::Theme;
@@ -1038,46 +1040,102 @@ impl SettingsScreen {
 
     // --- Drawing --------------------------------------------------------
 
-    fn draw_nav(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let background = match self.focus {
-            Focus::Nav => theme.tinted("surface", "foreground", 0.05),
-            _ => theme.color("surface"),
-        };
-        let base = Style::default()
-            .bg(background)
-            .fg(theme.on_color("foreground", background));
-        frame.render_widget(Paragraph::new("").style(base), area);
-        let border = Style::default()
-            .fg(theme.color("surface-lighten-2"))
-            .bg(background);
-        for y in area.y..area.bottom() {
-            frame.render_widget(
-                Paragraph::new(Line::styled("│", border)),
-                Rect::new(area.right() - 1, y, 1, 1),
-            );
-        }
-        let highlight = theme.color("primary");
-        for (index, label) in NAV.iter().enumerate() {
-            let y = area.y + index as u16;
-            if y >= area.bottom() {
-                break;
+    /// A click inside the page box.
+    fn click_page(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        let index = self.page_index();
+        let page = &mut self.pages[index];
+        if !page.takes_click(input.column, input.row) {
+            // Empty page space: the scroll container takes the focus.
+            if index != APPEARANCE {
+                page.set_focus(None);
+                self.focus = Focus::Container;
             }
-            let mut style = match self.nav.index == Some(index) {
-                true => Style::default()
-                    .bg(highlight)
-                    .fg(theme.on("text", "primary")),
-                false => base,
-            };
-            if self.nav.index == Some(index) && self.focus == Focus::Nav {
-                style = style.add_modifier(Modifier::BOLD);
-            }
-            let width = usize::from(area.width - 1);
-            let text = format!(" {label:<width$}", width = width - 1);
-            frame.render_widget(
-                Paragraph::new(Line::styled(text, style)),
-                Rect::new(area.x, y, area.width - 1, 1),
-            );
+            return Action::None;
         }
+        let event = page.click(input.column, input.row);
+        if page.focus.is_some() {
+            self.focus = Focus::Page;
+        }
+        match event {
+            Some(event) => self.on_event(event, ctx),
+            None => Action::None,
+        }
+    }
+
+    /// The page list in a rounded box titled "Settings".
+    fn draw_nav(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, ctx: &Ctx) {
+        let focused = self.focus == Focus::Nav;
+        let background = theme.color("background");
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            area,
+            "Settings",
+            crate::tui::widgets::border_color(focused, theme),
+            background,
+            theme,
+        );
+        let rows: Vec<Line> = NAV.iter().map(|label| Line::from(*label)).collect();
+        self.nav
+            .render(frame, inner, &rows, focused, background, theme);
+        ctx.hit(inner, "nav", 0);
+    }
+
+    /// The page in a rounded box: its name at the left of the top border, the
+    /// config file at the right. Returns the inside.
+    fn draw_page_box(&self, frame: &mut Frame, area: Rect, theme: &Theme) -> Rect {
+        let focused = matches!(self.focus, Focus::Container | Focus::Page);
+        let border = crate::tui::widgets::border_color(focused, theme);
+        let background = theme.color("background");
+        let name = NAV[self.page_index()];
+        // The path gives way to the name: it loses its start first.
+        let room = usize::from(area.width).saturating_sub(name.len() + 10);
+        let path = tail(&self.config_file().display().to_string(), room);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .style(Style::default().bg(background))
+            .border_style(Style::default().fg(border).bg(background))
+            .title(Line::from(vec![
+                ratatui::text::Span::styled("─", Style::default().fg(border)),
+                ratatui::text::Span::styled(
+                    format!(" {name} "),
+                    Style::default()
+                        .fg(theme.color("foreground"))
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .title(
+                Line::styled(
+                    format!(" {path} "),
+                    Style::default().fg(theme.on("text-muted", "background")),
+                )
+                .right_aligned(),
+            );
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        inner
+    }
+}
+
+/// The end of `text` in `width` columns, with `…` in front when it is cut.
+fn tail(text: &str, width: usize) -> String {
+    if crate::tui::text::str_width(text) <= width {
+        return text.to_string();
+    }
+    let mut kept: Vec<char> = Vec::new();
+    let mut used = 1;
+    for character in text.chars().rev() {
+        let cell = crate::tui::text::str_width(&character.to_string());
+        if used + cell > width {
+            break;
+        }
+        used += cell;
+        kept.push(character);
+    }
+    let end: String = kept.into_iter().rev().collect();
+    match width {
+        0 => String::new(),
+        _ => format!("…{end}"),
     }
 }
 
@@ -1170,24 +1228,6 @@ impl Screen for SettingsScreen {
         }
         left_bar(
             frame,
-            Rect::new(area.x, area.y, area.width, 1),
-            "Settings",
-            "primary",
-            "text",
-            true,
-            theme,
-        );
-        left_bar(
-            frame,
-            Rect::new(area.x, area.y + 1, area.width, 1),
-            &self.config_file().display().to_string(),
-            "surface",
-            "text-muted",
-            false,
-            theme,
-        );
-        left_bar(
-            frame,
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
             "[Ctrl+S] Save  [t] Test AI  [e] Edit raw file  [Esc] Back",
             "surface",
@@ -1195,17 +1235,45 @@ impl Screen for SettingsScreen {
             false,
             theme,
         );
-        let shell = Rect::new(area.x, area.y + 2, area.width, area.height - 3);
+        let shell = Rect::new(area.x, area.y, area.width, area.height - 1);
         let nav = Rect::new(shell.x, shell.y, NAV_WIDTH.min(shell.width), shell.height);
-        self.draw_nav(frame, nav, theme);
-        let page_area = Rect::new(
+        self.draw_nav(frame, nav, theme, ctx);
+        let page_box = Rect::new(
             shell.x + nav.width,
             shell.y,
             shell.width - nav.width,
             shell.height,
         );
+        ctx.hit(page_box, "page", 0);
+        let page_area = self.draw_page_box(frame, page_box, theme);
         let index = self.page_index();
         self.pages[index].render(frame, page_area, theme);
+    }
+
+    /// A click on a page row opens it; on the page it focuses and presses
+    /// what is under the pointer. The wheel scrolls the page.
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        let index = self.page_index();
+        let open = self.pages[index].expanded();
+        match input.kind {
+            MouseKind::WheelUp | MouseKind::WheelDown => {
+                if open || input.on("page").is_some() {
+                    self.pages[index].wheel(input.kind == MouseKind::WheelDown);
+                }
+                Action::None
+            }
+            MouseKind::Click if open => self.click_page(input, ctx),
+            MouseKind::Click if input.on("nav").is_some() => {
+                if let Some(row) = self.nav.item_at(input.row) {
+                    self.pages[index].close_selects();
+                    self.nav.select(row);
+                    self.focus = Focus::Nav;
+                }
+                Action::None
+            }
+            MouseKind::Click if input.on("page").is_some() => self.click_page(input, ctx),
+            MouseKind::Click => Action::None,
+        }
     }
 
     fn key(&mut self, key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {

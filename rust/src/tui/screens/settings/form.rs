@@ -21,11 +21,13 @@ use crate::tui::widgets::text_area::TextArea;
 
 /// `.field-label { width: 24 }`.
 pub const LABEL_WIDTH: u16 = 24;
-/// `scrollbar-size-vertical: 2`.
-const SCROLLBAR: u16 = 2;
+/// The thin scrollbar column.
+const SCROLLBAR: u16 = 1;
 /// `#cfg-recognition-hints { min-height: 5; max-height: 16 }`.
 const HINTS_MIN: u16 = 5;
 const HINTS_MAX: u16 = 16;
+/// Columns a switch takes: `padding: 0 2` around a 4-column slider.
+const SWITCH_WIDTH: u16 = 8;
 
 /// What the page reports to the screen.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +70,14 @@ pub trait Custom {
     fn region(&self, _stop: usize) -> Option<(u16, u16)> {
         None
     }
+    /// Where each focus stop sat at the last draw, for the mouse.
+    fn hits(&self) -> Vec<(Rect, usize)> {
+        Vec::new()
+    }
+    /// The open select list: where it sits on screen and its option labels.
+    fn open_select(&self, _origin: (u16, u16), _screen: Rect) -> Option<(Rect, Vec<String>)> {
+        None
+    }
     fn as_any(&mut self) -> &mut dyn Any;
 }
 
@@ -92,8 +102,6 @@ impl Button {
 pub enum Kind {
     /// `.section-title`: bold accent.
     Title(String),
-    /// `.section-rule`.
-    Rule,
     /// Muted text that wraps (`.section-desc`, `.field-help`).
     Desc(String),
     /// One bold line (`.field-label` on its own).
@@ -141,8 +149,7 @@ impl Item {
     pub fn new(id: &'static str, kind: Kind) -> Self {
         let (margin_top, margin_bottom) = match &kind {
             Kind::Title(_) => (1, 0),
-            Kind::Rule
-            | Kind::Desc(_)
+            Kind::Desc(_)
             | Kind::Field { .. }
             | Kind::Switch { .. }
             | Kind::Select { label: Some(_), .. }
@@ -171,6 +178,21 @@ impl Item {
         self
     }
 
+    /// The space after the item. A form row stacks tight on the next one;
+    /// its help text, when it has some, gets a blank row after it.
+    fn bottom_margin(&self) -> u16 {
+        match &self.kind {
+            Kind::Field { help, .. }
+            | Kind::Switch { help, .. }
+            | Kind::Select {
+                label: Some(_),
+                help,
+                ..
+            } => u16::from(!help.is_empty()),
+            _ => self.margin_bottom,
+        }
+    }
+
     fn stops(&self) -> usize {
         match &self.kind {
             Kind::Field { .. }
@@ -194,7 +216,7 @@ impl Item {
             false => wrap_line(&Line::from(help.to_string()), control).len() as u16,
         };
         match &self.kind {
-            Kind::Title(_) | Kind::Rule | Kind::Label(_) | Kind::Text(..) | Kind::Input(_) => 1,
+            Kind::Title(_) | Kind::Label(_) | Kind::Text(..) | Kind::Input(_) => 1,
             Kind::Buttons { .. } => 1,
             Kind::Desc(text) => wrap_line(&Line::from(text.clone()), width).len().max(1) as u16,
             Kind::Field { help, .. } | Kind::Switch { help, .. } => 1 + help_rows(help),
@@ -224,6 +246,21 @@ pub struct Page {
     total: u16,
     /// Where each shown item sat at the last layout: (index, top, height).
     placed: Vec<(usize, u16, u16)>,
+    /// Each focus stop on screen at the last draw: (rect, item, stop).
+    targets: Vec<(Rect, usize, usize)>,
+    /// The open select list on screen at the last draw: its rows, each with an option index.
+    open_rows: Vec<(Rect, usize)>,
+    /// The options in the open list, for the keys that pick one.
+    open_count: usize,
+}
+
+/// Where a select's open list sits, as `Select::render_overlay` places it.
+pub fn overlay_area(below: Rect, height: u16, screen: Rect) -> Rect {
+    let mut y = below.y;
+    if y + height > screen.bottom() {
+        y = screen.bottom().saturating_sub(height);
+    }
+    Rect::new(below.x, y, below.width, height)
 }
 
 impl Page {
@@ -237,6 +274,9 @@ impl Page {
             window: 1,
             total: 0,
             placed: Vec::new(),
+            targets: Vec::new(),
+            open_rows: Vec::new(),
+            open_count: 0,
         }
     }
 
@@ -350,11 +390,11 @@ impl Page {
         self.offset = offset as usize;
     }
 
-    /// The column the items use inside a page of `width`: `padding: 1 2`,
-    /// `max-width`, and the scrollbar when the page overflows.
+    /// The column the items use inside a page of `width`: one column of
+    /// padding each side, `max-width`, and the scrollbar when the page overflows.
     fn content_width(&self, width: u16, scrollbar: bool) -> u16 {
         let bar = if scrollbar { SCROLLBAR } else { 0 };
-        width.min(self.max_width).saturating_sub(4 + bar)
+        width.min(self.max_width).saturating_sub(2 + bar)
     }
 
     /// Lay the shown items out top to bottom. Adjacent vertical margins collapse.
@@ -368,8 +408,9 @@ impl Page {
             if !item.shown {
                 continue;
             }
+            // The page box's border is the first item's space.
             let margin = match first {
-                true => item.margin_top,
+                true => 0,
                 false => gap_before.max(item.margin_top),
             };
             first = false;
@@ -378,7 +419,7 @@ impl Page {
             let height = item.height(item_width);
             placed.push((index, y, height));
             y += height;
-            gap_before = item.margin_bottom;
+            gap_before = item.bottom_margin();
         }
         self.placed = placed;
         self.total = y + gap_before;
@@ -470,6 +511,8 @@ impl Page {
 
     /// Draw the page into `area`. The open select's list is drawn last, over the rest.
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        self.targets.clear();
+        self.open_rows.clear();
         let background = theme.color("background");
         frame.render_widget(
             Paragraph::new("").style(Style::default().bg(background)),
@@ -479,8 +522,7 @@ impl Page {
         if width == 0 || area.height == 0 {
             return;
         }
-        // `padding: 1 2`: the viewport and its scrollbar sit inside the padding.
-        let window = area.height.saturating_sub(2);
+        let window = area.height;
         let mut total = self.layout(width);
         let overflow = !self.fill_last && total > window;
         if overflow {
@@ -501,6 +543,7 @@ impl Page {
         let Ok(mut canvas) = ratatui::Terminal::new(TestBackend::new(width, total.max(1)));
         let mut overlay = None;
         let mut custom_overlay = None;
+        let mut hits = Vec::new();
         let drawn = canvas.draw(|canvas_frame| {
             let full = canvas_frame.area();
             canvas_frame.render_widget(
@@ -515,7 +558,12 @@ impl Page {
                     .focus
                     .filter(|(at, _)| *at == index)
                     .map(|(_, stop)| stop);
-                draw_item(canvas_frame, rect, item, focus, theme);
+                let item_hits = draw_item(canvas_frame, rect, item, focus, theme);
+                hits.extend(
+                    item_hits
+                        .into_iter()
+                        .map(|(rect, stop)| (rect, index, stop)),
+                );
                 match &item.kind {
                     Kind::Select { select, label, .. } if select.expanded => {
                         let x = if label.is_some() { LABEL_WIDTH } else { 0 };
@@ -532,8 +580,8 @@ impl Page {
             return;
         }
         let source = canvas.backend().buffer().clone();
-        let left = area.x + 2;
-        let top = area.y + 1;
+        let left = area.x + 1;
+        let top = area.y;
         let target = frame.buffer_mut();
         for row in 0..window {
             let from_y = self.offset as u16 + row;
@@ -546,32 +594,113 @@ impl Page {
                 }
             }
         }
-        let column = Rect::new(area.x, top, width + 2 + SCROLLBAR, window);
+        self.targets = shown_targets(hits, (left, top), self.offset as u16, window);
         if overflow {
-            crate::tui::widgets::scroll::draw_scrollbar_columns(
+            let column = Rect::new(area.x, top, area.width.min(self.max_width), window);
+            crate::tui::widgets::scroll::draw_scrollbar(
                 frame,
                 column,
-                SCROLLBAR,
                 self.offset,
                 usize::from(total),
                 self.window,
                 theme,
             );
         }
+        let screen = frame.area();
         if let Some((index, x, top, list_width)) = overlay {
-            let y = (i32::from(area.y + 1) + i32::from(top) - self.offset as i32).max(0) as u16;
+            let y = (i32::from(area.y) + i32::from(top) - self.offset as i32).max(0) as u16;
             let below = Rect::new(left + x, y, list_width, 1);
-            let screen = frame.area();
             if let Kind::Select { select, .. } = &mut self.items[index].kind {
                 select.render_overlay(frame, below, screen, "surface-lighten-1", theme);
+                let labels: Vec<String> = select
+                    .options()
+                    .iter()
+                    .map(|(label, _)| label.clone())
+                    .collect();
+                let rect = overlay_area(below, select.overlay_height(), screen);
+                self.open_rows = option_rows(frame, rect, &labels);
+                self.open_count = labels.len();
             }
         }
         if let Some((index, top)) = custom_overlay {
-            let y = (i32::from(area.y + 1) + i32::from(top) - self.offset as i32).max(0) as u16;
+            let y = (i32::from(area.y) + i32::from(top) - self.offset as i32).max(0) as u16;
             if let Kind::Custom(custom) = &mut self.items[index].kind {
                 custom.render_overlay(frame, (left, y), theme);
+                if let Some((rect, labels)) = custom.open_select((left, y), screen) {
+                    self.open_rows = option_rows(frame, rect, &labels);
+                    self.open_count = labels.len();
+                }
             }
         }
+    }
+
+    // --- The mouse ---
+
+    /// The wheel over the page: one row per step, or the open list's highlight.
+    pub fn wheel(&mut self, down: bool) {
+        let name = if down { "down" } else { "up" };
+        if self.expanded() {
+            self.key(&enter(), name);
+            return;
+        }
+        self.scroll_key(name);
+    }
+
+    /// True when (column, row) is on a focus stop, or a list is open.
+    pub fn takes_click(&self, column: u16, row: u16) -> bool {
+        self.expanded() || self.stop_at(column, row).is_some()
+    }
+
+    fn stop_at(&self, column: u16, row: u16) -> Option<(usize, usize)> {
+        let point = ratatui::layout::Position::new(column, row);
+        self.targets
+            .iter()
+            .find(|(rect, _, _)| rect.contains(point))
+            .map(|&(_, item, stop)| (item, stop))
+    }
+
+    /// A click. On the open list it picks the option; elsewhere it closes the
+    /// list. On a stop it takes the focus; a button, switch, select or row then
+    /// acts as Enter does. Inputs and text areas only take the focus.
+    pub fn click(&mut self, column: u16, row: u16) -> Option<FormEvent> {
+        let point = ratatui::layout::Position::new(column, row);
+        if self.expanded() {
+            let picked = self
+                .open_rows
+                .iter()
+                .find(|(rect, _)| rect.contains(point))
+                .map(|&(_, option)| option);
+            return match picked {
+                Some(option) => self.pick(option),
+                None => {
+                    self.key(&enter(), "escape");
+                    None
+                }
+            };
+        }
+        let stop = self.stop_at(column, row)?;
+        if self.focus != Some(stop) {
+            self.set_focus(Some(stop));
+        }
+        let typed = matches!(
+            self.items[stop.0].kind,
+            Kind::Field { .. } | Kind::Input(_) | Kind::TextArea(_)
+        );
+        if typed {
+            return None;
+        }
+        self.key(&enter(), "enter").flatten()
+    }
+
+    /// Move the open list's highlight to `option` and press Enter, as the keys do.
+    fn pick(&mut self, option: usize) -> Option<FormEvent> {
+        for _ in 0..self.open_count {
+            self.key(&enter(), "up");
+        }
+        for _ in 0..option {
+            self.key(&enter(), "down");
+        }
+        self.key(&enter(), "enter").flatten()
     }
 
     // --- Values by id, for the saved data ---
@@ -675,6 +804,9 @@ fn muted(theme: &Theme) -> Style {
 }
 
 fn draw_wrapped(frame: &mut Frame, area: Rect, text: &str, style: Style) {
+    if text.is_empty() {
+        return;
+    }
     let lines = wrap_line(&Line::styled(text.to_string(), style), area.width);
     for (row, line) in lines.into_iter().enumerate().take(usize::from(area.height)) {
         line_at(
@@ -694,7 +826,14 @@ fn draw_label(frame: &mut Frame, area: Rect, label: &str, theme: &Theme) {
     line_at(frame, rect, Line::styled(label.to_string(), style));
 }
 
-fn draw_item(frame: &mut Frame, area: Rect, item: &mut Item, focus: Option<usize>, theme: &Theme) {
+/// Draw one item. Returns where each of its focus stops sits, in `frame`'s coordinates.
+fn draw_item(
+    frame: &mut Frame,
+    area: Rect,
+    item: &mut Item,
+    focus: Option<usize>,
+    theme: &Theme,
+) -> Vec<(Rect, usize)> {
     let control = Rect::new(
         area.x + LABEL_WIDTH,
         area.y,
@@ -709,53 +848,37 @@ fn draw_item(frame: &mut Frame, area: Rect, item: &mut Item, focus: Option<usize
             area.height.saturating_sub(rows),
         )
     };
+    let row = Rect::new(control.x, control.y, control.width, 1);
     match &mut item.kind {
         Kind::Title(text) => {
-            let style = Style::default()
-                .fg(theme.on("accent", "background"))
-                .bg(theme.color("background"))
-                .add_modifier(Modifier::BOLD);
-            line_at(frame, area, Line::styled(text.clone(), style));
+            draw_section_title(frame, Rect::new(area.x, area.y, area.width, 1), text, theme);
+            Vec::new()
         }
-        Kind::Rule => {
-            let style = Style::default()
-                .fg(theme.color("surface-lighten-2"))
-                .bg(theme.color("background"));
-            line_at(
-                frame,
-                area,
-                Line::styled("─".repeat(usize::from(area.width)), style),
-            );
+        Kind::Desc(text) => {
+            draw_wrapped(frame, area, text, muted(theme));
+            Vec::new()
         }
-        Kind::Desc(text) => draw_wrapped(frame, area, text, muted(theme)),
         Kind::Label(text) => {
-            draw_label(frame, Rect::new(area.x, area.y, area.width, 1), text, theme)
+            draw_label(frame, Rect::new(area.x, area.y, area.width, 1), text, theme);
+            Vec::new()
         }
         Kind::Text(text, color) => {
             let fg = theme.on(color.unwrap_or("foreground"), "background");
             let style = Style::default().fg(fg).bg(theme.color("background"));
             line_at(frame, area, Line::styled(text.clone(), style));
+            Vec::new()
         }
         Kind::Field { label, input, help } => {
             draw_label(frame, area, label, theme);
-            input.render_compact(
-                frame,
-                Rect::new(control.x, control.y, control.width, 1),
-                focus.is_some(),
-                theme,
-            );
+            input.render_compact(frame, row, focus.is_some(), theme);
             draw_wrapped(frame, help_area(1), help, muted(theme));
+            vec![(row, 0)]
         }
         Kind::Switch { label, on, help } => {
             draw_label(frame, area, label, theme);
-            draw_switch(
-                frame,
-                Rect::new(control.x, control.y, control.width, 1),
-                *on,
-                focus.is_some(),
-                theme,
-            );
+            draw_switch(frame, row, *on, focus.is_some(), theme);
             draw_wrapped(frame, help_area(1), help, muted(theme));
+            vec![(Rect::new(row.x, row.y, SWITCH_WIDTH.min(row.width), 1), 0)]
         }
         Kind::Select {
             label,
@@ -764,53 +887,143 @@ fn draw_item(frame: &mut Frame, area: Rect, item: &mut Item, focus: Option<usize
         } => {
             let box_area = match label {
                 Some(text) => {
-                    draw_label(frame, area, text, theme);
+                    draw_label(
+                        frame,
+                        Rect::new(area.x, area.y + 1, area.width, 1),
+                        text,
+                        theme,
+                    );
                     Rect::new(control.x, control.y, control.width, 3)
                 }
                 None => Rect::new(area.x, area.y, area.width, 3),
             };
-            select.render(frame, box_area, focus.is_some(), "surface-lighten-1", theme);
+            select.render(frame, box_area, focus.is_some(), "background", theme);
             if label.is_some() {
                 draw_wrapped(frame, help_area(3), help, muted(theme));
             }
+            vec![(box_area, 0)]
         }
         Kind::Buttons { gap, buttons } => {
             let mut x = area.x;
             let mut stop = 0;
+            let mut hits = Vec::new();
             for button in buttons.iter().filter(|button| button.shown) {
                 let width = compact_button_width(&button.label);
                 if x + width > area.right() {
                     break;
                 }
                 let focused = !button.disabled && focus == Some(stop);
-                draw_compact_button(
-                    frame,
-                    Rect::new(x, area.y, width, 1),
-                    &button.label,
-                    focused,
-                    button.disabled,
-                    theme,
-                );
+                let rect = Rect::new(x, area.y, width, 1);
+                draw_compact_button(frame, rect, &button.label, focused, button.disabled, theme);
                 if !button.disabled {
+                    hits.push((rect, stop));
                     stop += 1;
                 }
                 x += width + *gap;
             }
+            hits
         }
-        Kind::Input(input) => input.render_compact(frame, area, focus.is_some(), theme),
+        Kind::Input(input) => {
+            input.render_compact(frame, area, focus.is_some(), theme);
+            vec![(area, 0)]
+        }
         Kind::TextArea(text_area) => {
             let border = if focus.is_some() {
-                "border"
+                "primary"
             } else {
                 "border-blurred"
             };
             text_area.render(frame, area, focus.is_some(), "", border, theme);
+            vec![(area, 0)]
         }
-        Kind::Custom(custom) => custom.render(frame, area, focus, theme),
+        Kind::Custom(custom) => {
+            custom.render(frame, area, focus, theme);
+            custom.hits()
+        }
     }
+}
+
+/// A section heading in a rule: `── Title ─────`, the title bold in the accent color.
+fn draw_section_title(frame: &mut Frame, area: Rect, text: &str, theme: &Theme) {
+    let background = theme.color("background");
+    let rule = Style::default()
+        .fg(theme.color("border-blurred"))
+        .bg(background);
+    let title = Style::default()
+        .fg(theme.on("accent", "background"))
+        .bg(background)
+        .add_modifier(Modifier::BOLD);
+    let used = crate::tui::text::str_width(text) + 4;
+    let rest = usize::from(area.width).saturating_sub(used);
+    line_at(
+        frame,
+        area,
+        Line::from(vec![
+            Span::styled("── ", rule),
+            Span::styled(text.to_string(), title),
+            Span::styled(format!(" {}", "─".repeat(rest)), rule),
+        ]),
+    );
 }
 
 /// A line of spans at `area`, for custom items.
 pub fn spans_at(frame: &mut Frame, area: Rect, spans: Vec<Span<'static>>) {
     line_at(frame, area, Line::from(spans));
+}
+
+fn enter() -> KeyEvent {
+    KeyEvent::new(
+        crossterm::event::KeyCode::Enter,
+        crossterm::event::KeyModifiers::NONE,
+    )
+}
+
+/// Canvas hits moved to the screen, cut to the rows the window shows.
+fn shown_targets(
+    hits: Vec<(Rect, usize, usize)>,
+    (left, top): (u16, u16),
+    offset: u16,
+    window: u16,
+) -> Vec<(Rect, usize, usize)> {
+    hits.into_iter()
+        .filter_map(|(rect, item, stop)| {
+            let first = rect.y.max(offset);
+            let last = rect.bottom().min(offset + window);
+            (first < last).then(|| {
+                let shown = Rect::new(
+                    left + rect.x,
+                    top + first - offset,
+                    rect.width,
+                    last - first,
+                );
+                (shown, item, stop)
+            })
+        })
+        .collect()
+}
+
+/// The rows of an open list as drawn. The list scrolls itself, so the text on
+/// each row, after the `▶ ` marker, names the option it shows.
+fn option_rows(frame: &mut Frame, rect: Rect, labels: &[String]) -> Vec<(Rect, usize)> {
+    let inner = Rect::new(
+        rect.x + 1,
+        rect.y + 1,
+        rect.width.saturating_sub(2),
+        rect.height.saturating_sub(2),
+    );
+    let buffer = frame.buffer_mut();
+    let mut rows = Vec::new();
+    for y in inner.top()..inner.bottom() {
+        let text: String = (inner.left()..inner.right())
+            .filter_map(|x| buffer.cell((x, y)).map(|cell| cell.symbol().to_string()))
+            .collect();
+        // The marker leads the row; the list's own scrollbar may end it.
+        let text = text
+            .trim_start_matches(['▶', ' '])
+            .trim_end_matches(['┃', '│', ' ']);
+        if let Some(option) = labels.iter().position(|label| label.trim_end() == text) {
+            rows.push((Rect::new(inner.x, y, inner.width, 1), option));
+        }
+    }
+    rows
 }

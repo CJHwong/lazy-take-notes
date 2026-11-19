@@ -151,3 +151,176 @@ fn the_form_reads_and_saves_config_yaml_as_python_does() {
         }
     }
 }
+
+// --- The mouse ---
+
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+
+/// Settings on a host, drawn on a test terminal, driven by real mouse events.
+struct Driven {
+    host: Host,
+    terminal: Terminal<TestBackend>,
+    _root: tempfile::TempDir,
+    _runtime: tokio::runtime::Runtime,
+}
+
+impl Driven {
+    fn open(width: u16, height: u16) -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let (mut host, runtime) = host();
+        host.push(Box::new(screen_for(root.path(), None)));
+        let mut driven = Self {
+            host,
+            terminal: Terminal::new(TestBackend::new(width, height)).unwrap(),
+            _root: root,
+            _runtime: runtime,
+        };
+        driven.draw();
+        driven
+    }
+
+    fn draw(&mut self) {
+        let host = &mut self.host;
+        self.terminal.draw(|frame| host.draw(frame)).unwrap();
+    }
+
+    fn rows(&self) -> Vec<String> {
+        let buffer = self.terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The cell where `text` first shows.
+    fn find(&self, text: &str) -> (u16, u16) {
+        let wanted: Vec<char> = text.chars().collect();
+        for (y, row) in self.rows().iter().enumerate() {
+            let cells: Vec<char> = row.chars().collect();
+            let last = cells.len().saturating_sub(wanted.len());
+            if let Some(x) = (0..=last).find(|&x| cells[x..x + wanted.len()] == wanted[..]) {
+                return (x as u16, y as u16);
+            }
+        }
+        panic!("{text:?} is not on screen:\n{}", self.rows().join("\n"));
+    }
+
+    fn shows(&self, text: &str) -> bool {
+        self.rows().iter().any(|row| row.contains(text))
+    }
+
+    fn mouse(&mut self, kind: MouseEventKind, (column, row): (u16, u16)) {
+        self.host.mouse(&MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        self.draw();
+    }
+
+    fn click(&mut self, text: &str) {
+        let at = self.find(text);
+        self.mouse(MouseEventKind::Down(MouseButton::Left), at);
+    }
+
+    fn press(&mut self, code: KeyCode) {
+        self.host.key(&KeyEvent::new(code, KeyModifiers::NONE));
+        self.draw();
+    }
+}
+
+#[test]
+fn a_click_on_a_page_row_opens_that_page() {
+    let mut driven = Driven::open(100, 30);
+    assert!(driven.rows()[0].contains("─ Models "));
+    driven.click("Digest");
+    assert!(
+        driven.rows()[0].contains("─ Digest "),
+        "{}",
+        driven.rows()[0]
+    );
+    assert!(driven.shows("When to summarize"));
+}
+
+#[test]
+fn a_click_opens_a_select_and_a_click_on_an_option_picks_it() {
+    let mut driven = Driven::open(100, 30);
+    driven.click("Appearance");
+    driven.click("textual-dark");
+    // The wheel moves the list's highlight down past its first screen, so the list scrolls.
+    let list = driven.find("nord");
+    for _ in 0..12 {
+        driven.mouse(MouseEventKind::ScrollDown, list);
+    }
+    driven.click("dracula");
+    assert!(driven.shows("│ dracula "), "{}", driven.rows().join("\n"));
+    assert!(!driven.shows("tokyo-night"), "the list closed");
+}
+
+#[test]
+fn the_wheel_scrolls_the_page_under_the_pointer() {
+    let mut driven = Driven::open(100, 20);
+    assert!(driven.rows()[1].contains("Text generation"));
+    // Over the page list, the wheel leaves the page where it is.
+    let nav = driven.find("Digest");
+    driven.mouse(MouseEventKind::ScrollDown, nav);
+    assert!(driven.rows()[1].contains("Text generation"));
+    let page = driven.find("Provider");
+    for _ in 0..3 {
+        driven.mouse(MouseEventKind::ScrollDown, page);
+    }
+    assert!(!driven.rows()[1].contains("Text generation"));
+}
+
+#[test]
+fn a_click_focuses_a_field_and_the_dialog_buttons_answer_clicks() {
+    let mut driven = Driven::open(100, 30);
+    driven.click("http://localhost");
+    driven.press(KeyCode::End);
+    driven.press(KeyCode::Char('x'));
+    assert!(driven.shows("11434x"));
+    // The first Esc leaves the page for the page list; the second asks.
+    driven.press(KeyCode::Esc);
+    driven.press(KeyCode::Esc);
+    assert!(driven.shows("Unsaved changes"));
+    driven.click("Keep editing");
+    assert!(!driven.shows("Unsaved changes"));
+    driven.press(KeyCode::Esc);
+    driven.click("Discard and exit");
+    assert!(!driven.shows("Settings"));
+}
+
+#[test]
+fn a_click_on_a_switch_turns_it_on() {
+    let mut driven = Driven::open(100, 30);
+    driven.click("Audio");
+    let page = driven.find("Microphone");
+    for _ in 0..30 {
+        driven.mouse(MouseEventKind::ScrollDown, page);
+    }
+    let (_, row) = driven.find("Label speakers");
+    let was = driven.switch_color();
+    // The switch sits in the control column, after the 24-column label.
+    let (label_x, _) = driven.find("Label speakers");
+    driven.mouse(
+        MouseEventKind::Down(MouseButton::Left),
+        (label_x + super::form::LABEL_WIDTH + 2, row),
+    );
+    assert_ne!(driven.switch_color(), was);
+}
+
+impl Driven {
+    /// The thumb's cell color of the speaker switch: its right half is the
+    /// success color while on.
+    fn switch_color(&self) -> ratatui::style::Color {
+        let (x, y) = self.find("Label speakers");
+        let buffer = self.terminal.backend().buffer();
+        buffer[(x + super::form::LABEL_WIDTH + 4, y)].bg
+    }
+}
