@@ -5,14 +5,21 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.92"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 dirs = "7.0.0"
 fancy-regex = "0.20.2"
+flate2 = "1.1.11"
 indexmap = { version = "2.14.2", features = ["serde"] }
 libc = "0.2.191"
 regex = "1.13.2"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "stream", "system-proxy"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
+sha2 = "0.11.1"
+tar = "0.4.46"
+tempfile = "3.27.0"
 thiserror = "2.0.21"
+tokio = { version = "1.54.1", features = ["rt", "macros", "time", "sync", "net", "io-util"] }
 tracing = "0.1.44"
 yaml_serde = "0.10.7"
 

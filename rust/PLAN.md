@@ -34,7 +34,7 @@ The two versions must work on the same data, in both directions:
 ## Checklist
 
 1. [x] Domain types, ports, use cases (digest, compaction, label, quick actions, speaker attribution, template builder, validator, diff, transcription buffering and speech gate)
-2. [ ] Persistence and assets: config loader and writer, template loader and writer, session files, session reader and status, model catalog, cached store, download engine, file lock
+2. [x] Persistence and assets: config loader and writer, template loader and writer, session files, session reader and status, model catalog, cached store, download engine, file lock
 3. [ ] LLM clients (Ollama, OpenAI-compatible), whisper-rs transcriber, audio file loader
 4. [ ] Audio: cpal mic source, Core Audio tap source (existing Swift binary), mixed source with retry and health, mic boost, WAV writer with backlog, test tone
 5. [ ] Session controller, headless record, preflight, shutdown signals, diarization (existing NeMo runtime)
@@ -47,3 +47,4 @@ The two versions must work on the same data, in both directions:
 2. `Invalid JSON` and `Schema validation failed` messages in the template builder carry serde's text, not pydantic's.
 3. The LLM error kind in `LLM error: <kind>: <message>` comes from the Rust HTTP client.
 4. A successful digest removes only the buffer lines it covered. Python cleared the whole buffer, so a line that arrived during the LLM call never reached a periodic digest.
+5. A bare pywhispercpp model name (`base.en`, `large-v3-turbo`) uses the copy in pywhispercpp's models folder when it exists. Otherwise the store downloads it into the cache under `assets/whisper/custom/ggerganov__whisper.cpp/`. Python handed the name to pywhispercpp, which downloaded into its own folder.
