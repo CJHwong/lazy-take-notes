@@ -54,8 +54,10 @@ The two versions must work on the same data, in both directions:
    - A closed window (SIGHUP) during a recording: the audio flushes and the transcript is saved; failed draws are dropped.
    - Named tests cover the faults of `test_record_app_faults.py` that apply without a mouse: markup-like text, a failed speakers write, a rename onto an existing folder, a failed rename, a panic in a digest or quick action task, a raising message handler, the shutdown signals, Ctrl+C under a modal, and a thread posting while the loop does not run. A panic in a session task now comes back as a failed result (`Ctx::spawn_or`). Before, it left the digest or query flag set, and `d` answered "Digest already in progress" until the app closed.
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
-7. [ ] Cross-version run: each version opens the other's sessions and config
-   - Ship `coreaudio-tap` next to the executable. A release build looks for it only there.
+7. [x] Cross-version run: each version opens the other's sessions and config
+   - `scripts/package.sh` builds a release and puts `coreaudio-tap` next to the executable in `dist/lazy-take-notes-<arch>-macos.tar.gz`. A release build looks for the helper only there.
+   - Real runs from the extracted package outside the repo: preflight captured the test tone, and with the mic muted (SIGUSR1) a spoken sentence came through the tap into `transcript.txt` word for word. With the helper removed, preflight fails and names the missing path.
+   - In one home: Python Settings saved After lines 7, Rust Settings showed it and saved Wait seconds 45, and Python Settings showed both. Each version transcribed the same file headless with an identical `transcript.txt`, `status` printed the same lines in both, and each `view` opened the other's session.
 
 ## Known differences from the Python version
 
