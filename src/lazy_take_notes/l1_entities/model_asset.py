@@ -63,3 +63,15 @@ class AssetState:
     installed_bytes: int = 0
     legacy_bytes: int = 0
     path: str | None = None
+
+
+@dataclass(frozen=True)
+class RemovalEstimate:
+    """Bytes a Remove frees on disk. A hard-linked file frees nothing while its other name exists.
+
+    ``legacy_path`` is the older copy that Remove can delete too, or None when there is none.
+    """
+
+    frees: int
+    frees_with_legacy: int
+    legacy_path: str | None = None

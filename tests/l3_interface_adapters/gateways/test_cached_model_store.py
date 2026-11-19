@@ -306,6 +306,146 @@ class TestLegacyAdoption:
         assert not (tmp_path / 'cache' / 'assets' / RUNTIME.subdir).exists()
 
 
+def legacy_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    legacy_root = tmp_path / 'pywhispercpp'
+    legacy = legacy_root / 'legacy-dir' / ASSET.entry
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(BODY)
+    monkeypatch.setattr('pywhispercpp.constants.MODELS_DIR', str(legacy_root))
+    return legacy
+
+
+def legacy_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str = 'runtime') -> Path:
+    """An old runtime tree; its folder name matches the catalog's, as the old tool laid it out."""
+    tree = tmp_path / 'legacy-store' / name
+    (tree / 'bin').mkdir(parents=True)
+    (tree / 'bin' / 'tool').write_bytes(RUNTIME_ENTRY)
+    (tree / 'lib').mkdir()
+    (tree / 'lib' / 'extra').write_bytes(b'lib-data')
+    (tmp_path / 'legacy-store' / 'runtime.json').write_text(
+        json.dumps({'binary': str(tree / 'bin' / 'tool')}), encoding='utf-8'
+    )
+    monkeypatch.setattr(
+        'lazy_take_notes.l3_interface_adapters.gateways.cached_model_store.LEGACY_NEMOTRON_STORE',
+        tmp_path / 'legacy-store',
+    )
+    return tree
+
+
+class TestRemoveStaysRemoved:
+    """Regression: Remove deleted the cache copy, then the next status() adopted the old copy again."""
+
+    def test_a_removed_asset_is_not_adopted_again(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy = legacy_file(tmp_path, monkeypatch)
+        store = make_store(tmp_path)
+        assert store.status(ASSET.id).status is AssetStatus.READY
+
+        store.remove(ASSET.id)
+
+        assert store.status(ASSET.id).status is AssetStatus.MISSING
+        assert make_store(tmp_path).status(ASSET.id).status is AssetStatus.MISSING, 'the mark is saved'
+        assert legacy.exists()
+
+    def test_a_removed_asset_still_reports_its_old_copy(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy_file(tmp_path, monkeypatch)
+        store = make_store(tmp_path)
+        store.status(ASSET.id)
+        store.remove(ASSET.id)
+
+        assert store.status(ASSET.id).legacy_bytes == len(BODY)
+
+    def test_download_after_remove_adopts_the_old_copy_without_a_download(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        legacy_file(tmp_path, monkeypatch)
+        session = FakeSession(BODY)
+        store = make_store(tmp_path, session)
+        store.status(ASSET.id)
+        store.remove(ASSET.id)
+
+        store.install(ASSET.id)
+
+        assert store.status(ASSET.id).status is AssetStatus.READY
+        assert session.calls == 0
+
+    def test_a_hard_linked_copy_frees_nothing_alone(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy = legacy_file(tmp_path, monkeypatch)
+        store = make_store(tmp_path)
+        store.status(ASSET.id)  # adopts by hard link
+
+        estimate = store.removal(ASSET.id)
+
+        assert estimate.frees == 0
+        assert estimate.frees_with_legacy == len(BODY)
+        assert estimate.legacy_path == str(legacy)
+
+    def test_remove_with_the_old_copy_deletes_both(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy = legacy_file(tmp_path, monkeypatch)
+        store = make_store(tmp_path)
+        store.status(ASSET.id)
+
+        freed = store.remove(ASSET.id, delete_legacy=True)
+
+        assert freed == len(BODY)
+        assert not legacy.exists()
+        state = store.status(ASSET.id)
+        assert state.status is AssetStatus.MISSING
+        assert state.legacy_bytes == 0
+
+    def test_remove_keeps_the_old_copy_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy = legacy_file(tmp_path, monkeypatch)
+        store = make_store(tmp_path)
+        store.status(ASSET.id)
+
+        assert store.remove(ASSET.id) == 0
+        assert legacy.read_bytes() == BODY
+
+    def test_a_copied_runtime_frees_its_own_bytes(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        legacy_runtime(tmp_path, monkeypatch)
+        store = make_store(tmp_path, assets={RUNTIME.id: RUNTIME})
+        store.status(RUNTIME.id)  # a tree is copied, not linked
+
+        estimate = store.removal(RUNTIME.id)
+
+        own = len(RUNTIME_ENTRY) + len(b'lib-data')
+        assert estimate.frees == own
+        assert estimate.frees_with_legacy == 2 * own
+
+    def test_remove_with_the_old_copy_deletes_the_old_runtime_tree(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        tree = legacy_runtime(tmp_path, monkeypatch)
+        store = make_store(tmp_path, assets={RUNTIME.id: RUNTIME})
+        store.status(RUNTIME.id)
+
+        store.remove(RUNTIME.id, delete_legacy=True)
+
+        assert not tree.exists()
+        assert (tmp_path / 'legacy-store' / 'runtime.json').exists(), 'only the asset itself is deleted'
+
+    def test_an_old_runtime_in_an_unexpected_folder_is_not_deleted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        tree = legacy_runtime(tmp_path, monkeypatch, name='somewhere-else')
+        store = make_store(tmp_path, assets={RUNTIME.id: RUNTIME})
+        store.status(RUNTIME.id)
+
+        estimate = store.removal(RUNTIME.id)
+        store.remove(RUNTIME.id, delete_legacy=True)
+
+        assert estimate.legacy_path is None
+        assert tree.exists()
+
+    def test_no_old_copy_means_no_offer(self, tmp_path: Path):
+        store = make_store(tmp_path)
+        store.install(ASSET.id)
+
+        estimate = store.removal(ASSET.id)
+
+        assert estimate.legacy_path is None
+        assert estimate.frees == estimate.frees_with_legacy == len(BODY)
+
+
 class TestState:
     def test_corrupt_state_file_is_ignored(self, tmp_path: Path):
         cache = tmp_path / 'cache'

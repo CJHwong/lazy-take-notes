@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Checkbox, Static
+
+from lazy_take_notes.l1_entities.model_asset import RemovalEstimate
 
 
 def _megabytes(size: int) -> str:
@@ -72,24 +76,43 @@ class _DiscardChangesModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class RemoveModelModal(_DiscardChangesModal):
-    """Confirm model removal and state the freed bytes.
+def _home_relative(path: str) -> str:
+    home = str(Path.home())
+    return '~' + path[len(home) :] if path == home or path.startswith(home + '/') else path
 
-    It shares the discard dialog layout and ids.
+
+class RemoveModelModal(_DiscardChangesModal):
+    """Confirm model removal and state the bytes it really frees.
+
+    An older copy from another tool is kept unless the user ticks the box;
+    ``delete_legacy`` holds the choice for the caller. It shares the discard
+    dialog layout and ids.
     """
 
-    def __init__(self, label: str, size: int) -> None:
+    def __init__(self, label: str, estimate: RemovalEstimate) -> None:
         super().__init__()
         self._asset_label = label
-        self._freed_bytes = size
+        self._estimate = estimate
+        self.delete_legacy = False
 
     def compose(self) -> ComposeResult:
+        estimate = self._estimate
+        body = f'This frees {_megabytes(estimate.frees)}.'
+        if estimate.legacy_path is not None:
+            extra = estimate.frees_with_legacy - estimate.frees
+            body += f' An older copy in {_home_relative(estimate.legacy_path)} uses {_megabytes(extra)} more.'
+        body += ' It downloads again if you need it.'
         with Vertical():
             yield Static(f'Remove {self._asset_label}?', id='discard-title')
-            yield Static(
-                f'This frees {_megabytes(self._freed_bytes)}. It downloads again if you need it.',
-                id='discard-body',
-            )
+            yield Static(body, id='discard-body')
+            if estimate.legacy_path is not None:
+                yield Checkbox(
+                    f'Also delete it (frees {_megabytes(estimate.frees_with_legacy)} in total)',
+                    id='remove-legacy',
+                )
             with Horizontal(id='discard-actions'):
                 yield Button('Cancel', id='discard-cancel')
                 yield Button('Remove', id='discard-confirm', variant='error')
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        self.delete_legacy = event.value

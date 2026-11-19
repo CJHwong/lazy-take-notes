@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
-from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, ModelAsset
+from lazy_take_notes.l1_entities.model_asset import AssetProgress, AssetState, ModelAsset, RemovalEstimate
 
 
 class AssetStore(Protocol):
@@ -34,8 +34,12 @@ class AssetStore(Protocol):
         """Ensure the asset is present. Returns the entry path."""
         ...
 
-    def remove(self, asset_id: str) -> int:
-        """Delete an installed asset. Returns the freed bytes."""
+    def removal(self, asset_id: str) -> RemovalEstimate:
+        """Return the bytes remove() frees, with and without the older copy."""
+        ...
+
+    def remove(self, asset_id: str, *, delete_legacy: bool = False) -> int:
+        """Delete an installed asset and keep it removed until install(). Returns the freed bytes."""
         ...
 
     def resolve(self, name: str) -> str:
@@ -60,4 +64,5 @@ class ModelAdminStore(Protocol):
         cancel: threading.Event | None = None,
     ) -> Path: ...
 
-    def remove(self, asset_id: str) -> int: ...
+    def removal(self, asset_id: str) -> RemovalEstimate: ...
+    def remove(self, asset_id: str, *, delete_legacy: bool = False) -> int: ...

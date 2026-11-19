@@ -217,7 +217,7 @@ The Models page lists each transcript model as a row with its size, state, and o
 
 Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show size, speed and time left, and can be cancelled. A cancelled download keeps its partial file. Two downloads of one model never run at once, even from two windows: the second waits and uses the first one's file. A model that another window is downloading shows as Downloading; press Download to follow it. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
 
-On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place.
+On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place. A model you remove stays removed until you press `Download`, which reuses the original if it is still there. The remove dialog says how much space the original uses, and deletes it only if you tick the box under that line.
 
 
 ## Desktop app (macOS)
