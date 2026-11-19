@@ -121,6 +121,25 @@ pub fn thick_box(
         lines.push(row("█", " ", "█"));
     }
     lines.push(row("█", "▄", "█"));
+    // A modal covers what is under it; text styles there must not show through.
+    frame.render_widget(ratatui::widgets::Clear, area);
     frame.render_widget(Paragraph::new(lines), area);
     Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
+}
+
+/// The styles of Textual's `tall` border: the left edge `▊`, the right edge `▎`,
+/// and the top `▔` and bottom `▁` fills. The left edge is drawn reversed, so its
+/// glyph shows the parent's background and only a thin line of border is left.
+pub struct TallEdges {
+    pub left: Style,
+    pub right: Style,
+    pub fill: Style,
+}
+
+pub fn tall_edges(border: Color, inner: Color, outer: Color) -> TallEdges {
+    TallEdges {
+        left: Style::default().fg(outer).bg(border),
+        right: Style::default().fg(border).bg(outer),
+        fill: Style::default().fg(border).bg(inner),
+    }
 }

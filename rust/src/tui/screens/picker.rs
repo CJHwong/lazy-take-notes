@@ -43,6 +43,8 @@ pub struct Picker {
     pub preview: ScrollView,
     /// `max-width` of the list pane.
     pub max_list_width: u16,
+    /// The `fr` widths of the list pane and the preview.
+    pub fractions: (u16, u16),
 }
 
 impl Picker {
@@ -60,6 +62,7 @@ impl Picker {
                 preview
             },
             max_list_width,
+            fractions: (1, 3),
         }
     }
 
@@ -78,7 +81,7 @@ impl Picker {
         }
         if name == "down" {
             self.list_focused = true;
-            self.list.select(0);
+            self.list.select(self.list.first_enabled().unwrap_or(0));
             return PickerKey::Moved;
         }
         let before = self.search.value();
@@ -94,7 +97,8 @@ impl Picker {
     }
 
     fn list_key(&mut self, name: &str) -> PickerKey {
-        if name == "up" && self.list.index == Some(0) {
+        if name == "up" && self.list.index.is_some() && self.list.index == self.list.first_enabled()
+        {
             self.list_focused = false;
             return PickerKey::Used;
         }
@@ -132,8 +136,10 @@ impl Picker {
         let (top, body, bottom) = split_bars(area, 1, 1);
         bar(frame, top, header, "primary", "text", true, theme);
         bar(frame, bottom, footer, "surface", "text-muted", false, theme);
-        // The list pane is 1fr, the preview 3fr; the list keeps between 24 and its max.
-        let list_width = (body.width / 4)
+        // The list pane and the preview share the width by `fr`; the list keeps
+        // between 24 and its max.
+        let (list_fr, preview_fr) = self.fractions;
+        let list_width = (body.width * list_fr / (list_fr + preview_fr))
             .clamp(24.min(body.width), self.max_list_width.max(24))
             .min(body.width);
         let pane = Rect::new(body.x, body.y, list_width, body.height);

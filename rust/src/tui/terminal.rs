@@ -10,7 +10,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::event::{
+    DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+};
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -57,6 +59,16 @@ pub fn set_quiet_panics(quiet: bool) {
 /// Enter raw mode and the alternate screen.
 pub fn enter() -> io::Result<Term> {
     install_hook();
+    take_over()?;
+    let terminal = Terminal::new(CrosstermBackend::new(io::stdout()));
+    if terminal.is_err() {
+        restore();
+    }
+    terminal
+}
+
+/// Raw mode, the alternate screen, bracketed paste, focus reports, no cursor.
+fn take_over() -> io::Result<()> {
     enable_raw_mode()?;
     ACTIVE.store(true, Ordering::SeqCst);
     let mut stdout = io::stdout();
@@ -64,16 +76,22 @@ pub fn enter() -> io::Result<Term> {
         stdout,
         EnterAlternateScreen,
         EnableBracketedPaste,
+        EnableFocusChange,
         cursor::Hide
     ) {
         restore();
         return Err(e);
     }
-    let terminal = Terminal::new(CrosstermBackend::new(stdout));
-    if terminal.is_err() {
-        restore();
-    }
-    terminal
+    Ok(())
+}
+
+/// Give the terminal back while `job` runs (an editor), then take it again,
+/// as Textual's `App.suspend()` does. The caller redraws the whole screen.
+pub fn suspended<T>(job: impl FnOnce() -> T) -> io::Result<T> {
+    restore();
+    let result = job();
+    take_over()?;
+    Ok(result)
 }
 
 /// Leave the alternate screen and raw mode. Safe to call twice, from any thread.
@@ -86,6 +104,7 @@ pub fn restore() {
         stdout,
         LeaveAlternateScreen,
         DisableBracketedPaste,
+        DisableFocusChange,
         cursor::Show
     );
     let _ = disable_raw_mode();
@@ -104,4 +123,12 @@ pub fn catching<R>(body: impl FnOnce() -> R) -> Result<R, String> {
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "panic".into())
     })
+}
+
+/// Clear the normal screen before a TUI starts. Between two TUIs the terminal
+/// shows the normal screen for a moment; a blank one hides the shell history.
+pub fn clear_normal_screen() {
+    let mut stdout = io::stdout();
+    let _ = stdout.write_all(b"\x1b[2J\x1b[H");
+    let _ = stdout.flush();
 }

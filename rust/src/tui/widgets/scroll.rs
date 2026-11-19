@@ -32,6 +32,10 @@ pub struct ScrollView {
     pub content_padding: u16,
     /// Lines that scroll above the content, outside the Markdown's padding.
     pub prefix: Vec<Line<'static>>,
+    /// Rows a docked widget adds to the scroll height, its margin included.
+    pub dock_rows: u16,
+    /// Rows the docked widget itself covers; content draws in its margin.
+    pub dock_cover: u16,
     /// The Markdown widget's own `padding: 0 N`, inside `content_padding`.
     pub markdown_padding: u16,
     /// `overflow-y: scroll`: the scrollbar column is there even when nothing overflows.
@@ -54,6 +58,8 @@ impl ScrollView {
             padding_y: 0,
             content_padding: 0,
             prefix: Vec::new(),
+            dock_rows: 0,
+            dock_cover: 0,
             markdown_padding: 0,
             always_bar: true,
             bar_width: 1,
@@ -86,6 +92,12 @@ impl ScrollView {
             Content::Lines(_) => Content::Lines(Vec::new()),
             Content::Markdown(_) => Content::Markdown(String::new()),
         };
+        self.offset = 0;
+    }
+
+    /// Replace the content with plain lines, from the top (a `Static.update`).
+    pub fn set_lines(&mut self, lines: Vec<Line<'static>>) {
+        self.content = Content::Lines(lines);
         self.offset = 0;
     }
 
@@ -127,7 +139,7 @@ impl ScrollView {
         let text_width = width
             .saturating_sub((self.padding + self.content_padding) * 2)
             .max(1);
-        self.lines_at(text_width, theme).len()
+        self.lines_at(text_width, theme).len() + usize::from(self.dock_rows)
     }
 
     fn lines_at(&self, width: u16, theme: &Theme) -> Vec<Line<'static>> {
@@ -158,12 +170,13 @@ impl ScrollView {
         );
         let height = usize::from(region.height);
         let full = region.width.saturating_sub(self.content_padding * 2).max(1);
+        let dock = usize::from(self.dock_rows);
         let mut lines = self.lines_at(full, theme);
-        let bar_column = lines.len() > height || self.always_bar;
+        let bar_column = lines.len() + dock > height || self.always_bar;
         if bar_column {
             lines = self.lines_at(full.saturating_sub(self.bar_width).max(1), theme);
         }
-        self.rows = lines.len();
+        self.rows = lines.len() + dock;
         self.height = height;
         let last = self.rows.saturating_sub(height);
         if self.at_end_pending {
@@ -177,9 +190,13 @@ impl ScrollView {
             region
                 .width
                 .saturating_sub(u16::from(bar_column) * self.bar_width + self.content_padding * 2),
-            region.height,
+            region.height.saturating_sub(self.dock_cover),
         );
-        let shown: Vec<Line<'static>> = lines.into_iter().skip(self.offset).take(height).collect();
+        let shown: Vec<Line<'static>> = lines
+            .into_iter()
+            .skip(self.offset)
+            .take(height.saturating_sub(usize::from(self.dock_cover)))
+            .collect();
         frame.render_widget(Paragraph::new(shown).style(style), text_area);
         if self.rows > height {
             for column in 0..self.bar_width.min(region.width) {

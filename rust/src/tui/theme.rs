@@ -220,6 +220,42 @@ impl Theme {
 }
 
 impl Theme {
+    /// `variable` as it shows over `under`, a color that is not a variable
+    /// (a tinted background).
+    pub fn on_color(&self, variable: &str, under: Color) -> Color {
+        let Color::Rgb(r, g, b) = under else {
+            return self.color(variable);
+        };
+        let under = Rgba::opaque(r, g, b);
+        match self.value(variable) {
+            Some(Value::Ansi(color)) => color,
+            Some(Value::Rgba(color)) => color.over(under).to_color(),
+            Some(Value::Auto(alpha)) => under.contrast_text(alpha).over(under).to_color(),
+            None => Color::Reset,
+        }
+    }
+
+    /// A text-style variable (`block-cursor-text-style`): `none`, or words like `b reverse`.
+    pub fn text_style(&self, variable: &str) -> ratatui::style::Modifier {
+        use ratatui::style::Modifier;
+        let words = self
+            .data
+            .variables
+            .get(variable)
+            .map_or("", |value| value.as_str());
+        words
+            .split_whitespace()
+            .fold(Modifier::empty(), |style, word| match word {
+                "b" | "bold" => style | Modifier::BOLD,
+                "i" | "italic" => style | Modifier::ITALIC,
+                "u" | "underline" => style | Modifier::UNDERLINED,
+                "r" | "reverse" => style | Modifier::REVERSED,
+                "d" | "dim" => style | Modifier::DIM,
+                "s" | "strike" => style | Modifier::CROSSED_OUT,
+                _ => style,
+            })
+    }
+
     /// `variable` with `toward` painted over it at `alpha`, as Textual's `background-tint`.
     pub fn tinted(&self, variable: &str, toward: &str, alpha: f64) -> Color {
         let base = self.opaque(variable, 0);

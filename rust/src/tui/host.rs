@@ -72,7 +72,10 @@ pub struct Ctx {
     pub runtime: tokio::runtime::Handle,
     exit_at: Option<Instant>,
     exit_now: bool,
+    suspend_job: Option<SuspendJob>,
 }
+
+type SuspendJob = Box<dyn FnOnce() -> Payload + Send>;
 
 impl Ctx {
     pub fn notify(&mut self, text: impl Into<String>) {
@@ -164,6 +167,21 @@ impl Ctx {
     pub fn exit(&mut self) {
         self.exit_now = true;
     }
+
+    /// Run `job` with the terminal given back (an editor), after this event.
+    /// Its output comes back as `Msg::Task`.
+    pub fn suspend<T, F>(&mut self, job: F)
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        self.suspend_job = Some(Box::new(move || Box::new(job()) as Payload));
+    }
+
+    /// The job a screen asked to run suspended, for tests.
+    pub fn take_suspend_job(&mut self) -> Option<Box<dyn FnOnce() -> Payload + Send>> {
+        self.suspend_job.take()
+    }
 }
 
 /// What a screen asks the host to do after an event.
@@ -225,6 +243,11 @@ pub trait Screen {
     /// What ctrl+c says instead of the generic quit hint.
     fn quit_hint(&self) -> Option<String> {
         None
+    }
+
+    /// The terminal window got the focus back (Textual's `AppFocus`).
+    fn app_focus(&mut self, _ctx: &mut Ctx) -> Action {
+        Action::None
     }
 }
 
@@ -320,6 +343,7 @@ impl Host {
                 runtime,
                 exit_at: None,
                 exit_now: false,
+                suspend_job: None,
             },
             receiver,
             errors: ErrorTracker::default(),
@@ -563,6 +587,7 @@ impl Host {
             }
         }
         render_toasts(frame, area, &self.ctx);
+        resolve_dim(frame.buffer_mut(), area);
     }
 
     /// Run until the stack empties or a screen exits the app.
@@ -580,6 +605,24 @@ impl Host {
         let mut input = EventStream::new();
         let mut ticks = tokio::time::interval(TICK);
         while !self.finished() {
+            if let Some(job) = self.ctx.suspend_job.take() {
+                // The input reader must stop first, or it takes the editor's keys.
+                drop(input);
+                let payload = terminal::suspended(job)?;
+                input = EventStream::new();
+                // `Terminal::clear` asks the terminal where the cursor is, and that
+                // read times out right after the editor gives the terminal back.
+                // Clear without it, and blank both buffers so the next draw
+                // repaints every cell.
+                crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+                )?;
+                terminal.swap_buffers();
+                terminal.swap_buffers();
+                self.message(Msg::Task(payload));
+                continue;
+            }
             terminal.draw(|frame| self.draw(frame))?;
             tokio::select! {
                 event = input.next() => match event {
@@ -606,6 +649,10 @@ impl Host {
         match event {
             TermEvent::Key(key) => self.key(&key),
             TermEvent::Paste(text) => self.paste(&text),
+            TermEvent::FocusGained => {
+                let action = self.guarded(|screen, ctx| screen.app_focus(ctx));
+                self.apply(action);
+            }
             _ => {}
         }
     }
@@ -764,6 +811,32 @@ fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
             text_area,
         );
         bottom = rect.top().saturating_sub(1);
+    }
+}
+
+/// Textual's `DIM_FACTOR`: dim text is its color 66% of the way from the background.
+const DIM_FACTOR: f64 = 0.66;
+
+/// Turn the dim attribute into a color, as Textual's output filter does after
+/// compositing. A terminal's own dim differs from one terminal to the next.
+fn resolve_dim(buffer: &mut ratatui::buffer::Buffer, area: Rect) {
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            let Some(cell) = buffer.cell_mut((x, y)) else {
+                continue;
+            };
+            if !cell.modifier.contains(Modifier::DIM) {
+                continue;
+            }
+            let (Color::Rgb(fr, fg, fb), Color::Rgb(br, bg, bb)) = (cell.fg, cell.bg) else {
+                continue;
+            };
+            let mix = |back: u8, fore: u8| {
+                (f64::from(back) + (f64::from(fore) - f64::from(back)) * DIM_FACTOR) as u8
+            };
+            cell.fg = Color::Rgb(mix(br, fr), mix(bg, fg), mix(bb, fb));
+            cell.modifier.remove(Modifier::DIM);
+        }
     }
 }
 

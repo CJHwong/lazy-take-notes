@@ -57,6 +57,22 @@ fn searchable_pickers() {
 }
 
 #[test]
+fn file_and_template_pickers_and_their_modals() {
+    use lazy_take_notes::tui::screens::file_picker::FILE_PICKER_BINDINGS;
+    use lazy_take_notes::tui::screens::modals::NOTICE_BINDINGS;
+    use lazy_take_notes::tui::screens::template_picker::CONFIRM_DELETE_BINDINGS;
+    assert_table("pickers.file_picker.FilePicker", &FILE_PICKER_BINDINGS);
+    assert_table(
+        "pickers.template_picker._ConfirmDeleteScreen",
+        &CONFIRM_DELETE_BINDINGS,
+    );
+    assert_table(
+        "widgets.builtin_templates_notice.BuiltinTemplatesNotice",
+        &NOTICE_BINDINGS,
+    );
+}
+
+#[test]
 fn transcribe_screen_and_its_modals() {
     use lazy_take_notes::tui::screens::modals::{HELP_BINDINGS, LABEL_BINDINGS, QUERY_BINDINGS};
     use lazy_take_notes::tui::screens::transcribe::TRANSCRIBE_BINDINGS;

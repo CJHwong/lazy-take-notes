@@ -15,8 +15,9 @@ const BULLETS: [&str; 5] = ["• ", "▪ ", "‣ ", "⭑ ", "◦ "];
 struct ListState {
     /// The next number, for an ordered list.
     next: Option<u64>,
-    /// The width of the widest number, for right-aligned numbers.
-    number_width: usize,
+    /// The width of every marker: Textual right-justifies `"{n}. "` to the
+    /// length of the last one plus 1.
+    marker_width: usize,
 }
 
 struct Table {
@@ -30,10 +31,15 @@ struct Builder<'t> {
     width: u16,
     out: Vec<Line<'static>>,
     pending_gap: usize,
+    /// The quote depth the pending gap is drawn at.
+    gap_depth: usize,
     /// Inline spans of the block being read.
     spans: Vec<Span<'static>>,
     styles: Vec<Style>,
     lists: Vec<ListState>,
+    /// Items per list, from a first pass, and how many lists have started.
+    list_items: Vec<usize>,
+    lists_seen: usize,
     /// The bullet or number waiting for the item's first line.
     item_marker: Option<Span<'static>>,
     quote_depth: usize,
@@ -48,9 +54,12 @@ impl<'t> Builder<'t> {
             width,
             out: Vec::new(),
             pending_gap: 0,
+            gap_depth: 0,
             spans: Vec::new(),
             styles: vec![Style::default().fg(theme.color("foreground"))],
             lists: Vec::new(),
+            list_items: Vec::new(),
+            lists_seen: 0,
             item_marker: None,
             quote_depth: 0,
             code: None,
@@ -74,12 +83,19 @@ impl<'t> Builder<'t> {
     }
 
     fn gap(&mut self, rows: usize) {
+        // A margin belongs to the outermost block that asked for it: the gap
+        // before a quote has no bar, the gap between its paragraphs has one.
+        self.gap_depth = match self.pending_gap {
+            0 => self.quote_depth,
+            _ => self.gap_depth.min(self.quote_depth),
+        };
         self.pending_gap = self.pending_gap.max(rows);
     }
 
     fn emit(&mut self, line: Line<'static>) {
         for _ in 0..self.pending_gap {
-            self.out.push(self.decorate(Line::default()));
+            self.out
+                .push(self.decorate_at(Line::default(), self.gap_depth));
         }
         self.pending_gap = 0;
         self.out.push(line);
@@ -87,17 +103,34 @@ impl<'t> Builder<'t> {
 
     /// The quote bars in front of a line.
     fn decorate(&self, line: Line<'static>) -> Line<'static> {
-        if self.quote_depth == 0 {
+        self.decorate_at(line, self.quote_depth)
+    }
+
+    fn decorate_at(&self, line: Line<'static>, depth: usize) -> Line<'static> {
+        if depth == 0 {
             return line;
         }
-        let bar = Style::default()
-            .fg(self.theme.color("text-primary"))
-            .bg(self.theme.color("boost"));
-        let mut spans: Vec<Span<'static>> = (0..self.quote_depth)
-            .map(|_| Span::styled("▌ ", bar))
-            .collect();
+        // `background: $boost` on the whole row; `border-left: outer $text-primary 50%`
+        // (`$text-secondary` in a light theme), its color taken over the parent.
+        let boost = self.theme.color("boost");
+        let bar_color = match self.theme.dark {
+            true => tint(
+                self.theme.color("text-primary"),
+                self.theme.color("background"),
+                0.5,
+            ),
+            false => self.theme.color("text-secondary"),
+        };
+        let bar = Style::default().fg(bar_color).bg(boost);
+        let mut spans: Vec<Span<'static>> = (0..depth).map(|_| Span::styled("▌ ", bar)).collect();
         spans.extend(line.spans);
-        Line::from(spans).alignment(line.alignment.unwrap_or(LineAlignment::Left))
+        // The quote's background fills the row to the right edge.
+        let used: usize = spans.iter().map(|span| str_width(&span.content)).sum();
+        let rest = usize::from(self.width).saturating_sub(used);
+        spans.push(Span::styled(" ".repeat(rest), Style::default().bg(boost)));
+        Line::from(spans)
+            .style(line.style.bg(boost))
+            .alignment(line.alignment.unwrap_or(LineAlignment::Left))
     }
 
     /// The columns the list and quote prefixes take.
@@ -160,13 +193,17 @@ impl<'t> Builder<'t> {
         } else {
             ("error", "text-error")
         };
-        Style::default()
-            .bg(tint(
-                self.theme.color(background),
-                self.theme.color("background"),
-                if self.theme.dark { 0.1 } else { 0.05 },
-            ))
-            .fg(self.theme.color(foreground))
+        let code_background = tint(
+            self.theme.color(background),
+            self.theme.color("background"),
+            if self.theme.dark { 0.1 } else { 0.05 },
+        );
+        // `color: $text-warning 95%` (or `$text-error 95%`) over the code's background.
+        Style::default().bg(code_background).fg(tint(
+            self.theme.color(foreground),
+            code_background,
+            0.95,
+        ))
     }
 
     fn start(&mut self, tag: Tag<'_>) {
@@ -198,9 +235,15 @@ impl<'t> Builder<'t> {
                 if self.lists.is_empty() {
                     self.gap(0);
                 }
+                let items = self.list_items.get(self.lists_seen).copied().unwrap_or(1);
+                self.lists_seen += 1;
+                let marker_width = match first {
+                    Some(start) => format!("{}. ", start + items.max(1) as u64 - 1).len() + 1,
+                    None => 2,
+                };
                 self.lists.push(ListState {
                     next: first,
-                    number_width: 0,
+                    marker_width,
                 });
             }
             Tag::Item => {
@@ -214,10 +257,9 @@ impl<'t> Builder<'t> {
                 let list = self.lists.last_mut().expect("an item is in a list");
                 let marker = match list.next.as_mut() {
                     Some(number) => {
-                        let text = format!("{number}.");
+                        let text = format!("{number}. ");
                         *number += 1;
-                        list.number_width = list.number_width.max(text.len());
-                        format!("{text:>width$} ", width = list.number_width)
+                        format!("{text:>width$}", width = list.marker_width)
                     }
                     None => BULLETS[depth % BULLETS.len()].to_string(),
                 };
@@ -446,7 +488,21 @@ impl<'t> Builder<'t> {
             return;
         }
         let style = self.style();
-        self.spans.push(Span::styled(text.to_string(), style));
+        // Textual's `re.sub(r"\s+", " ", ...)` on each inline text token.
+        let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let edges = (
+            text.starts_with(char::is_whitespace) && !collapsed.is_empty(),
+            text.ends_with(char::is_whitespace) && !collapsed.is_empty(),
+        );
+        let text = match (collapsed.is_empty() && !text.is_empty(), edges) {
+            (true, _) => " ".to_string(),
+            (false, (lead, trail)) => format!(
+                "{}{collapsed}{}",
+                if lead { " " } else { "" },
+                if trail { " " } else { "" }
+            ),
+        };
+        self.spans.push(Span::styled(text, style));
     }
 
     fn rule(&mut self) {
@@ -465,10 +521,7 @@ impl<'t> Builder<'t> {
 }
 
 fn list_marker_width(list: &ListState) -> usize {
-    match list.next {
-        Some(_) => list.number_width.max(2) + 1,
-        None => 2,
-    }
+    list.marker_width
 }
 
 /// `color` at `alpha` over `under`.
@@ -488,6 +541,7 @@ fn tint(color: Color, under: Color, alpha: f64) -> Color {
 pub fn render(markdown: &str, width: u16, theme: &Theme) -> Vec<Line<'static>> {
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     let mut builder = Builder::new(theme, width);
+    builder.list_items = list_item_counts(markdown, options);
     for event in Parser::new_ext(markdown, options) {
         match event {
             Event::Start(tag) => builder.start(tag),
@@ -506,7 +560,39 @@ pub fn render(markdown: &str, width: u16, theme: &Theme) -> Vec<Line<'static>> {
         }
     }
     builder.flush_text(LineAlignment::Left);
+    // The last block's bottom margin is part of the Markdown's height in Textual.
+    if !builder.out.is_empty() {
+        for _ in 0..builder.pending_gap {
+            let line = builder.decorate_at(Line::default(), builder.gap_depth);
+            builder.out.push(line);
+        }
+    }
     builder.out
+}
+
+/// The number of items in each list, in the order the lists start. A marker's
+/// width depends on the last number, which a single pass has not seen yet.
+fn list_item_counts(markdown: &str, options: Options) -> Vec<usize> {
+    let mut counts = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    for event in Parser::new_ext(markdown, options) {
+        match event {
+            Event::Start(Tag::List(_)) => {
+                counts.push(0);
+                open.push(counts.len() - 1);
+            }
+            Event::End(TagEnd::List(_)) => {
+                open.pop();
+            }
+            Event::Start(Tag::Item) => {
+                if let Some(at) = open.last() {
+                    counts[*at] += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    counts
 }
 
 /// Textual's `resolve` for a grid with `expand` and `shrink`: grow the columns
@@ -604,12 +690,29 @@ mod tests {
                 "  three four",
                 "• five",
                 "",
-                "After."
+                "After.",
+                ""
             ]
         );
+        // Textual: `"{n}. ".rjust(len("{last}. ") + 1)`, so a lead space, two from 10.
         let numbered = render("1. a\n2. b", 20, &theme);
-        assert_eq!(plain(&numbered), ["1. a", "2. b"]);
+        assert_eq!(plain(&numbered), [" 1. a", " 2. b", ""]);
+        let long: String = (1..=11).map(|n| format!("{n}. x\n")).collect();
+        let long = plain(&render(&long, 20, &theme));
+        assert_eq!((long[0].as_str(), long[10].as_str()), ("  1. x", " 11. x"));
         let cjk = render("### 已結案議題\n\n本集由主持人", 8, &theme);
-        assert_eq!(plain(&cjk), ["", "已結案議", "題", "", "本集由主", "持人"]);
+        assert_eq!(
+            plain(&cjk),
+            ["", "已結案議", "題", "", "本集由主", "持人", ""]
+        );
+    }
+
+    #[test]
+    fn the_height_counts_the_last_block_margin_as_textual_does() {
+        // Textual 40 columns wide: this document is 17 rows, the last paragraph's margin included.
+        let theme = Theme::load("textual-dark");
+        let markdown = "# Title\n\nPara one\n\n- a\n- b\n\n> quote\n\n```\ncode\n```\n\nEnd";
+        assert_eq!(render(markdown, 36, &theme).len(), 17);
+        assert!(render("", 36, &theme).is_empty());
     }
 }

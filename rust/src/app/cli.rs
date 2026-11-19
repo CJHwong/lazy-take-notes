@@ -192,8 +192,16 @@ fn transcribe_tui(
     audio_file: Option<&str>,
     options: &SessionOptions,
 ) -> Result<i32, String> {
-    let Some(audio_file) = audio_file else {
-        return Ok(not_ported("the file picker"));
+    let picked;
+    let audio_file = match audio_file {
+        Some(audio_file) => audio_file,
+        None => match crate::app::tui_run::pick_file()? {
+            Some(path) => {
+                picked = path.display().to_string();
+                picked.as_str()
+            }
+            None => return Ok(0),
+        },
     };
     if !Path::new(audio_file).is_file() {
         let quoted = py_repr_json(&serde_json::Value::String(audio_file.into()));
