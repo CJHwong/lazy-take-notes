@@ -83,6 +83,21 @@ impl TextArea {
             .join("\n")
     }
 
+    /// Replace the text; the cursor goes to the start, as `TextArea.text = ...` does.
+    pub fn set_text(&mut self, text: &str) {
+        self.lines = text
+            .split('\n')
+            .map(|line| line.chars().collect())
+            .collect();
+        self.row = 0;
+        self.column = 0;
+        self.scroll = 0;
+    }
+
+    pub fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
     fn line(&self) -> &Vec<char> {
         &self.lines[self.row]
     }
@@ -266,7 +281,10 @@ impl TextArea {
         let outside = theme.color("background");
         let width = usize::from(area.width - 2);
         let edges = crate::tui::widgets::tall_edges(border, surface, outside);
-        let title_text = format!(" {title} ");
+        let title_text = match title.is_empty() {
+            true => String::new(),
+            false => format!(" {title} "),
+        };
         let title_cells = title_text.chars().count().min(width.saturating_sub(1));
         let top = Line::from(vec![
             Span::styled("▊", edges.left),
@@ -315,9 +333,10 @@ impl TextArea {
         let text_style = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(theme.color("surface"));
-        let line_style = match focused {
-            true => text_style.bg(theme.on("boost", "surface")),
-            false => text_style,
+        // Textual marks the cursor line of an editable area, focused or not.
+        let line_style = match self.read_only {
+            false => text_style.bg(theme.on("boost", "surface")),
+            true => text_style,
         };
         let cursor_style = Style::default()
             .fg(theme.color("input-cursor-foreground"))

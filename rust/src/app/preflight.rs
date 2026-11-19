@@ -76,7 +76,7 @@ pub struct Check {
 }
 
 impl Check {
-    fn new(key: &'static str, title: &'static str, overridable: bool) -> Self {
+    pub fn new(key: &'static str, title: &'static str, overridable: bool) -> Self {
         Self {
             key,
             title,

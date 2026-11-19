@@ -224,13 +224,27 @@ pub fn draw_scrollbar(
     height: usize,
     theme: &Theme,
 ) {
+    draw_scrollbar_columns(frame, area, 1, offset, rows, height, theme);
+}
+
+/// A vertical scrollbar `columns` wide at the right edge of `area`
+/// (`scrollbar-size-vertical`; Textual's default is 2).
+pub fn draw_scrollbar_columns(
+    frame: &mut Frame,
+    area: Rect,
+    columns: u16,
+    offset: usize,
+    rows: usize,
+    height: usize,
+    theme: &Theme,
+) {
     let size = usize::from(area.height);
     if size == 0 || area.width == 0 {
         return;
     }
     let back = theme.color("scrollbar-background");
     let bar = theme.color("scrollbar");
-    let x = area.right() - 1;
+    let first_x = area.right() - columns.min(area.width);
     let mut cells: Vec<(&str, Style)> = vec![(" ", Style::default().bg(back)); size];
     if height > 0 && rows > 0 && rows != size && rows > height {
         let len_bars = VERTICAL_BARS.len();
@@ -260,9 +274,11 @@ pub fn draw_scrollbar(
     }
     let buffer = frame.buffer_mut();
     for (row, (symbol, style)) in cells.into_iter().enumerate() {
-        if let Some(cell) = buffer.cell_mut((x, area.y + row as u16)) {
-            cell.set_symbol(symbol);
-            cell.set_style(style);
+        for x in first_x..area.right() {
+            if let Some(cell) = buffer.cell_mut((x, area.y + row as u16)) {
+                cell.set_symbol(symbol);
+                cell.set_style(style);
+            }
         }
     }
 }
