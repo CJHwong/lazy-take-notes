@@ -746,6 +746,62 @@ class TestAFailedRun:
 
         assert (out_dir / 'recording.wav').exists()
 
+    def test_an_error_drops_a_folder_with_only_the_status_and_its_debug_log(self, tmp_path, monkeypatch, capsys):
+        # A debug log is no record to recover: stderr already has the error, and the
+        # same file run again writes the log again.
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+        config = build_app_config({'output': {'save_debug_log': True}})
+
+        with pytest.raises(SystemExit) as exited:
+            hl_module()._run(out_dir, config, self._session(st.ERROR), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert exited.value.code == 1
+        assert not out_dir.exists()
+        captured = capsys.readouterr()
+        assert not captured.out
+        assert f'Removed {out_dir}: the run saved nothing.' in captured.err
+
+    def test_an_error_keeps_a_folder_whose_debug_log_sits_next_to_a_transcript(self, tmp_path):
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+        (out_dir / 'transcript.txt').write_text('[00:00:01] hello\n')
+        config = build_app_config({'output': {'save_debug_log': True}})
+
+        with pytest.raises(SystemExit):
+            hl_module()._run(out_dir, config, self._session(st.ERROR), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert (out_dir / 'debug.log').exists()
+        assert (out_dir / 'transcript.txt').exists()
+
+    def test_a_folder_that_cannot_be_removed_is_kept_and_printed(self, tmp_path, monkeypatch, capsys):
+        self._quiet_logging(monkeypatch)
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+
+        def refuse(_self):
+            raise PermissionError('read-only volume')
+
+        monkeypatch.setattr(Path, 'rmdir', refuse)
+        with pytest.raises(SystemExit) as exited:
+            hl_module()._run(out_dir, build_app_config({}), self._session(st.ERROR), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert exited.value.code == 1
+        assert capsys.readouterr().out.strip() == str(out_dir)
+
+    def test_a_clean_stop_with_a_debug_log_keeps_its_folder(self, tmp_path):
+        out_dir = tmp_path / 'session'
+        out_dir.mkdir()
+        (out_dir / '.status.json').write_text('{}')
+        config = build_app_config({'output': {'save_debug_log': True}})
+
+        hl_module()._run(out_dir, config, self._session(st.STOPPED), drop_if_empty=True)  # noqa: SLF001 -- testing module helper
+
+        assert (out_dir / 'debug.log').exists()
+
     def test_a_clean_stop_exits_normally(self, tmp_path, monkeypatch):
         self._quiet_logging(monkeypatch)
         hl_module()._run(tmp_path, build_app_config({}), self._session(st.STOPPED), drop_if_empty=True)  # noqa: SLF001 -- testing module helper

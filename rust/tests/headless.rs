@@ -11,7 +11,8 @@ use lazy_take_notes::adapters::session_controller::SessionController;
 use lazy_take_notes::adapters::session_status::read_status;
 use lazy_take_notes::app::events::{Event, WorkerState};
 use lazy_take_notes::app::headless::{
-    HeadlessSession, Launcher, StatusWriter, banner_lines, heartbeat_line, summary_lines,
+    HeadlessSession, Launcher, StatusWriter, banner_lines, drop_empty_session, heartbeat_line,
+    summary_lines,
 };
 use lazy_take_notes::config::build_app_config;
 use lazy_take_notes::domain::session_status::SessionStatus;
@@ -356,4 +357,57 @@ fn the_fixed_lines_read_like_python() {
             "  error:      boom"
         ]
     );
+}
+
+// --- A failed run with nothing to recover (TestAFailedRun) ---
+
+fn session_dir(files: &[&str]) -> (tempfile::TempDir, std::path::PathBuf) {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("session");
+    std::fs::create_dir(&dir).unwrap();
+    for name in files {
+        std::fs::write(dir.join(name), "x").unwrap();
+    }
+    (root, dir)
+}
+
+#[test]
+fn a_folder_with_only_the_status_is_dropped() {
+    let (_root, dir) = session_dir(&[".status.json"]);
+    assert!(drop_empty_session(&dir));
+    assert!(!dir.exists());
+}
+
+#[test]
+fn a_folder_with_only_the_status_and_its_debug_log_is_dropped() {
+    // stderr already has the error, and the same file run again writes the log again.
+    let (_root, dir) = session_dir(&[".status.json", "debug.log"]);
+    assert!(drop_empty_session(&dir));
+    assert!(!dir.exists());
+}
+
+#[test]
+fn a_folder_whose_debug_log_sits_next_to_a_transcript_is_kept() {
+    let (_root, dir) = session_dir(&[".status.json", "debug.log", "transcript.txt"]);
+    assert!(!drop_empty_session(&dir));
+    assert!(dir.join("debug.log").exists());
+    assert!(dir.join("transcript.txt").exists());
+}
+
+#[test]
+fn a_folder_without_its_status_file_is_kept() {
+    let (_root, dir) = session_dir(&["debug.log"]);
+    assert!(!drop_empty_session(&dir));
+    assert!(dir.join("debug.log").exists());
+}
+
+#[test]
+fn a_folder_that_cannot_be_removed_is_kept() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_root, dir) = session_dir(&[".status.json"]);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let dropped = drop_empty_session(&dir);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!dropped);
+    assert!(dir.join(".status.json").exists());
 }

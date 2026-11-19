@@ -20,7 +20,7 @@ use crate::adapters::audio::mixed::MixedAudioSource;
 use crate::adapters::session_controller::SessionController;
 use crate::adapters::session_status::{STATUS_FILE, write_status};
 use crate::app::events::{Cancel, Event, Poster, WorkerState};
-use crate::domain::session_files::{NOTES, TRANSCRIPT};
+use crate::domain::session_files::{DEBUG_LOG, NOTES, TRANSCRIPT};
 use crate::domain::session_status::{self as st, SessionStatus};
 use crate::ports::audio_source::AudioSource as _; // set_mic_muted on the mixer
 
@@ -520,14 +520,29 @@ impl Stopper {
     }
 }
 
-/// The session folder holds nothing but the status file.
-pub fn holds_only_status(out_dir: &Path) -> bool {
+/// Remove a session folder that holds only the status file and the debug log.
+/// The debug log is no record to recover: stderr already has the error, and
+/// the same file run again writes the log again. Returns whether the folder is
+/// gone. A folder that cannot be removed is kept.
+pub fn drop_empty_session(out_dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(out_dir) else {
         return false;
     };
-    let names: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|e| e.file_name())
-        .collect();
-    names.len() == 1 && names[0] == STATUS_FILE
+    let files: Vec<PathBuf> = entries.filter_map(Result::ok).map(|e| e.path()).collect();
+    let named = |path: &PathBuf, name: &str| path.file_name().is_some_and(|n| n == name);
+    let has_status = files.iter().any(|f| named(f, STATUS_FILE));
+    let only_status_and_log = files
+        .iter()
+        .all(|f| named(f, STATUS_FILE) || named(f, DEBUG_LOG.name));
+    if !(has_status && only_status_and_log) {
+        return false;
+    }
+    let removed = files
+        .iter()
+        .try_for_each(std::fs::remove_file)
+        .and_then(|()| std::fs::remove_dir(out_dir));
+    if let Err(e) = &removed {
+        warn!(target: "ltn.headless", "could not remove {}: {e}", out_dir.display());
+    }
+    removed.is_ok()
 }
