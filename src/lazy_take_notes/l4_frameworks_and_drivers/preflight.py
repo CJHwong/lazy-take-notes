@@ -58,6 +58,11 @@ _MIC_PERMISSION_FIX = (
 _SYSTEM_PERMISSION_FIX = (
     'Allow this app in System Settings > Privacy & Security > Screen & System Audio Recording, then press Retry.'
 )
+# The tap opens before macOS asks for any permission, so a failed open means the
+# helper is missing or cannot start.
+_SYSTEM_HELPER_FIX = (
+    'Reinstall lazy-take-notes to restore its coreaudio-tap helper, or build it with: bash scripts/build_native.sh'
+)
 
 
 @dataclass
@@ -287,9 +292,10 @@ def _check_system_audio(check: Check, plan: PreflightPlan, update: Callable[[str
     )
 
     _mic, system = DependencyContainer.build_audio_sources(plan.config.transcription.input_device)
-    check.fix = _SYSTEM_PERMISSION_FIX if sys.platform == 'darwin' else ''
+    check.fix = _SYSTEM_HELPER_FIX if sys.platform == 'darwin' else ''
     update('Starting capture')
     system.open(SAMPLE_RATE, 1)
+    check.fix = _SYSTEM_PERMISSION_FIX if sys.platform == 'darwin' else ''
     try:
         _verify_system_capture(check, system, update)
     finally:

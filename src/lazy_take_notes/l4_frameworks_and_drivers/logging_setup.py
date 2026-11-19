@@ -22,6 +22,11 @@ def _detach_previous_session(root: logging.Logger) -> None:
             handler.close()
 
 
+def close_file_logging() -> None:
+    """Close the session's log file, so the session folder can be removed."""
+    _detach_previous_session(logging.getLogger('ltn'))
+
+
 def see_debug_log() -> str:
     """' (see debug.log)' while this session writes one, else ''.
 

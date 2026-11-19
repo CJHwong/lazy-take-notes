@@ -173,6 +173,16 @@ class TestBlocking:
         assert report.get('system').status == FAIL
         assert 'Screen & System Audio Recording' in report.get('system').fix
 
+    def test_a_missing_tap_helper_says_to_restore_it_not_to_grant_permission(self, plan):
+        class NoHelper(LiveSource):
+            def open(self, sample_rate, channels):
+                raise RuntimeError('Native binary not found: /nowhere/coreaudio-tap\nRun: bash scripts/build_native.sh')
+
+        check = _run(plan, system=NoHelper()).get('system')
+        assert check.status == FAIL
+        assert 'coreaudio-tap' in check.fix
+        assert 'Privacy' not in check.fix
+
     def test_system_audio_that_misses_the_tone_blocks(self, plan):
         report = _run(plan, system=LiveSource(value=0.0))
         assert report.get('system').status == FAIL

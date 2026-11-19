@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import click
 
 from lazy_take_notes.l1_entities import session_status as st
-from lazy_take_notes.l1_entities.session_files import NOTES, TRANSCRIPT
+from lazy_take_notes.l1_entities.session_files import DEBUG_LOG, NOTES, TRANSCRIPT
 from lazy_take_notes.l1_entities.session_status import SessionStatus
 from lazy_take_notes.l3_interface_adapters.gateways.session_status import STATUS_FILE, write_status
 from lazy_take_notes.l4_frameworks_and_drivers.cli_helpers import (
@@ -463,10 +463,13 @@ def _run(out_dir: Path, config, session: HeadlessSession, *, drop_if_empty: bool
     """Run the session, print the summary, and exit 1 when it ended in an error.
 
     With *drop_if_empty*, a failed run whose folder holds only the status file
-    removes the folder: it has nothing to recover, and a script retrying a bad
-    file would otherwise leave one empty folder per try.
+    and the debug log removes the folder: it has nothing to recover, and a script
+    retrying a bad file would otherwise leave one empty folder per try. The debug
+    log goes with it. stderr already shows the error, and the same file run
+    again writes the log again.
     """
     from lazy_take_notes.l4_frameworks_and_drivers.logging_setup import (  # noqa: PLC0415 -- deferred
+        close_file_logging,
         setup_file_logging,
     )
 
@@ -475,9 +478,12 @@ def _run(out_dir: Path, config, session: HeadlessSession, *, drop_if_empty: bool
     for line in _summary_lines(out_dir, session.status):
         click.echo(line, err=True)
     failed = session.status.state == st.ERROR
-    if failed and drop_if_empty and _holds_only_status(out_dir):
-        (out_dir / STATUS_FILE).unlink()
-        out_dir.rmdir()
+    if failed and drop_if_empty and _holds_nothing_to_recover(out_dir):
+        close_file_logging()  # the open log file would keep the folder
+        dropped = _remove_session_dir(out_dir)
+    else:
+        dropped = False
+    if dropped:
         click.echo(f'Removed {out_dir}: the run saved nothing.', err=True)
     else:
         click.echo(str(out_dir))
@@ -485,8 +491,21 @@ def _run(out_dir: Path, config, session: HeadlessSession, *, drop_if_empty: bool
         sys.exit(1)
 
 
-def _holds_only_status(out_dir: Path) -> bool:
-    return [entry.name for entry in out_dir.iterdir()] == [STATUS_FILE]
+def _holds_nothing_to_recover(out_dir: Path) -> bool:
+    names = {entry.name for entry in out_dir.iterdir()}
+    return STATUS_FILE in names and names <= {STATUS_FILE, DEBUG_LOG.name}
+
+
+def _remove_session_dir(out_dir: Path) -> bool:
+    """Remove the folder and its files. A failure keeps the folder: the caller prints its path."""
+    try:
+        for entry in out_dir.iterdir():
+            entry.unlink()
+        out_dir.rmdir()
+    except OSError as exc:
+        log.warning('Could not remove %s: %s', out_dir, exc)
+        return False
+    return True
 
 
 def _emit_banner(activity: str, out_dir: Path, pid: int, *, show_mute: bool = False) -> None:
