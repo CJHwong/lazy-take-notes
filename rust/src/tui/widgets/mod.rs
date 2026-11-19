@@ -1,0 +1,94 @@
+//! Widgets shared by the screens, drawn in Textual's styles.
+
+pub mod input;
+pub mod list;
+pub mod scroll;
+pub mod status_bar;
+
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+
+use crate::tui::text::center;
+use crate::tui::theme::Theme;
+
+/// A `border: solid` box on `background`, its title at the top left. Returns the inside.
+pub fn panel(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    border: &str,
+    background: Color,
+    theme: &Theme,
+) -> Rect {
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .style(Style::default().bg(background))
+        .border_style(Style::default().fg(theme.color(border)).bg(background));
+    if !title.is_empty() {
+        // Textual draws `┌─ Title ──`: one line segment before the title.
+        block = block.title(Line::from(vec![
+            Span::styled("─", Style::default().fg(theme.color(border))),
+            Span::styled(
+                format!(" {title} "),
+                Style::default().fg(theme.color("foreground")),
+            ),
+        ]));
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    inner
+}
+
+/// A one-row bar: the header (`$primary`, bold, centered) or a footer.
+pub fn bar(
+    frame: &mut Frame,
+    area: Rect,
+    text: &str,
+    background: &str,
+    foreground: &str,
+    bold: bool,
+    theme: &Theme,
+) {
+    let mut style = Style::default()
+        .bg(theme.color(background))
+        .fg(theme.on(foreground, background));
+    if bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    frame.render_widget(Paragraph::new("").style(style), area);
+    // `padding: 0 1`, then Rich's centering.
+    let inner = Rect::new(
+        area.x + 1,
+        area.y,
+        area.width.saturating_sub(2),
+        area.height,
+    );
+    let line = center(Line::from(text.to_string()), inner.width);
+    frame.render_widget(Paragraph::new(line).style(style), inner);
+}
+
+/// `area` minus `top` rows and `bottom` rows.
+pub fn split_bars(area: Rect, top: u16, bottom: u16) -> (Rect, Rect, Rect) {
+    let top = top.min(area.height);
+    let bottom = bottom.min(area.height - top);
+    let header = Rect::new(area.x, area.y, area.width, top);
+    let body = Rect::new(area.x, area.y + top, area.width, area.height - top - bottom);
+    let footer = Rect::new(area.x, area.bottom() - bottom, area.width, bottom);
+    (header, body, footer)
+}
+
+/// A box of `width` by `height` in the middle of `area`.
+pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    )
+}

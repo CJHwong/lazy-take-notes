@@ -31,6 +31,7 @@ The two versions must work on the same data, in both directions:
 - `scripts/llm_parity.py` drives both versions' LLM clients against one failing local server and compares the shown text and the request count.
 - `scripts/whisper_parity.py` transcribes the start of a real recording in both versions the way the file worker does, with a template's hints, and compares every segment's text and times.
 - `examples/cross_check.rs record DIR SECONDS` records the real mic and system audio into a session WAV, and prints health changes and the delivered audio against wall time. `tone` measures the test tone in the tap. `mic-levels DEVICE SECONDS` reads one input device. `list-devices SECONDS` prints the input list every 0.5 s. `record DIR SECONDS DEVICE` records from a chosen input; changing that device's nominal rate mid-run tests the mic's stop and reopen. Fault runs: `kill -STOP` and `kill -9` on the tap pid, and a small `hdiutil` disk image filled, freed, with the WAV moved and the folder removed.
+- `scripts/tui_compare.sh "ARGS" KEY... snap` runs both TUIs in tmux at one size, sends the same keys, and diffs the screen text at each `snap`. `scripts/gen_bindings.py` records every Python screen's merged key table into `tests/fixtures/bindings.json`; `tests/tui_bindings.rs` checks the Rust tables against it. `scripts/gen_themes.py` writes Textual's generated theme colors into `src/tui/themes.json`.
 - `scripts/cross_check.py` compares both versions on copies of the real config, templates, sessions and model cache.
 - Each fixed bug listed in AGENTS.md gets a named Rust test.
 - Before a step is done: a real run (headless record of a call, transcribe of a saved file, Rust `view` of a session Python recorded, and the reverse).
@@ -66,3 +67,7 @@ The two versions must work on the same data, in both directions:
 11. A panic is written to `debug.log` with a backtrace. A native crash (a segfault in a C library) is not; Python's `faulthandler` wrote one.
 12. Log lines written before the session folder exists (preflight) go nowhere: `debug.log` opens with the session.
 13. `transcribe` has no subtitle replay: that came only from plugins, which are dropped.
+14. A Markdown heading wider than its panel wraps. Textual cut an H3 to one row (`width: auto`), so its end was lost.
+15. A fenced code block shows no horizontal scrollbar glyph; Textual drew one even when it had no size.
+16. An unexpected error toast reads `Unexpected error: <panic message>`. Python named the exception class (`Unexpected error: KeyError: 'x'`).
+17. No mouse: click and wheel do nothing. The terminal's own selection copies text, in place of Textual's `ctrl+c` on selected text.
