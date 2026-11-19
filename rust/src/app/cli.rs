@@ -256,10 +256,8 @@ fn status(
     let loaded = load_config(config, output_dir)?;
     let base_dir = resolve_base_dir(&loaded.paths, output_dir, &loaded.config);
     let session_dir = status_command::resolve_status_dir(&base_dir, session)?;
-    for line in status_command::status_lines(&session_dir)? {
-        println!("{line}");
-    }
-    Ok(0)
+    let lines = status_command::status_lines(&session_dir)?;
+    Ok(write_stdout(&lines_text(&lines)))
 }
 
 fn base_dir(config: Option<&Path>, output_dir: Option<&str>) -> Result<PathBuf, String> {
@@ -274,8 +272,9 @@ fn ls(
     show_all: bool,
 ) -> Result<i32, String> {
     let listing = session_commands::list(&base_dir(config, output_dir)?, as_json, show_all);
-    for line in listing.stdout {
-        println!("{line}");
+    let code = write_stdout(&lines_text(&listing.stdout));
+    if code != 0 {
+        return Ok(code);
     }
     if let Some(note) = listing.stderr {
         eprintln!("{note}");
@@ -290,8 +289,29 @@ fn print_text(
     session: Option<&str>,
     read: fn(&Path, Option<&str>) -> Result<String, String>,
 ) -> Result<i32, String> {
-    print!("{}", read(&base_dir(config, output_dir)?, session)?);
-    Ok(0)
+    Ok(write_stdout(&read(
+        &base_dir(config, output_dir)?,
+        session,
+    )?))
+}
+
+fn lines_text(lines: &[String]) -> String {
+    lines.iter().map(|line| format!("{line}\n")).collect()
+}
+
+/// Write to stdout. A reader that went away (`| head`) ends the command with
+/// exit 1 and no message, as click does; `print!` would panic there.
+fn write_stdout(text: &str) -> i32 {
+    use std::io::Write;
+    let mut stdout = std::io::stdout().lock();
+    match stdout
+        .write_all(text.as_bytes())
+        .and_then(|()| stdout.flush())
+    {
+        Ok(()) => 0,
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => 1,
+        Err(e) => fail(&e.to_string()),
+    }
 }
 
 fn view(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> {
