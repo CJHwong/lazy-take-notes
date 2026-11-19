@@ -72,7 +72,7 @@ impl ScrollView {
         Self {
             content: Content::Markdown(String::new()),
             auto_scroll: false,
-            padding: 2,
+            padding: 1,
             always_bar: false,
             ..Self::log()
         }
@@ -210,7 +210,9 @@ impl ScrollView {
             .collect();
         frame.render_widget(Paragraph::new(shown).style(style), text_area);
         if self.rows > height {
-            draw_scrollbar(frame, region, self.offset, self.rows, height, theme);
+            // On the right edge, outside the side padding.
+            let strip = Rect::new(region.x, region.y, area.right() - region.x, region.height);
+            draw_scrollbar(frame, strip, self.offset, self.rows, height, theme);
         }
     }
 }
@@ -243,7 +245,7 @@ pub fn draw_scrollbar_columns(
     if size == 0 || area.width == 0 {
         return;
     }
-    let track = Style::default().fg(theme.color("border-blurred"));
+    let track = Style::default().fg(crate::tui::widgets::quiet_line(theme));
     let thumb = Style::default().fg(theme.color("primary"));
     let first_x = area.right() - columns.min(area.width);
     let mut cells: Vec<(&str, Style)> = vec![("│", track); size];

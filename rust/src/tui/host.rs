@@ -115,6 +115,16 @@ pub struct MouseInput {
 }
 
 impl MouseInput {
+    /// The key a wheel step stands for: up or down.
+    pub fn wheel_key(&self) -> Option<(KeyEvent, &'static str)> {
+        let (code, name) = match self.kind {
+            MouseKind::WheelUp => (KeyCode::Up, "up"),
+            MouseKind::WheelDown => (KeyCode::Down, "down"),
+            MouseKind::Click => return None,
+        };
+        Some((KeyEvent::new(code, KeyModifiers::NONE), name))
+    }
+
     /// The target's index when the pointer is on the widget named `key`.
     pub fn on(&self, key: &str) -> Option<usize> {
         self.target
@@ -364,12 +374,10 @@ pub trait Screen {
     /// A click or a wheel step. Unless a screen handles it, the wheel moves as
     /// up and down do, and a click does nothing.
     fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
-        let (code, name) = match input.kind {
-            MouseKind::WheelUp => (KeyCode::Up, "up"),
-            MouseKind::WheelDown => (KeyCode::Down, "down"),
-            MouseKind::Click => return Action::None,
-        };
-        self.key(&KeyEvent::new(code, KeyModifiers::NONE), name, ctx)
+        match input.wheel_key() {
+            Some((key, name)) => self.key(&key, name, ctx),
+            None => Action::None,
+        }
     }
 
     /// A worker event or task result. Give it back when this screen does not own it.
@@ -697,11 +705,22 @@ impl Host {
             return;
         }
         let top = self.ids.last().copied().unwrap_or(0);
+        let target = self.ctx.target_at(top, column, row);
+        // A click on a `[key] label` hint presses the key.
+        if kind == MouseKind::Click
+            && let Some(key) = target
+                .as_ref()
+                .and_then(|target| target.key.strip_prefix("key:"))
+                .and_then(crate::tui::keys::hint_key)
+        {
+            self.key(&key);
+            return;
+        }
         let input = MouseInput {
             kind,
             column,
             row,
-            target: self.ctx.target_at(top, column, row),
+            target,
         };
         let action = self.guarded(|screen, ctx| screen.mouse(&input, ctx));
         self.apply(action);

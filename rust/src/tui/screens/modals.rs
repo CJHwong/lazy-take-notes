@@ -12,14 +12,14 @@ use ratatui::text::Line;
 use ratatui::widgets::Paragraph;
 
 use crate::app::events::{Event, WorkerState};
-use crate::tui::host::{Action, Ctx, Msg, Screen, Severity};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Msg, Screen, Severity};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::system::copy_to_clipboard;
 use crate::tui::text::center;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::scroll::ScrollView;
-use crate::tui::widgets::{centered, thick_box};
+use crate::tui::widgets::{centered, dialog_box, thick_box};
 
 pub const HELP_BINDINGS: [Binding; 6] = [
     SCREEN_BASE[0],
@@ -219,30 +219,16 @@ impl Screen for MarkdownModal {
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(surface);
-        let title_style = match (&self.kind, self.is_error) {
-            (Kind::Notice { color, .. }, _) => text.fg(theme.on(color, "surface")),
-            (_, true) => text.fg(theme.on("error", "surface")),
-            (_, false) => text,
-        }
-        .add_modifier(Modifier::BOLD);
-        // The title and its margin scroll with the body: all three sit in the VerticalScroll.
-        self.body.prefix = vec![
-            Line::styled(self.title.clone(), title_style),
-            Line::default(),
-        ];
+        // The title sits in the border; the body and the docked hint fill the box.
+        self.body.prefix = Vec::new();
         let width = percent_of(area.width, self.width_percent, self.max_width);
-        // Border and padding around the content and the docked hint.
-        let content_rows = self.body.content_rows(width.saturating_sub(2 + 4), theme) as u16;
-        let wanted = 2 + 2 + content_rows;
+        let content_rows = self.body.content_rows(width.saturating_sub(2 + 2), theme) as u16;
+        let wanted = 2 + content_rows;
         let height = wanted.min(percent_of(area.height, self.max_height_percent, u16::MAX));
         let outer = centered(area, width, height);
-        let inner = thick_box(frame, outer, self.border_var(), "surface", theme);
-        let padded = Rect::new(
-            inner.x + 2,
-            inner.y + 1,
-            inner.width.saturating_sub(4),
-            inner.height.saturating_sub(2),
-        );
+        let inner = dialog_box(frame, outer, &self.title, self.border_var(), "surface", theme);
+        ctx.hit(inner, "body", 0);
+        let padded = inner;
         if padded.height < 2 {
             return;
         }
@@ -261,6 +247,20 @@ impl Screen for MarkdownModal {
             self.hint,
             text.fg(theme.on("text-muted", "surface")),
         );
+    }
+
+    /// The wheel scrolls the body; a click on a notice closes it, as a key does.
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        match input.kind {
+            MouseKind::WheelUp => self.body.scroll_by(-1),
+            MouseKind::WheelDown => self.body.scroll_by(1),
+            MouseKind::Click => {
+                if matches!(self.kind, Kind::Notice { .. }) && input.on("body").is_some() {
+                    return Action::Pop(None);
+                }
+            }
+        }
+        Action::None
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {
@@ -319,6 +319,8 @@ impl LabelModal {
         input.parent_background = Some("surface");
         input.set_value(current);
         input.select_all();
+        // A darker row inside the dialog marks the field.
+        input.compact = Some(("background", "background"));
         Self {
             title: title.into(),
             input,
@@ -333,34 +335,24 @@ impl LabelModal {
 impl Screen for LabelModal {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
-        // Border, padding, title, margin, the 3-row input, margin, hint.
-        let outer = centered(area, 60, 2 + 2 + 1 + 1 + 3 + 1 + 1);
-        let inner = thick_box(frame, outer, "primary", "surface", theme);
-        let padded = Rect::new(
-            inner.x + 2,
-            inner.y + 1,
-            inner.width.saturating_sub(4),
-            inner.height.saturating_sub(2),
-        );
-        if padded.height < 7 {
+        // The title in the border, the input row, a blank row, the hint.
+        let outer = centered(area, 60, 2 + 3);
+        let inner = dialog_box(frame, outer, &self.title, "primary", "surface", theme);
+        if inner.height < 3 {
             return;
         }
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(theme.color("surface"));
-        frame.render_widget(
-            Paragraph::new(self.title.as_str()).style(text.add_modifier(Modifier::BOLD)),
-            Rect::new(padded.x, padded.y, padded.width, 1),
-        );
-        self.input.render(
+        self.input.render_compact(
             frame,
-            Rect::new(padded.x, padded.y + 2, padded.width, 3),
+            Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), 1),
             true,
             theme,
         );
         centered_row(
             frame,
-            Rect::new(padded.x, padded.y + 6, padded.width, 1),
+            Rect::new(inner.x + 1, inner.y + 2, inner.width.saturating_sub(2), 1),
             "Press Enter to confirm, or Escape to cancel.",
             text.fg(theme.on("text-muted", "surface")),
         );
@@ -409,12 +401,12 @@ impl DownloadModal {
         let widest = crate::tui::text::str_width(&self.status)
             .max(crate::tui::text::str_width(&self.model_name)) as u16;
         let width = (widest + 6 + 2).clamp(40, 60);
-        let outer = centered(area, width, 2 + 2 + 3);
+        let outer = centered(area, width, 2 + 3);
         let inner = thick_box(frame, outer, "primary", "surface", theme);
-        if inner.height < 5 {
+        if inner.height < 3 {
             return;
         }
-        let padded = Rect::new(inner.x + 3, inner.y + 1, inner.width.saturating_sub(6), 3);
+        let padded = Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), 3);
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(theme.color("surface"));

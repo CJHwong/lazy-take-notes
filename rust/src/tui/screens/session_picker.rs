@@ -10,7 +10,7 @@ use ratatui::text::{Line, Span};
 
 use crate::adapters::session_reader::{SessionInfo, list_sessions};
 use crate::domain::session_files::{NOTES, TRANSCRIPT};
-use crate::tui::host::{Action, Ctx, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, Screen};
 use crate::tui::screens::picker::{Picker, PickerKey};
 
 /// The file text, or a Markdown note when it cannot be read.
@@ -161,7 +161,7 @@ impl Screen for SessionPicker {
             &header,
             "[Enter] Select  [↑/↓] Navigate  [Esc] Cancel",
             &rows,
-            &ctx.theme,
+            ctx,
         );
     }
 
@@ -172,6 +172,11 @@ impl Screen for SessionPicker {
 
     fn paste(&mut self, text: &str, _ctx: &mut Ctx) -> Action {
         let outcome = self.picker.paste(text);
+        self.after(outcome)
+    }
+
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        let outcome = self.picker.mouse(input);
         self.after(outcome)
     }
 }

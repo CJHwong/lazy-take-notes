@@ -58,6 +58,26 @@ pub fn action_for(table: &[Binding], key: &str) -> Option<&'static str> {
 }
 
 /// A key press by Textual's name, or None for a release or repeat-only event.
+/// The key a status bar hint names, as in `[Esc] Cancel` or `[1] Summary`.
+/// None for a hint that names no single key (`[↑/↓] Navigate`).
+pub fn hint_key(hint: &str) -> Option<KeyEvent> {
+    let lower = hint.to_lowercase();
+    let code = match lower.as_str() {
+        "esc" | "escape" => KeyCode::Esc,
+        "enter" => KeyCode::Enter,
+        "tab" => KeyCode::Tab,
+        "space" => KeyCode::Char(' '),
+        _ => {
+            let mut chars = lower.chars();
+            match (chars.next(), chars.next()) {
+                (Some(character), None) if !character.is_whitespace() => KeyCode::Char(character),
+                _ => return None,
+            }
+        }
+    };
+    Some(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
 pub fn key_name(event: &KeyEvent) -> Option<String> {
     if event.kind == KeyEventKind::Release {
         return None;

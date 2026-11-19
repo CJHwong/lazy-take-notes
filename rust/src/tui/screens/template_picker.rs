@@ -14,12 +14,12 @@ use tracing::warn;
 
 use crate::adapters::templates::YamlTemplates;
 use crate::domain::template::SessionTemplate;
-use crate::tui::host::{Action, Ctx, Msg, Payload, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Msg, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::modals::MarkdownModal;
 use crate::tui::screens::picker::{Picker, PickerKey};
 use crate::tui::text::center;
-use crate::tui::widgets::button::{Variant, draw_button};
+use crate::tui::widgets::button::{Variant, button_width, draw_button};
 use crate::tui::widgets::{centered, thick_box};
 
 /// What the picker closed with.
@@ -403,7 +403,7 @@ impl Screen for TemplatePicker {
             &header,
             "[Enter] Select  [↑/↓] Navigate  [n] New  [e] Edit  [a] Edit with AI  [x] Delete  [Esc] Cancel",
             &rows,
-            &ctx.theme,
+            ctx,
         );
     }
 
@@ -414,6 +414,11 @@ impl Screen for TemplatePicker {
 
     fn paste(&mut self, text: &str, ctx: &mut Ctx) -> Action {
         let outcome = self.picker.paste(text);
+        self.after(outcome, "", ctx)
+    }
+
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        let outcome = self.picker.mouse(input);
         self.after(outcome, "", ctx)
     }
 
@@ -504,38 +509,35 @@ impl Confirm {
 impl Screen for Confirm {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
-        // Border, padding, the message, its margin, then two buttons stacked in a `Center`.
-        let outer = centered(area, 50, 2 + 2 + 1 + 1 + 3 + 3);
+        // The message, a blank row, then No and Yes side by side.
+        let outer = centered(area, 50, 2 + 3);
         let inner = thick_box(frame, outer, self.border, "surface", theme);
-        if inner.height < 10 || inner.width < 20 {
+        if inner.height < 3 || inner.width < 20 {
             return;
         }
-        let padded = Rect::new(inner.x + 2, inner.y + 1, inner.width - 4, inner.height - 2);
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(theme.color("surface"));
         frame.render_widget(
-            Paragraph::new(center(self.message.clone(), padded.width)).style(text),
-            Rect::new(padded.x, padded.y, padded.width, 1),
+            Paragraph::new(center(self.message.clone(), inner.width)).style(text),
+            Rect::new(inner.x, inner.y, inner.width, 1),
         );
-        // Each button is 16 wide (its `min-width`) with `margin: 0 1`.
-        let x = padded.x + padded.width.saturating_sub(18) / 2 + 1;
-        draw_button(
-            frame,
-            Rect::new(x, padded.y + 2, 16, 3),
-            "No (n)",
-            Variant::Default,
-            !self.yes_focused,
-            theme,
-        );
-        draw_button(
-            frame,
-            Rect::new(x, padded.y + 5, 16, 3),
-            "Yes (y)",
-            self.yes,
-            self.yes_focused,
-            theme,
-        );
+        let no_width = button_width("No (n)");
+        let yes_width = button_width("Yes (y)");
+        let x = inner.x + inner.width.saturating_sub(no_width + 2 + yes_width) / 2;
+        let no = Rect::new(x, inner.y + 2, no_width, 1);
+        let yes = Rect::new(x + no_width + 2, inner.y + 2, yes_width, 1);
+        draw_button(frame, no, "No (n)", Variant::Default, !self.yes_focused, theme);
+        draw_button(frame, yes, "Yes (y)", self.yes, self.yes_focused, theme);
+        ctx.hit(no, "button", 0);
+        ctx.hit(yes, "button", 1);
+    }
+
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        match (input.kind, input.on("button")) {
+            (MouseKind::Click, Some(index)) => Self::answer(index == 1),
+            _ => Action::None,
+        }
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, _ctx: &mut Ctx) -> Action {
@@ -630,6 +632,35 @@ mod tests {
         assert!(matches!(press(&mut screen, "x", ctx), Action::None));
         assert_eq!(ctx.toast_texts(), ["Only user templates can be deleted"]);
         assert!(screen.picker.search.value().is_empty());
+    }
+
+    #[test]
+    fn a_click_highlights_a_template_and_a_second_click_picks_it() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let root = tempfile::tempdir().unwrap();
+        let runtime = runtime();
+        let mut host = crate::tui::host::Host::new("textual-dark", runtime.handle().clone());
+        host.push(Box::new(picker(root.path())));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 6,
+            row: 7,
+            modifiers: KeyModifiers::NONE,
+        };
+        let row_at = |terminal: &ratatui::Terminal<ratatui::backend::TestBackend>| -> String {
+            let buffer = terminal.backend().buffer();
+            (0..30).map(|x| buffer[(x, 7)].symbol().to_string()).collect()
+        };
+        terminal.draw(|frame| host.draw(frame)).unwrap();
+        assert!(!row_at(&terminal).contains('▶'), "{}", row_at(&terminal));
+        host.mouse(&click);
+        terminal.draw(|frame| host.draw(frame)).unwrap();
+        assert!(row_at(&terminal).contains('▶'), "{}", row_at(&terminal));
+        assert!(!host.finished());
+        host.mouse(&click);
+        assert!(host.finished());
     }
 
     #[test]
