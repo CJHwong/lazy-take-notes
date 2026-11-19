@@ -7,7 +7,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::tui::host::{Action, Ctx, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
 use crate::tui::system::saved_theme;
 use crate::tui::widgets::list::ListCursor;
@@ -152,6 +152,7 @@ impl Screen for WelcomePicker {
             false,
             theme,
         );
+        crate::tui::widgets::hint_targets(frame, footer, ctx);
         // `align: center middle`: the banner (with its top padding) and the list
         // (with `margin: 1 2`) sit together in the middle of the rest.
         let body = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
@@ -175,9 +176,16 @@ impl Screen for WelcomePicker {
         if list_y + list_height > body.bottom() || body.width < 6 {
             return;
         }
-        let list_area = Rect::new(body.x + 2, list_y, body.width - 4, list_height);
-        let surface = theme.tinted("surface", "foreground", 0.05);
+        let list_width = (body.width - 4).min(64);
+        let list_area = Rect::new(
+            body.x + (body.width - list_width) / 2,
+            list_y,
+            list_width,
+            list_height,
+        );
+        let surface = background;
         let inner = panel(frame, list_area, "", "primary", surface, theme);
+        ctx.hit(inner, "list", 0);
         let dim = Style::default().add_modifier(Modifier::DIM);
         let rows: Vec<Line<'static>> = MODES
             .iter()
@@ -190,6 +198,20 @@ impl Screen for WelcomePicker {
             })
             .collect();
         self.list.render(frame, inner, &rows, true, surface, theme);
+    }
+
+    /// A click opens the mode under the pointer, as a menu does.
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        match input.kind {
+            MouseKind::Click if input.on("list").is_some() => match self.list.click(input.row) {
+                Some((index, _)) => Action::Pop(Some(Box::new(ChosenMode(MODES[index].0)))),
+                None => Action::None,
+            },
+            _ => match input.wheel_key() {
+                Some((key, name)) => self.key(&key, name, ctx),
+                None => Action::None,
+            },
+        }
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, _ctx: &mut Ctx) -> Action {

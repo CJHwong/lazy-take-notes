@@ -9,7 +9,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::adapters::os_error::OsError;
-use crate::tui::host::{Action, Ctx, Msg, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, Msg, Screen};
 use crate::tui::keys::{Binding, bind};
 use crate::tui::screens::picker::{PICKER_BINDINGS, Picker, PickerKey};
 
@@ -361,7 +361,7 @@ impl Screen for FilePicker {
             &header,
             "[Enter] Open/Select  [Left/Backspace] Parent  [Right] Enter dir  [↑/↓] Navigate  [Esc] Cancel",
             &rows,
-            &ctx.theme,
+            ctx,
         );
     }
 
@@ -372,6 +372,11 @@ impl Screen for FilePicker {
 
     fn paste(&mut self, text: &str, ctx: &mut Ctx) -> Action {
         let outcome = self.picker.paste(text);
+        self.after(outcome, "", ctx)
+    }
+
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        let outcome = self.picker.mouse(input);
         self.after(outcome, "", ctx)
     }
 

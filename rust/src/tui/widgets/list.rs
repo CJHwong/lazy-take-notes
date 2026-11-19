@@ -142,6 +142,15 @@ impl ListCursor {
         (!self.disabled.get(item).copied().unwrap_or(false)).then_some(item)
     }
 
+    /// A click at screen row `y`: highlight the item there. Returns it, and
+    /// whether it already had the highlight (a second click opens it).
+    pub fn click(&mut self, y: u16) -> Option<(usize, bool)> {
+        let item = self.item_at(y)?;
+        let again = self.index == Some(item);
+        self.select(item);
+        Some((item, again))
+    }
+
     /// Scroll by `rows` without moving the highlight, as the wheel does.
     pub fn scroll_by(&mut self, rows: isize) {
         self.follow = false;

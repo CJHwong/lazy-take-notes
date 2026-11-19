@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use crate::app::events::{Cancel, Event, WorkerState};
 use crate::app::headless::Launcher;
 use crate::app::logging::see_debug_log;
-use crate::tui::host::{Action, Ctx, Msg, Payload, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, Msg, Payload, Screen};
 use crate::tui::keys::{Binding, action_for, bind};
 use crate::tui::screens::session::{Mode, SESSION_BINDINGS, Session};
 
@@ -181,6 +181,11 @@ impl Screen for TranscribeScreen {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         self.session.render(frame, area, ctx);
+    }
+
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        self.session.mouse(input);
+        Action::None
     }
 
     fn key(&mut self, key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {

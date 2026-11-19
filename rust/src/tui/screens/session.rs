@@ -25,7 +25,7 @@ use crate::domain::session_files::SPEAKER_TRANSCRIPT;
 use crate::domain::speaker_turn::SpeakerTurn;
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::ports::llm::{ChatResponse, LlmError};
-use crate::tui::host::{Action, Ctx, Payload};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::modals::{DownloadModal, LabelModal, MarkdownModal};
 use crate::tui::screens::view::{
@@ -306,12 +306,14 @@ impl Session {
         // The speaker bar is `height: auto`: one row once a speaker is heard.
         let chips = self.speaker_chips();
         let bar_rows = u16::from(!chips.is_empty()).min(body.height);
+        let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
         self.transcript.render(
             frame,
-            Rect::new(body.x, body.y, left, body.height - bar_rows),
+            transcript_area,
             self.focus == Focus::Transcript,
             theme,
         );
+        ctx.hit(transcript_area, "transcript", 0);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - 1, left, 1);
             render_speaker_bar(frame, bar, &chips, theme);
@@ -331,6 +333,7 @@ impl Session {
         );
         self.digest
             .render(frame, digest_area, self.focus == Focus::Digest, theme);
+        ctx.hit(digest_area, "digest", 0);
         let context_area = Rect::new(column.x, digest_area.bottom(), column.width, context_rows);
         self.context.render(
             frame,
@@ -340,7 +343,36 @@ impl Session {
             "primary",
             theme,
         );
+        ctx.hit(context_area, "context", 0);
         self.status.render(frame, bottom, theme);
+        crate::tui::widgets::hint_targets(frame, bottom, ctx);
+    }
+
+    /// A click focuses the panel under it; the wheel scrolls the transcript or
+    /// the digest under the pointer.
+    pub fn mouse(&mut self, input: &MouseInput) {
+        let focus = if input.on("transcript").is_some() {
+            Focus::Transcript
+        } else if input.on("digest").is_some() {
+            Focus::Digest
+        } else if input.on("context").is_some() {
+            Focus::Context
+        } else {
+            return;
+        };
+        let step = match input.kind {
+            MouseKind::Click => {
+                self.focus = focus;
+                return;
+            }
+            MouseKind::WheelUp => -1,
+            MouseKind::WheelDown => 1,
+        };
+        match focus {
+            Focus::Transcript => self.transcript.view.scroll_by(step),
+            Focus::Digest => self.digest.view.scroll_by(step),
+            Focus::Context => {}
+        }
     }
 
     /// The text the panels copy after the transcript: the context once it is locked.

@@ -7,11 +7,11 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
-use crate::tui::theme::Theme;
+use crate::tui::host::{Ctx, MouseInput, MouseKind};
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::list::ListCursor;
 use crate::tui::widgets::scroll::ScrollView;
-use crate::tui::widgets::{bar, panel, split_bars};
+use crate::tui::widgets::{bar, border_color, split_bars};
 
 pub const PICKER_BINDINGS: [Binding; 7] = [
     SCREEN_BASE[0],
@@ -54,11 +54,11 @@ impl Picker {
             list: ListCursor::default(),
             list_focused: false,
             preview: {
-                // The preview box's `padding: 1 2`; the Markdown inside it has its own `0 2`.
+                // One column of room inside the preview's border.
                 let mut preview = ScrollView::markdown();
-                preview.padding = 2;
-                preview.padding_y = 1;
-                preview.content_padding = 2;
+                preview.padding = 1;
+                preview.padding_y = 0;
+                preview.content_padding = 0;
                 preview
             },
             max_list_width,
@@ -116,6 +116,38 @@ impl Picker {
         }
     }
 
+    /// A click or a wheel step, as the matching key would do it: a click on the
+    /// search box focuses it, a click on a row highlights it and a second click
+    /// selects it. The wheel scrolls the list or the preview under the pointer.
+    pub fn mouse(&mut self, input: &MouseInput) -> PickerKey {
+        let step = match input.kind {
+            MouseKind::WheelUp => -1,
+            MouseKind::WheelDown => 1,
+            MouseKind::Click => 0,
+        };
+        if step != 0 {
+            if input.on("preview").is_some() {
+                self.preview.scroll_by(step);
+            } else if input.on("list").is_some() {
+                self.list.scroll_by(step);
+            }
+            return PickerKey::Used;
+        }
+        if input.on("search").is_some() {
+            self.list_focused = false;
+            return PickerKey::Used;
+        }
+        if input.on("list").is_none() {
+            return PickerKey::Unused;
+        }
+        self.list_focused = true;
+        match self.list.click(input.row) {
+            Some((_, true)) => PickerKey::Select,
+            Some((_, false)) => PickerKey::Moved,
+            None => PickerKey::Used,
+        }
+    }
+
     pub fn paste(&mut self, text: &str) -> PickerKey {
         if self.list_focused {
             return PickerKey::Unused;
@@ -131,11 +163,13 @@ impl Picker {
         header: &str,
         footer: &str,
         rows: &[Line<'_>],
-        theme: &Theme,
+        ctx: &Ctx,
     ) {
+        let theme = &ctx.theme;
         let (top, body, bottom) = split_bars(area, 1, 1);
         bar(frame, top, header, "primary", "text", true, theme);
         bar(frame, bottom, footer, "surface", "text-muted", false, theme);
+        crate::tui::widgets::hint_targets(frame, bottom, ctx);
         // The list pane and the preview share the width by `fr`; the list keeps
         // between 24 and its max.
         let (list_fr, preview_fr) = self.fractions;
@@ -149,27 +183,34 @@ impl Picker {
             body.width - list_width,
             body.height,
         );
-        self.search.render(
-            frame,
-            Rect::new(pane.x, pane.y, pane.width, 3.min(pane.height)),
-            !self.list_focused,
-            theme,
-        );
-        let list_top = (pane.y + 4).min(pane.bottom());
+        let search_area = Rect::new(pane.x, pane.y, pane.width, 3.min(pane.height));
+        self.search.render(frame, search_area, !self.list_focused, theme);
+        ctx.hit(search_area, "search", 0);
+        let list_top = (pane.y + 3).min(pane.bottom());
         let list_area = Rect::new(pane.x, list_top, pane.width, pane.bottom() - list_top);
+        let background = theme.color("background");
         if list_area.height >= 2 {
-            let surface = theme.color("surface");
-            let background = if self.list_focused {
-                theme.tinted("surface", "foreground", 0.05)
-            } else {
-                surface
-            };
-            let inner = panel(frame, list_area, "", "primary", background, theme);
+            let inner = crate::tui::widgets::rounded(
+                frame,
+                list_area,
+                "",
+                border_color(self.list_focused, theme),
+                background,
+                theme,
+            );
+            ctx.hit(inner, "list", 0);
             self.list
                 .render(frame, inner, rows, self.list_focused, background, theme);
         }
-        let background = theme.color("background");
-        let inner = panel(frame, preview_area, "", "secondary", background, theme);
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            preview_area,
+            "",
+            border_color(false, theme),
+            background,
+            theme,
+        );
+        ctx.hit(inner, "preview", 0);
         let style = Style::default()
             .bg(background)
             .fg(theme.color("foreground"));

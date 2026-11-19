@@ -12,14 +12,14 @@ use tracing::error;
 
 use crate::adapters::os_error::OsError;
 use crate::domain::session_files::{NOTES, TRANSCRIPT};
-use crate::tui::host::{Action, Ctx, Payload, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
 use crate::tui::screens::session_picker::{SessionPicker, picked_dir, utf8_error};
 use crate::tui::system::{copy_to_clipboard, open_folder};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::scroll::ScrollView;
 use crate::tui::widgets::status_bar::StatusBar;
-use crate::tui::widgets::{bar, panel, split_bars};
+use crate::tui::widgets::{bar, split_bars};
 
 pub const VIEW_BINDINGS: [Binding; 6] = [
     bind("tab", "app.focus_next", "Switch Panel").hidden(),
@@ -63,7 +63,12 @@ pub struct TranscriptPanel {
 impl Default for TranscriptPanel {
     fn default() -> Self {
         Self {
-            view: ScrollView::log(),
+            view: {
+                // One column of room inside the border; the scrollbar sits on its edge.
+                let mut view = ScrollView::log();
+                view.padding = 1;
+                view
+            },
             all_text: Vec::new(),
         }
     }
@@ -71,16 +76,12 @@ impl Default for TranscriptPanel {
 
 impl TranscriptPanel {
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
-        let background = if focused {
-            theme.tinted("surface", "foreground", 0.05)
-        } else {
-            theme.color("surface")
-        };
-        let border = if focused { "accent" } else { "primary" };
-        let inner = panel(frame, area, "Transcript", border, background, theme);
+        let background = theme.color("background");
+        let border = crate::tui::widgets::border_color(focused, theme);
+        let inner = crate::tui::widgets::rounded(frame, area, "Transcript", border, background, theme);
         let style = Style::default()
             .bg(background)
-            .fg(theme.on("foreground", "surface"));
+            .fg(theme.color("foreground"));
         self.view.render(frame, inner, style, theme);
     }
 
@@ -121,8 +122,8 @@ impl DigestPanel {
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
         let background = theme.color("background");
-        let border = if focused { "accent" } else { "secondary" };
-        let inner = panel(frame, area, "Digest", border, background, theme);
+        let border = crate::tui::widgets::border_color(focused, theme);
+        let inner = crate::tui::widgets::rounded(frame, area, "Digest", border, background, theme);
         let style = Style::default()
             .bg(background)
             .fg(theme.color("foreground"));
@@ -269,19 +270,34 @@ impl Screen for ViewScreen {
             theme,
         );
         let left = body.width / 2;
-        self.transcript.render(
-            frame,
-            Rect::new(body.x, body.y, left, body.height),
-            !self.digest_focused,
-            theme,
-        );
-        self.digest.render(
-            frame,
-            Rect::new(body.x + left, body.y, body.width - left, body.height),
-            self.digest_focused,
-            theme,
-        );
+        let transcript_area = Rect::new(body.x, body.y, left, body.height);
+        let digest_area = Rect::new(body.x + left, body.y, body.width - left, body.height);
+        self.transcript
+            .render(frame, transcript_area, !self.digest_focused, theme);
+        self.digest
+            .render(frame, digest_area, self.digest_focused, theme);
+        ctx.hit(transcript_area, "transcript", 0);
+        ctx.hit(digest_area, "digest", 0);
         self.status.render(frame, bottom, theme);
+        crate::tui::widgets::hint_targets(frame, bottom, ctx);
+    }
+
+    /// A click focuses the panel under it; the wheel scrolls that panel.
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        let digest = input.on("digest").is_some();
+        if !digest && input.on("transcript").is_none() {
+            return Action::None;
+        }
+        let view = match digest {
+            true => &mut self.digest.view,
+            false => &mut self.transcript.view,
+        };
+        match input.kind {
+            MouseKind::Click => self.digest_focused = digest,
+            MouseKind::WheelUp => view.scroll_by(-1),
+            MouseKind::WheelDown => view.scroll_by(1),
+        }
+        Action::None
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {

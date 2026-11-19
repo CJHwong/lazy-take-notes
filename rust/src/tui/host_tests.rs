@@ -526,6 +526,107 @@ fn a_render_that_panics_once_does_not_freeze_the_screen() {
     assert!(!host.finished());
 }
 
+// --- The mouse ---
+
+/// A screen with a button at (2, 1) and a `[x] Exit` hint on the last row.
+/// It records the keys and the mouse targets it gets.
+struct Clicky(Arc<Mutex<Vec<String>>>);
+
+impl Screen for Clicky {
+    fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
+        let button = Rect::new(2, 1, 6, 1);
+        frame.render_widget(Paragraph::new("Button"), button);
+        ctx.hit(button, "button", 7);
+        let hints = Rect::new(0, area.bottom() - 1, area.width, 1);
+        frame.render_widget(Paragraph::new("[x] Exit  [↑/↓] Move"), hints);
+        crate::tui::widgets::hint_targets(frame, hints, ctx);
+    }
+
+    fn key(&mut self, _key: &KeyEvent, name: &str, _ctx: &mut Ctx) -> Action {
+        self.0.lock().unwrap().push(format!("key {name}"));
+        Action::None
+    }
+
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        let target = input.target.as_ref().map(|t| format!("{}#{}", t.key, t.index));
+        self.0.lock().unwrap().push(format!("{:?} {target:?}", input.kind));
+        Action::None
+    }
+}
+
+fn mouse_at(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers: KeyModifiers::NONE,
+    }
+}
+
+#[test]
+fn a_click_reaches_the_widget_under_the_pointer_and_a_hint_presses_its_key() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    host.push(Box::new(Clicky(seen.clone())));
+    let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+    terminal.draw(|frame| host.draw(frame)).unwrap();
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), 4, 1));
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), 30, 3));
+    host.mouse(&mouse_at(MouseEventKind::ScrollDown, 30, 3));
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), 2, 5));
+    // The arrow hint names no single key: a click on it is an ordinary click.
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), 12, 5));
+    // A release or a drag does nothing.
+    host.mouse(&mouse_at(MouseEventKind::Up(MouseButton::Left), 4, 1));
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![
+            "Click Some(\"button#7\")",
+            "Click None",
+            "WheelDown None",
+            "key x",
+            "Click None",
+        ]
+    );
+}
+
+#[test]
+fn a_click_on_a_toast_closes_it_and_reaches_no_screen() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    host.push(Box::new(Clicky(seen.clone())));
+    host.ctx().notify("saved");
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).unwrap();
+    terminal.draw(|frame| host.draw(frame)).unwrap();
+    let buffer = terminal.backend().buffer().clone();
+    let (x, y) = (0..12u16)
+        .flat_map(|y| (0..80u16).map(move |x| (x, y)))
+        .find(|&(x, y)| buffer[(x, y)].symbol() == "s" && buffer[(x + 1, y)].symbol() == "a")
+        .expect("the toast is drawn");
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), x, y));
+    assert!(host.ctx().toast_texts().is_empty());
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_covered_screen_gets_no_clicks() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let below = Arc::new(Mutex::new(Vec::new()));
+    host.push(Box::new(Clicky(below.clone())));
+    host.push(Box::new(Probe {
+        modal: true,
+        ..Probe::default()
+    }));
+    let mut terminal = Terminal::new(TestBackend::new(40, 6)).unwrap();
+    terminal.draw(|frame| host.draw(frame)).unwrap();
+    // The button below the dialog is drawn, but the dialog is on top.
+    host.mouse(&mouse_at(MouseEventKind::Down(MouseButton::Left), 4, 1));
+    assert!(below.lock().unwrap().is_empty());
+}
+
 // --- Signals and the exit watchdog, in a child process: they end the process. ---
 
 const CHILD_CASE: &str = "LTN_HOST_CHILD_CASE";

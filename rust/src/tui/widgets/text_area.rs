@@ -276,53 +276,21 @@ impl TextArea {
         if area.height < 3 || area.width < 4 {
             return;
         }
-        let border = theme.color(border_var);
-        let surface = theme.color("surface");
-        let outside = theme.color("background");
-        let width = usize::from(area.width - 2);
-        let edges = crate::tui::widgets::tall_edges(border, surface, outside);
-        let title_text = match title.is_empty() {
-            true => String::new(),
-            false => format!(" {title} "),
+        // "primary" means the normal look: primary while focused, quiet otherwise.
+        // Any other color (an error) shows as it is.
+        let border = match border_var {
+            "primary" => crate::tui::widgets::border_color(focused, theme),
+            other => theme.color(other),
         };
-        let title_cells = title_text.chars().count().min(width.saturating_sub(1));
-        let top = Line::from(vec![
-            Span::styled("▊", edges.left),
-            Span::styled("▔", edges.fill),
-            Span::styled(
-                title_text.chars().take(title_cells).collect::<String>(),
-                Style::default()
-                    .fg(theme.on("foreground", "surface"))
-                    .bg(surface),
-            ),
-            Span::styled(
-                "▔".repeat(width.saturating_sub(1 + title_cells)),
-                edges.fill,
-            ),
-            Span::styled("▎", edges.right),
-        ]);
-        frame.render_widget(
-            Paragraph::new(top),
-            Rect::new(area.x, area.y, area.width, 1),
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            area,
+            title,
+            border,
+            theme.color("surface"),
+            theme,
         );
-        let bottom = Line::from(vec![
-            Span::styled("▊", edges.left),
-            Span::styled("▁".repeat(width), edges.fill),
-            Span::styled("▎", edges.right),
-        ]);
-        frame.render_widget(
-            Paragraph::new(bottom),
-            Rect::new(area.x, area.bottom() - 1, area.width, 1),
-        );
-        for y in area.y + 1..area.bottom() - 1 {
-            let side = Line::from(vec![
-                Span::styled("▊", edges.left),
-                Span::styled(" ".repeat(width), Style::default().bg(surface)),
-                Span::styled("▎", edges.right),
-            ]);
-            frame.render_widget(Paragraph::new(side), Rect::new(area.x, y, area.width, 1));
-        }
-        let inner = Rect::new(area.x + 2, area.y + 1, area.width - 4, area.height - 2);
+        let inner = Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), inner.height);
         self.render_text(frame, inner, focused, theme);
     }
 
