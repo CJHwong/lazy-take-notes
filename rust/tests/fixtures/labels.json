@@ -1,0 +1,30 @@
+[
+ {
+  "raw": "\"Sprint Planning Review\"",
+  "out": "sprint_planning_review"
+ },
+ {
+  "raw": "  'weekly sync'  ",
+  "out": "weekly_sync"
+ },
+ {
+  "raw": "Team Standup: Q3 Roadmap & Budget!!",
+  "out": "team_standup_q3_roadmap_budget"
+ },
+ {
+  "raw": "one two three four five six seven",
+  "out": "one_two_three_four_five"
+ },
+ {
+  "raw": "中文 標籤",
+  "out": ""
+ },
+ {
+  "raw": "__already_snake__",
+  "out": "already_snake"
+ },
+ {
+  "raw": "",
+  "out": ""
+ }
+]

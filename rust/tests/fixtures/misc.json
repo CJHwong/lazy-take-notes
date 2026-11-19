@@ -1,0 +1,20 @@
+{
+ "label_prompt": [
+  {
+   "name": "Daily Standup",
+   "description": "Quick sync meeting",
+   "digest": "## Notes\nAll good.",
+   "out": "Generate a short label (2-5 words, snake_case, lowercase) that summarises this session.\n\nTemplate: Daily Standup — Quick sync meeting\n\nLatest digest:\n## Notes\nAll good.\n\nOutput ONLY the label, nothing else."
+  },
+  {
+   "name": "Default",
+   "description": "",
+   "digest": "d",
+   "out": "Generate a short label (2-5 words, snake_case, lowercase) that summarises this session.\n\nTemplate: Default\n\nLatest digest:\nd\n\nOutput ONLY the label, nothing else."
+  }
+ ],
+ "compact": {
+  "markdown": "## Topic\n中文",
+  "out": "(Prior conversation compacted) Current session state:\n\n## Topic\n中文\n\nContinue analyzing subsequent transcript segments based on this state."
+ }
+}

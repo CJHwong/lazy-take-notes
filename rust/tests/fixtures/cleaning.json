@@ -1,0 +1,134 @@
+{
+ "collapse": [
+  {
+   "text": "*clap*",
+   "out": "*clap*"
+  },
+  {
+   "text": "*sad music*",
+   "out": "*sad music*"
+  },
+  {
+   "text": "[BLANK_AUDIO]",
+   "out": "[BLANK_AUDIO]"
+  },
+  {
+   "text": "(laughs)",
+   "out": "(laughs)"
+  },
+  {
+   "text": "♪",
+   "out": "♪"
+  },
+  {
+   "text": ".",
+   "out": "."
+  },
+  {
+   "text": "...",
+   "out": "..."
+  },
+  {
+   "text": " - ",
+   "out": "-"
+  },
+  {
+   "text": "，。",
+   "out": "，。"
+  },
+  {
+   "text": "Real words.",
+   "out": "Real words."
+  },
+  {
+   "text": "好的。",
+   "out": "好的。"
+  },
+  {
+   "text": "We agreed. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. ",
+   "out": "We agreed. And you can write the search plan by next Friday."
+  },
+  {
+   "text": "we agreed and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday ",
+   "out": "we agreed and you can write the search plan by next friday"
+  },
+  {
+   "text": "No. No. I mean Friday.",
+   "out": "No. No. I mean Friday."
+  },
+  {
+   "text": "我們明天再討論這個問題吧。我們明天再討論這個問題吧。我們明天再討論這個問題吧。",
+   "out": "我們明天再討論這個問題吧。"
+  },
+  {
+   "text": "\"We're going to show you a couple of things.\" \"We're going to show you a couple of things.\"",
+   "out": "\"We're going to show you a couple of things.\" \"We're going to show you a couple of things.\""
+  }
+ ],
+ "not_speech": [
+  {
+   "text": "*clap*",
+   "out": true
+  },
+  {
+   "text": "*sad music*",
+   "out": true
+  },
+  {
+   "text": "[BLANK_AUDIO]",
+   "out": true
+  },
+  {
+   "text": "(laughs)",
+   "out": true
+  },
+  {
+   "text": "♪",
+   "out": true
+  },
+  {
+   "text": ".",
+   "out": true
+  },
+  {
+   "text": "...",
+   "out": true
+  },
+  {
+   "text": " - ",
+   "out": true
+  },
+  {
+   "text": "，。",
+   "out": true
+  },
+  {
+   "text": "Real words.",
+   "out": false
+  },
+  {
+   "text": "好的。",
+   "out": false
+  },
+  {
+   "text": "We agreed. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. And you can write the search plan by next Friday. ",
+   "out": false
+  },
+  {
+   "text": "we agreed and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday and you can write the search plan by next friday ",
+   "out": false
+  },
+  {
+   "text": "No. No. I mean Friday.",
+   "out": false
+  },
+  {
+   "text": "我們明天再討論這個問題吧。我們明天再討論這個問題吧。我們明天再討論這個問題吧。",
+   "out": false
+  },
+  {
+   "text": "\"We're going to show you a couple of things.\" \"We're going to show you a couple of things.\"",
+   "out": false
+  }
+ ]
+}
