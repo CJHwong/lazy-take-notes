@@ -261,12 +261,12 @@ fn mic_boost_follows_python_block_by_block() {
                 .sqrt();
             assert_eq!(boost.bleeding(), bleeding, "{name} block {block}: bleeding");
             assert!(
-                (boost.gain() - gain).abs() <= 1e-4 * gain,
+                (boost.gain() - gain).abs() <= 1e-6 * gain,
                 "{name} block {block}: gain {} vs {gain}",
                 boost.gain()
             );
             assert!(
-                (out_rms - rms).abs() <= 1e-4 * rms.max(1e-6),
+                (out_rms - rms).abs() <= 1e-6 * rms.max(1e-6),
                 "{name} block {block}: rms {out_rms} vs {rms}"
             );
         }

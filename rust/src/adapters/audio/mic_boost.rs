@@ -36,9 +36,12 @@ fn floor_rise_per_s() -> f64 {
     std::f64::consts::LN_2 / 2.0
 }
 
+/// Python takes `np.dot` in float32, and its order depends on the BLAS numpy was
+/// built with (Accelerate, OpenBLAS), so no fixed order matches it. A sum in f64,
+/// rounded to f32 once, lands closest to it.
 fn rms(samples: &[f32]) -> f64 {
-    let dot: f32 = samples.iter().map(|s| s * s).sum();
-    (f64::from(dot) / samples.len() as f64).sqrt()
+    let dot: f64 = samples.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+    (f64::from(dot as f32) / samples.len() as f64).sqrt()
 }
 
 /// RMS of each whole 256-sample frame. A partial frame at the end is dropped.
