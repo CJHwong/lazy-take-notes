@@ -69,17 +69,32 @@ fn install() {
         let _ = tracing::subscriber::set_global_default(subscriber);
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic| {
-            write_line(&format_line(
-                "CRITICAL",
-                &format!(
-                    "panic in thread {}: {panic}\n{}",
-                    std::thread::current().name().unwrap_or("?"),
-                    std::backtrace::Backtrace::force_capture()
-                ),
-            ));
+            log_panic(panic);
             previous(panic);
         }));
     });
+}
+
+/// Write a panic and its backtrace to the session's `debug.log`.
+pub fn log_panic(panic: &std::panic::PanicHookInfo<'_>) {
+    write_line(&format_line(
+        "CRITICAL",
+        &format!(
+            "panic in thread {}: {panic}\n{}",
+            std::thread::current().name().unwrap_or("?"),
+            std::backtrace::Backtrace::force_capture()
+        ),
+    ));
+}
+
+/// A CRITICAL line, the level Python's `log.critical` writes. tracing has no such level.
+pub fn critical(message: &str) {
+    write_line(&format_line("CRITICAL", message));
+}
+
+/// Install the subscriber and the panic hook now, before a TUI chains its own hook.
+pub fn install_logging() {
+    install();
 }
 
 fn is_ours(metadata: &Metadata<'_>) -> bool {

@@ -80,6 +80,8 @@ pub enum Command {
     },
     /// Show a headless session's status (newest by default).
     Status { session: Option<String> },
+    /// Browse a previously saved session (transcript + digest, read-only).
+    View,
 }
 
 /// Parse the arguments and run the command. Returns the exit code.
@@ -108,6 +110,7 @@ pub fn main() -> i32 {
             timeout_s,
         }) => return diarize(&session_dir, &device, timeout_s),
         Some(Command::Status { session }) => status(config, output_dir, session.as_deref()),
+        Some(Command::View) => view(config, output_dir),
     };
     result.unwrap_or_else(|message| fail(&message))
 }
@@ -194,6 +197,23 @@ fn status(
     for line in status_command::status_lines(&session_dir)? {
         println!("{line}");
     }
+    Ok(0)
+}
+
+fn view(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> {
+    let loaded = load_config(config, output_dir)?;
+    let base_dir = resolve_base_dir(&loaded.paths, output_dir, &loaded.config);
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let root = Box::new(crate::tui::screens::view::ViewLoop::new(base_dir));
+    crate::tui::host::run_screen(
+        root,
+        &crate::tui::system::saved_theme(),
+        runtime.handle().clone(),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(0)
 }
 
