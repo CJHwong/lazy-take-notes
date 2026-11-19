@@ -21,6 +21,7 @@ pub struct TextArea {
     /// Rows the box showed last time; page keys move by this.
     page: usize,
     pub read_only: bool,
+    blink: crate::tui::widgets::Blink,
 }
 
 impl Default for TextArea {
@@ -32,6 +33,7 @@ impl Default for TextArea {
             scroll: 0,
             page: 1,
             read_only: false,
+            blink: crate::tui::widgets::Blink::default(),
         }
     }
 }
@@ -105,6 +107,7 @@ impl TextArea {
     }
 
     pub fn paste(&mut self, text: &str) {
+        self.blink.restart();
         if !self.read_only {
             self.insert(text);
         }
@@ -238,6 +241,7 @@ impl TextArea {
 
     /// Handle a key. True when the box used it. A read-only box only moves the cursor.
     pub fn key(&mut self, key: &KeyEvent, name: &str) -> bool {
+        self.blink.restart();
         if self.move_key(name) {
             return true;
         }
@@ -347,7 +351,7 @@ impl TextArea {
                     text_style
                 };
                 let chars = &self.lines[*row][*start..*end];
-                if !(focused && visual == cursor_visual) {
+                if !(focused && self.blink.visible() && visual == cursor_visual) {
                     let text: String = chars.iter().collect();
                     let pad = width.saturating_sub(text.chars().map(char_width).sum());
                     return Line::from(vec![

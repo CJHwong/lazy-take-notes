@@ -1,5 +1,6 @@
 //! Loads, saves and deletes session templates: built-in ones compiled in, user ones on disk.
 
+use crate::adapters::os_error::OsError;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
@@ -179,18 +180,22 @@ impl YamlTemplates {
     }
 
     /// Write `template` as a user template. The key is the file name, so it is not stored.
+    /// Write `template` as `<name>.yaml` in the user folder. The error names the
+    /// path, as Python's `OSError` does.
     pub fn save_user_template(
         &self,
         template: &SessionTemplate,
         name: &str,
-    ) -> io::Result<PathBuf> {
-        fs::create_dir_all(&self.user_dir)?;
-        let mut value = yaml_serde::to_value(template).map_err(io::Error::other)?;
+    ) -> Result<PathBuf, OsError> {
+        fs::create_dir_all(&self.user_dir)
+            .map_err(|e| OsError::from_io(&e, Some(&self.user_dir), None))?;
+        let mut value = yaml_serde::to_value(template)
+            .map_err(|e| OsError::from_io(&io::Error::other(e), None, None))?;
         if let Some(metadata) = value.get_mut("metadata").and_then(Value::as_mapping_mut) {
             metadata.shift_remove("key");
         }
         let path = self.user_path(name);
-        fs::write(&path, to_yaml(&value))?;
+        fs::write(&path, to_yaml(&value)).map_err(|e| OsError::from_io(&e, Some(&path), None))?;
         Ok(path)
     }
 }

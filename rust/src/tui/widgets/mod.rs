@@ -16,6 +16,27 @@ use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
 use crate::tui::text::center;
 use crate::tui::theme::Theme;
 
+/// Textual's cursor blink: shown for 0.5 s, hidden for 0.5 s, shown again from
+/// the start after each key.
+#[derive(Debug)]
+pub struct Blink(std::cell::Cell<std::time::Instant>);
+
+impl Default for Blink {
+    fn default() -> Self {
+        Self(std::cell::Cell::new(std::time::Instant::now()))
+    }
+}
+
+impl Blink {
+    pub fn restart(&self) {
+        self.0.set(std::time::Instant::now());
+    }
+
+    pub fn visible(&self) -> bool {
+        (self.0.get().elapsed().as_millis() / 500).is_multiple_of(2)
+    }
+}
+
 /// A `border: solid` box on `background`, its title at the top left. Returns the inside.
 pub fn panel(
     frame: &mut Frame,

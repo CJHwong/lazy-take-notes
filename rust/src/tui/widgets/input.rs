@@ -21,6 +21,9 @@ pub struct Input {
     /// The theme variable of the parent's background, under the border's outer side.
     /// None means the screen background.
     pub parent_background: Option<&'static str>,
+    /// The whole value is selected, as Textual's `select_on_focus` leaves it.
+    selected_all: bool,
+    blink: crate::tui::widgets::Blink,
 }
 
 impl Input {
@@ -40,6 +43,45 @@ impl Input {
         self.cursor = self.chars.len();
     }
 
+    /// Select the whole value, as Textual does when the input gets the focus.
+    pub fn select_all(&mut self) {
+        self.blink.restart();
+        self.selected_all = !self.chars.is_empty();
+        self.cursor = self.chars.len();
+    }
+
+    /// Typing, a paste or a delete key replaces the selection.
+    fn take_selection(&mut self) {
+        if std::mem::take(&mut self.selected_all) {
+            self.chars.clear();
+            self.cursor = 0;
+        }
+    }
+
+    /// A key while the whole value is selected. Some(used) when the key is done;
+    /// None lets the normal editing run after the selection is settled.
+    fn selection_key(&mut self, key: &KeyEvent, name: &str) -> Option<bool> {
+        match name {
+            "left" | "home" | "ctrl+a" => self.cursor = 0,
+            "right" | "end" | "ctrl+e" => self.cursor = self.chars.len(),
+            "ctrl+left" | "ctrl+right" => {
+                self.selected_all = false;
+                return None;
+            }
+            "backspace" | "delete" | "ctrl+d" | "ctrl+w" | "ctrl+u" | "ctrl+k" => {
+                self.take_selection();
+                return Some(true);
+            }
+            _ => {
+                typed_char(key)?;
+                self.take_selection();
+                return None;
+            }
+        }
+        self.selected_all = false;
+        Some(true)
+    }
+
     fn insert(&mut self, text: &str) {
         for character in text.chars().filter(|c| !c.is_control()) {
             if self.max_length.is_some_and(|max| self.chars.len() >= max) {
@@ -51,6 +93,8 @@ impl Input {
     }
 
     pub fn paste(&mut self, text: &str) {
+        self.blink.restart();
+        self.take_selection();
         self.insert(text.lines().next().unwrap_or(""));
     }
 
@@ -78,6 +122,12 @@ impl Input {
 
     /// Handle an editing key. Returns true when the input used it.
     pub fn key(&mut self, key: &KeyEvent, name: &str) -> bool {
+        self.blink.restart();
+        if self.selected_all
+            && let Some(used) = self.selection_key(key, name)
+        {
+            return used;
+        }
         match name {
             "left" => self.cursor = self.cursor.saturating_sub(1),
             "right" => self.cursor = (self.cursor + 1).min(self.chars.len()),
@@ -162,6 +212,7 @@ impl Input {
         let text_style = Style::default()
             .fg(theme.on_color("foreground", surface))
             .bg(surface);
+        let cursor_shown = focused && self.blink.visible();
         let placeholder_color = theme.on_color("text-disabled", surface);
         let cursor_style = Style::default()
             .fg(theme.on("input-cursor-foreground", "surface"))
@@ -170,7 +221,7 @@ impl Input {
         if self.chars.is_empty() {
             let mut spans = Vec::new();
             let mut placeholder = self.placeholder.chars();
-            if focused {
+            if cursor_shown {
                 let first = placeholder
                     .next()
                     .map_or(" ".to_string(), |c| c.to_string());
@@ -196,10 +247,19 @@ impl Input {
             .get(self.cursor)
             .map_or(" ".into(), |c| c.to_string());
         let after: String = self.chars.iter().skip(self.cursor + 1).collect();
-        let mut spans = vec![Span::styled(before, text_style)];
+        // `input--selection`: the selected text on `$input-selection-background`.
+        let before_style = match self.selected_all && focused {
+            true => text_style.bg(theme.on_color("input-selection-background", surface)),
+            false => text_style,
+        };
+        let mut spans = vec![Span::styled(before, before_style)];
         spans.push(Span::styled(
             at,
-            if focused { cursor_style } else { text_style },
+            if cursor_shown {
+                cursor_style
+            } else {
+                text_style
+            },
         ));
         spans.push(Span::styled(after, text_style));
         frame.render_widget(Paragraph::new(Line::from(spans)).style(text_style), area);
@@ -234,5 +294,41 @@ mod tests {
         input.paste("a\nb");
         assert_eq!(input.value(), "a");
         assert!(!input.key(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), "up"));
+    }
+
+    #[test]
+    fn a_focused_value_is_selected_and_the_next_key_replaces_it() {
+        let none = KeyEvent::new(KeyCode::Null, KeyModifiers::NONE);
+        let mut input = Input::new("");
+        input.set_value("one_on_one");
+        input.select_all();
+        type_text(&mut input, "x");
+        assert_eq!(input.value(), "x");
+
+        input.set_value("abc");
+        input.select_all();
+        input.key(&none, "backspace");
+        assert_eq!(input.value(), "");
+
+        input.set_value("abc");
+        input.select_all();
+        input.key(&none, "left");
+        type_text(&mut input, "z");
+        assert_eq!(
+            input.value(),
+            "zabc",
+            "left goes to the start and ends the selection"
+        );
+
+        input.set_value("abc");
+        input.select_all();
+        input.paste("new");
+        assert_eq!(input.value(), "new");
+
+        input.set_value("abc");
+        input.select_all();
+        assert!(!input.key(&KeyEvent::new(KeyCode::Up, KeyModifiers::NONE), "up"));
+        type_text(&mut input, "q");
+        assert_eq!(input.value(), "q", "an unused key keeps the selection");
     }
 }
