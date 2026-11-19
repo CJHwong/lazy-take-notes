@@ -62,6 +62,13 @@ pub fn action_for(table: &[Binding], key: &str) -> Option<&'static str> {
 /// None for a hint that names no single key (`[↑/↓] Navigate`).
 pub fn hint_key(hint: &str) -> Option<KeyEvent> {
     let lower = hint.to_lowercase();
+    if let Some(rest) = lower.strip_prefix("ctrl+") {
+        let mut chars = rest.chars();
+        return match (chars.next(), chars.next()) {
+            (Some(character), None) => Some(KeyEvent::new(KeyCode::Char(character), KeyModifiers::CONTROL)),
+            _ => None,
+        };
+    }
     let code = match lower.as_str() {
         "esc" | "escape" => KeyCode::Esc,
         "enter" => KeyCode::Enter,

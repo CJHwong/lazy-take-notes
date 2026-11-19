@@ -266,5 +266,7 @@ mod hint_tests {
             found,
             vec![(1, 15, "Enter".to_string()), (33, 45, "Esc".to_string())]
         );
+        let found = hints_in_row(&cells("[Ctrl+S] Save"));
+        assert_eq!(found, vec![(0, 13, "Ctrl+S".to_string())]);
     }
 }
