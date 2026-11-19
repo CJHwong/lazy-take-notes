@@ -664,12 +664,18 @@ impl Session {
         let llm = self.controller.llm();
         let model = self.controller.digest_model().to_string();
         let messages = request.messages.clone();
-        let task = ctx.spawn(async move {
-            DigestReply {
+        let task = ctx.spawn_or(
+            async move {
+                DigestReply {
+                    generation,
+                    reply: llm.chat(&model, &messages).await,
+                }
+            },
+            move |message| DigestReply {
                 generation,
-                reply: llm.chat(&model, &messages).await,
-            }
-        });
+                reply: Err(LlmError::new("panic", message)),
+            },
+        );
         self.in_flight = Some(InFlight {
             generation,
             request,
@@ -841,12 +847,19 @@ impl Session {
         self.status.activity = format!("{label}...");
         self.flow.query_running = true;
         let job = self.controller.quick_action_job(key);
-        ctx.spawn(async move {
-            QueryReply {
-                label,
-                result: job.await,
-            }
-        });
+        let fallback = label.clone();
+        ctx.spawn_or(
+            async move {
+                QueryReply {
+                    label,
+                    result: job.await,
+                }
+            },
+            move |message| QueryReply {
+                label: fallback,
+                result: Some(Err(message)),
+            },
+        );
     }
 
     fn on_query_reply(&mut self, reply: QueryReply) -> Action {
@@ -874,7 +887,7 @@ impl Session {
             return;
         };
         self.flow.label_running = true;
-        ctx.spawn(async move { LabelReply(job.await) });
+        ctx.spawn_or(async move { LabelReply(job.await) }, |_| LabelReply(None));
     }
 
     fn on_label_reply(&mut self, reply: LabelReply, mode: &mut dyn Mode, ctx: &mut Ctx) -> Action {

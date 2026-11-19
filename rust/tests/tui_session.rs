@@ -111,6 +111,45 @@ impl Run {
 }
 
 #[test]
+fn an_unexpected_digest_panic_fails_the_digest_not_the_session() {
+    let mut run = start(Reply::Panic("bug in the client"));
+    run.post(Event::status(WorkerState::Recording));
+    run.lines(&["first line", "second line"]);
+    run.press("d");
+    assert!(
+        run.toasts()
+            .iter()
+            .any(|toast| toast.contains("bug in the client")),
+        "{:?}",
+        run.toasts()
+    );
+    run.llm.set(Reply::Text(DIGEST.into(), 10));
+    run.press("d");
+    assert!(
+        !run.toasts()
+            .contains(&"Digest already in progress".to_string()),
+        "the panicked digest released the running flag"
+    );
+    assert_eq!(run.notes(), [(DIGEST.to_string(), 1)]);
+}
+
+#[test]
+fn an_unexpected_quick_action_panic_shows_an_error_not_a_stuck_query() {
+    let mut run = start(Reply::Panic("bug in the client"));
+    run.post(Event::status(WorkerState::Recording));
+    run.lines(&["first line"]);
+    run.press("1");
+    run.press("escape");
+    run.llm.set(Reply::Text("an answer".into(), 1));
+    run.press("1");
+    assert!(
+        !run.toasts().iter().any(|toast| toast.contains("already")),
+        "the panicked query released its flag: {:?}",
+        run.toasts()
+    );
+}
+
+#[test]
 fn the_final_digest_replaces_a_running_one_and_drops_its_prompt() {
     let mut run = start(Reply::Hang);
     run.post(Event::status(WorkerState::Recording));

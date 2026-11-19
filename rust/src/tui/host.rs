@@ -25,6 +25,7 @@ use tracing::{error, info, warn};
 
 use crate::app::events::{Event, Poster};
 use crate::app::logging::{critical, see_debug_log};
+use crate::app::workers::audio::panic_text;
 use crate::tui::keys::key_name;
 use crate::tui::terminal::{self, Term, catching};
 use crate::tui::theme::Theme;
@@ -126,6 +127,40 @@ impl Ctx {
         self.runtime
             .spawn(async move {
                 let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(future.await)))));
+            })
+            .abort_handle()
+    }
+
+    /// Like `spawn`, but a panic inside `future` comes back as `on_panic(message)`,
+    /// so the screen that waits for the result is never left waiting. A Textual
+    /// worker that raised did the same through its error handler. The panic hook
+    /// logs the stack.
+    pub fn spawn_or<T, F, P>(&self, future: F, on_panic: P) -> tokio::task::AbortHandle
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+        P: FnOnce(String) -> T + Send + 'static,
+    {
+        /// Aborting the outer task drops this, which aborts the inner one.
+        struct AbortOnDrop(tokio::task::AbortHandle);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let inner = self.runtime.spawn(future);
+        let guard = AbortOnDrop(inner.abort_handle());
+        let sender = self.sender.clone();
+        let from = self.current;
+        self.runtime
+            .spawn(async move {
+                let _guard = guard;
+                let output = match inner.await {
+                    Ok(output) => output,
+                    Err(e) if e.is_panic() => on_panic(panic_text(&e.into_panic())),
+                    Err(_) => return,
+                };
+                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(output)))));
             })
             .abort_handle()
     }
