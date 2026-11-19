@@ -268,3 +268,149 @@ fn a_worker_that_stops_on_its_own_runs_the_final_digest() {
     run.settle();
     assert!(run.host.finished(), "{:?}", run.toasts());
 }
+
+// --- Named tests for the faults of test_record_app_faults.py ---
+
+impl Run {
+    fn enter(&mut self) {
+        self.host
+            .key(&KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        self.settle();
+    }
+
+    fn type_text(&mut self, text: &str) {
+        for ch in text.chars() {
+            self.press(&ch.to_string());
+        }
+    }
+
+    fn screen_text(&mut self) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal.draw(|frame| self.host.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+const MARKUP_LIKE: &str = "[/INST] [bold]not bold[/bold] {brace}";
+
+#[test]
+fn markup_like_text_is_shown_verbatim() {
+    let mut run = start(true);
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment(MARKUP_LIKE, 0.0, 2.0)]));
+    assert!(
+        run.screen_text().contains(MARKUP_LIKE),
+        "{}",
+        run.screen_text()
+    );
+}
+
+#[test]
+fn markup_like_text_survives_a_speaker_redraw() {
+    let mut run = start(true);
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment(MARKUP_LIKE, 0.0, 2.0)]));
+    run.post(Event::SpeakerTurns(vec![SpeakerTurn {
+        start: 0.0,
+        end: 2.0,
+        speaker: 0,
+    }]));
+    assert!(
+        run.screen_text().contains(&format!("S0: {MARKUP_LIKE}")),
+        "{}",
+        run.screen_text()
+    );
+    let labeled =
+        std::fs::read_to_string(run.session_dir().join("transcript_speakers.txt")).unwrap();
+    assert!(
+        labeled.ends_with(&format!("S0: {MARKUP_LIKE}\n")),
+        "{labeled}"
+    );
+}
+
+#[test]
+fn a_failed_speakers_write_keeps_the_session() {
+    let mut run = start(true);
+    run.recording();
+    // A folder where the file goes makes the write fail.
+    std::fs::create_dir(run.session_dir().join("speakers.json")).unwrap();
+    run.post(Event::TranscriptChunk(vec![segment("hello", 0.0, 2.0)]));
+    run.post(Event::SpeakerTurns(vec![SpeakerTurn {
+        start: 0.0,
+        end: 2.0,
+        speaker: 0,
+    }]));
+    assert!(
+        run.toasts()
+            .iter()
+            .any(|toast| toast.starts_with("Could not save speakers:")),
+        "{:?}",
+        run.toasts()
+    );
+    run.post(Event::TranscriptChunk(vec![segment(
+        "still here",
+        2.0,
+        3.0,
+    )]));
+    assert!(!run.host.finished());
+    assert!(run.screen_text().contains("still here"));
+}
+
+#[test]
+fn an_existing_target_is_never_overwritten() {
+    let mut run = start(true);
+    run.recording();
+    let taken = run.dir.path().join("2026-11-19_120000_taken");
+    std::fs::create_dir(&taken).unwrap();
+    std::fs::write(taken.join("notes.md"), "keep me").unwrap();
+    run.press("l");
+    run.type_text("taken");
+    run.enter();
+    assert!(
+        run.toasts()
+            .contains(&"Session folder 2026-11-19_120000_taken already exists".to_string()),
+        "{:?}",
+        run.toasts()
+    );
+    assert!(run.session_dir().exists(), "the session keeps its folder");
+    assert_eq!(
+        std::fs::read_to_string(taken.join("notes.md")).unwrap(),
+        "keep me"
+    );
+}
+
+#[test]
+fn a_failed_rename_keeps_the_session() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut run = start(true);
+    run.recording();
+    let parent = run.dir.path().to_path_buf();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+    run.press("l");
+    run.type_text("standup");
+    run.enter();
+    std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        run.toasts()
+            .iter()
+            .any(|toast| toast.starts_with("Could not rename the session folder:")),
+        "{:?}",
+        run.toasts()
+    );
+    assert!(run.session_dir().exists());
+    run.post(Event::TranscriptChunk(vec![segment(
+        "after the rename",
+        0.0,
+        1.0,
+    )]));
+    assert!(!run.host.finished());
+}

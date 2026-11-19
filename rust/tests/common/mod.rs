@@ -17,6 +17,8 @@ pub enum Reply {
     Fail(LlmError),
     /// Never answers, like a stalled server.
     Hang,
+    /// A bug in the client: the call panics.
+    Panic(&'static str),
 }
 
 pub struct FakeLlm {
@@ -61,6 +63,7 @@ impl FakeLlm {
             }),
             Reply::Fail(error) => Err(error),
             Reply::Hang => std::future::pending().await,
+            Reply::Panic(message) => panic!("{message}"),
         }
     }
 }

@@ -737,7 +737,8 @@ enum Flow {
     Exhausted,
 }
 
-fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
+/// The message a panic carried: a `&str` or a `String`, as `panic!` makes them.
+pub fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = panic.downcast_ref::<&str>() {
         return (*text).to_string();
     }

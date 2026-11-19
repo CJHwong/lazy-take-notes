@@ -297,3 +297,141 @@ fn a_result_from_a_closed_screen_never_reaches_the_next_one() {
     assert_eq!(*new_got.lock().unwrap(), vec![2]);
     assert!(old_got.lock().unwrap().is_empty());
 }
+
+// --- Named tests for the faults of test_record_app_faults.py ---
+
+/// A screen whose message handler panics on the first message, then counts the rest.
+#[derive(Default)]
+struct FlakyHandler {
+    seen: Arc<Mutex<u32>>,
+}
+
+impl Screen for FlakyHandler {
+    fn render(&mut self, _frame: &mut Frame, _area: Rect, _ctx: &Ctx) {}
+
+    fn key(&mut self, _key: &KeyEvent, _name: &str, _ctx: &mut Ctx) -> Action {
+        Action::None
+    }
+
+    fn message(&mut self, _msg: Msg, _ctx: &mut Ctx) -> (Option<Msg>, Action) {
+        let count = {
+            let mut seen = self.seen.lock().unwrap();
+            *seen += 1;
+            *seen
+        };
+        if count == 1 {
+            panic!("bug in a handler");
+        }
+        (None, Action::None)
+    }
+}
+
+/// A host whose exit watchdog counts as armed, so a test signal never ends the test run.
+fn host_without_watchdog(runtime: &tokio::runtime::Runtime) -> Host {
+    let host = Host::new("textual-dark", runtime.handle().clone());
+    host.watchdog_armed.store(true, Ordering::SeqCst);
+    host
+}
+
+#[test]
+fn a_raising_handler_does_not_stop_the_screen_from_handling_messages() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let seen = Arc::new(Mutex::new(0));
+    host.push(Box::new(FlakyHandler { seen: seen.clone() }));
+    host.message(Msg::Task(Box::new(1_u8)));
+    host.message(Msg::Task(Box::new(2_u8)));
+    assert_eq!(*seen.lock().unwrap(), 2, "the second message still arrived");
+    assert!(!host.finished());
+}
+
+#[test]
+fn a_signal_stops_the_session_and_exits_after_the_audio_flush() {
+    let runtime = runtime();
+    let mut host = host_without_watchdog(&runtime);
+    host.push(Box::new(Probe {
+        session: true,
+        stops: true,
+        ..Probe::default()
+    }));
+    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    assert!(!host.finished(), "waits for the audio flush");
+    let exit_at = host.ctx.exit_at.expect("an exit is scheduled");
+    assert!(exit_at <= Instant::now() + SHUTDOWN_GRACE);
+}
+
+#[test]
+fn a_signal_exits_even_if_the_audio_worker_never_stops() {
+    let runtime = runtime();
+    let mut host = host_without_watchdog(&runtime);
+    host.push(Box::new(Probe {
+        session: true,
+        stops: true,
+        ..Probe::default()
+    }));
+    host.message(Msg::Signal(signal_hook::consts::SIGHUP));
+    host.ctx.exit_at = Some(Instant::now());
+    assert!(
+        host.finished(),
+        "the grace period ends the app without the worker"
+    );
+}
+
+#[test]
+fn a_signal_with_no_session_exits_at_once() {
+    let runtime = runtime();
+    let mut host = host_without_watchdog(&runtime);
+    host.push(Box::new(Probe::default()));
+    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    assert!(host.finished());
+}
+
+#[test]
+fn the_exit_watchdog_is_armed_only_once() {
+    let armed = AtomicBool::new(true);
+    // Already armed: no second watchdog thread starts, so this returns at once.
+    arm_watchdog_once(&armed, signal_hook::consts::SIGTERM);
+    assert!(armed.load(Ordering::SeqCst));
+}
+
+#[test]
+fn ctrl_c_with_a_modal_open_still_names_the_stop_key() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    host.push(Box::new(Probe {
+        session: true,
+        hint: Some("Recording: press s to stop and save first".into()),
+        ..Probe::default()
+    }));
+    host.push(Box::new(Probe {
+        modal: true,
+        ..Probe::default()
+    }));
+    press(&mut host, KeyCode::Char('c'), KeyModifiers::CONTROL);
+    assert_eq!(
+        host.ctx().toast_texts().last().unwrap(),
+        "Recording: press s to stop and save first"
+    );
+}
+
+#[test]
+fn a_thread_never_waits_for_the_loop() {
+    // AGENTS.md: check threads post their updates and never wait on the event
+    // loop. Here nothing pumps the loop while the thread posts.
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    host.push(Box::new(Probe::default()));
+    let sender = host.ctx().task_sender();
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for value in 0..10_000 {
+            sender.post(value);
+        }
+        let _ = done.send(());
+    });
+    assert!(
+        finished.recv_timeout(Duration::from_secs(5)).is_ok(),
+        "the thread finished without the loop running"
+    );
+    assert_eq!(host.pump(), 10_000);
+}
