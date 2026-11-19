@@ -170,7 +170,7 @@ fn transcribe(
 ) -> Result<i32, String> {
     check_template_language(options)?;
     if !options.headless {
-        return Ok(not_ported("the transcription TUI"));
+        return transcribe_tui(config, output_dir, audio_file, options);
     }
     let Some(audio_file) = audio_file else {
         return Err("--headless requires an audio file argument (no interactive picker).".into());
@@ -181,6 +181,25 @@ fn transcribe(
         return Err(format!("{quoted} is not a valid file."));
     }
     headless_run::transcribe(
+        &headless_args(config, output_dir, options),
+        Path::new(audio_file),
+    )
+}
+
+fn transcribe_tui(
+    config: Option<&Path>,
+    output_dir: Option<&str>,
+    audio_file: Option<&str>,
+    options: &SessionOptions,
+) -> Result<i32, String> {
+    let Some(audio_file) = audio_file else {
+        return Ok(not_ported("the file picker"));
+    };
+    if !Path::new(audio_file).is_file() {
+        let quoted = py_repr_json(&serde_json::Value::String(audio_file.into()));
+        return Err(format!("{quoted} is not a valid file."));
+    }
+    crate::app::tui_run::transcribe(
         &headless_args(config, output_dir, options),
         Path::new(audio_file),
     )

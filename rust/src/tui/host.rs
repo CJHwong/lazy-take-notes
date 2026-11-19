@@ -108,15 +108,17 @@ impl Ctx {
     }
 
     /// Run `future` on the runtime; its output comes back as `Msg::Task`.
-    pub fn spawn<T, F>(&self, future: F)
+    pub fn spawn<T, F>(&self, future: F) -> tokio::task::AbortHandle
     where
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
     {
         let sender = self.sender.clone();
-        self.runtime.spawn(async move {
-            let _ = sender.send(Msg::Task(Box::new(future.await)));
-        });
+        self.runtime
+            .spawn(async move {
+                let _ = sender.send(Msg::Task(Box::new(future.await)));
+            })
+            .abort_handle()
     }
 
     /// Run `job` on its own thread; its output comes back as `Msg::Task`.
@@ -168,7 +170,9 @@ impl Ctx {
 pub enum Action {
     None,
     Push(Box<dyn Screen>),
-    /// Remove this screen and hand the result to the one below.
+    /// Remove this screen and hand the result to the one below. From a screen
+    /// under a modal, the modals above it close first, as Textual's `dismiss`
+    /// after popping them.
     Pop(Option<Payload>),
     /// Remove this screen and put another in its place.
     Replace(Box<dyn Screen>),
@@ -338,6 +342,17 @@ impl Host {
             || self.ctx.exit_at.is_some_and(|at| Instant::now() >= at)
     }
 
+    /// Handle every message already queued. Returns how many there were.
+    /// The run loop does this itself; tests call it to step the screens.
+    pub fn pump(&mut self) -> usize {
+        let mut handled = 0;
+        while let Ok(msg) = self.receiver.try_recv() {
+            self.message(msg);
+            handled += 1;
+        }
+        handled
+    }
+
     /// The value the last screen popped with.
     pub fn take_result(&mut self) -> Option<Payload> {
         self.result.take()
@@ -386,6 +401,24 @@ impl Host {
                 let action = self.guarded(|screen, ctx| screen.resumed(result, ctx));
                 self.apply(action);
             }
+        }
+    }
+
+    /// Apply an action from the screen at `index`, which a modal may cover.
+    /// A push goes on top, as Textual's `push_screen` does from any screen.
+    fn apply_from(&mut self, index: usize, action: Action) {
+        if index >= self.stack.len() {
+            return;
+        }
+        match action {
+            Action::Pop(result) if index + 1 < self.stack.len() => {
+                self.stack.truncate(index + 1);
+                self.apply(Action::Pop(result));
+            }
+            Action::Replace(_) if index + 1 < self.stack.len() => {
+                warn!(target: "ltn.app", "a covered screen asked to be replaced; ignored");
+            }
+            action => self.apply(action),
         }
     }
 
@@ -438,7 +471,11 @@ impl Host {
             let Some(msg) = pending.take() else {
                 break;
             };
-            let screen = &mut self.stack[index];
+            // A pop by a screen above can shrink the stack under this loop.
+            let Some(screen) = self.stack.get_mut(index) else {
+                pending = Some(msg);
+                continue;
+            };
             let ctx = &mut self.ctx;
             let outcome = catching(|| screen.message(msg, ctx));
             let action = match outcome {
@@ -452,30 +489,26 @@ impl Host {
                     Action::None
                 }
             };
-            // A screen below the top only reacts; it does not push or pop over the top.
-            if index + 1 == self.stack.len() {
-                self.apply(action);
-            } else if !matches!(action, Action::None) {
-                warn!(target: "ltn.app", "a covered screen asked for a screen change; ignored");
-            }
+            self.apply_from(index, action);
         }
     }
 
     pub fn tick(&mut self) {
         let now = Instant::now();
         self.ctx.toasts.retain(|toast| toast.until > now);
-        for index in 0..self.stack.len() {
+        let mut index = 0;
+        while index < self.stack.len() {
             let screen = &mut self.stack[index];
             let ctx = &mut self.ctx;
             let outcome = catching(|| screen.tick(ctx));
             match outcome {
-                Ok(action) if index + 1 == self.stack.len() => self.apply(action),
-                Ok(_) => {}
+                Ok(action) => self.apply_from(index, action),
                 Err(message) => {
                     let session = self.session_running();
                     self.errors.record(&message, session, &mut self.ctx);
                 }
             }
+            index += 1;
         }
     }
 
@@ -680,7 +713,10 @@ fn dim(buffer: &mut Buffer, area: Rect, background: Color) {
 /// Toasts stack at the bottom right, newest lowest, as Textual's toast rack does.
 fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
     let theme = &ctx.theme;
-    let width = 60.min(area.width / 2).max(20).min(area.width);
+    // The rack scrolls (`overflow-y: scroll`) with a 2-column scrollbar; a toast
+    // is `width: 60; max-width: 50%` of the columns left of it.
+    let rack = area.width.saturating_sub(2);
+    let width = 60.min(rack / 2).max(20).min(rack);
     let mut bottom = area.bottom().saturating_sub(1);
     for toast in ctx.toasts.iter().rev() {
         let (edge, title_color) = match toast.severity {
@@ -706,7 +742,7 @@ fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
             break;
         }
         let rect = Rect::new(
-            area.right().saturating_sub(width),
+            area.right().saturating_sub(width + 2),
             bottom - height,
             width,
             height,

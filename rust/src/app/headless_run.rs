@@ -176,7 +176,7 @@ fn resolver_posting(
     )
 }
 
-fn new_runtime() -> Result<tokio::runtime::Runtime, String> {
+pub fn new_runtime() -> Result<tokio::runtime::Runtime, String> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -311,35 +311,7 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
     let controller =
         SessionController::new(config.clone(), template.clone(), llm, Box::new(persistence));
     let store = Arc::new(CachedModelStore::new(&paths));
-    let transcriber: Box<dyn Transcriber> =
-        Box::new(SubprocessWhisperTranscriber::new().map_err(|e| e.to_string())?);
-    let model_name = config
-        .transcription
-        .model_for_locale(&template.metadata.locale)
-        .to_string();
-    let (language, file_settings, file_hints) = (
-        language_of(&template),
-        settings(&config),
-        hints(&config, &template),
-    );
-    let audio_path: PathBuf = audio_path.to_path_buf();
-    let launcher: Launcher = Box::new(move |poster, cancel| {
-        let resolver = resolver_posting(store, &poster, &model_name);
-        let job = FileJob {
-            audio_path: &audio_path,
-            model_name: &model_name,
-            language: &language,
-            settings: file_settings,
-            recognition_hints: file_hints,
-        };
-        run_file_transcription(
-            &poster,
-            &cancel,
-            job,
-            &resolver as &dyn ModelResolver,
-            transcriber,
-        );
-    });
+    let launcher = file_launcher(store, &config, &template, audio_path)?;
     let session = HeadlessSession::new(
         controller,
         out_dir.clone(),
@@ -357,6 +329,44 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
     Ok(run_session(
         &runtime, &out_dir, &config, session, launcher, true,
     ))
+}
+
+/// The file transcription worker for `audio_path`, ready to start on its own thread.
+pub fn file_launcher(
+    store: Arc<CachedModelStore>,
+    config: &AppConfig,
+    template: &SessionTemplate,
+    audio_path: &Path,
+) -> Result<Launcher, String> {
+    let transcriber: Box<dyn Transcriber> =
+        Box::new(SubprocessWhisperTranscriber::new().map_err(|e| e.to_string())?);
+    let model_name = config
+        .transcription
+        .model_for_locale(&template.metadata.locale)
+        .to_string();
+    let (language, file_settings, file_hints) = (
+        language_of(template),
+        settings(config),
+        hints(config, template),
+    );
+    let audio_path: PathBuf = audio_path.to_path_buf();
+    Ok(Box::new(move |poster, cancel| {
+        let resolver = resolver_posting(store, &poster, &model_name);
+        let job = FileJob {
+            audio_path: &audio_path,
+            model_name: &model_name,
+            language: &language,
+            settings: file_settings,
+            recognition_hints: file_hints,
+        };
+        run_file_transcription(
+            &poster,
+            &cancel,
+            job,
+            &resolver as &dyn ModelResolver,
+            transcriber,
+        );
+    }))
 }
 
 /// Warn up front about models the provider lacks. Headless has no screen to show it later.

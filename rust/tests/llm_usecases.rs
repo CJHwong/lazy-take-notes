@@ -249,6 +249,17 @@ mod quick_actions {
     }
 
     #[tokio::test]
+    async fn a_template_error_reaches_the_screen_as_python_prints_it() {
+        // Python's KeyError reads `'nope'`; the modal shows `Error: 'nope'`.
+        let mut template = built_in_template("default_zh_tw");
+        template.quick_actions[0].prompt_template = "{nope} x".into();
+        let llm = FakeLlm::text("unused");
+        let result = run_quick_action(&llm, "1", &template, "m", input(&[], "")).await;
+        assert_eq!(result, Some(Err("'nope'".to_string())));
+        assert!(llm.single_calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn an_unknown_key_runs_nothing() {
         let template = built_in_template("default_zh_tw");
         let llm = FakeLlm::text("x");

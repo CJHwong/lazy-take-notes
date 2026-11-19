@@ -54,11 +54,16 @@ pub fn resolve_base_dir(paths: &Paths, output_dir: Option<&str>, config: &AppCon
 static UNSAFE_LABEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[^\w\-]").expect("valid regex"));
 
+/// `label` with every character but word characters and `-` turned into `_`.
+pub fn safe_label(label: &str) -> String {
+    UNSAFE_LABEL.replace_all(label, "_").into_owned()
+}
+
 /// Create a timestamped session folder under `base_dir`.
 pub fn make_session_dir(base_dir: &Path, label: Option<&str>) -> std::io::Result<PathBuf> {
     let stamp = chrono::Local::now().format("%Y-%m-%d_%H%M%S").to_string();
     let name = match label.filter(|label| !label.is_empty()) {
-        Some(label) => format!("{stamp}_{}", UNSAFE_LABEL.replace_all(label, "_")),
+        Some(label) => format!("{stamp}_{}", safe_label(label)),
         None => stamp,
     };
     let session_dir = base_dir.join(name);

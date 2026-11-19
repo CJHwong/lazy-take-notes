@@ -4,7 +4,7 @@ use crate::ports::llm::LlmClient;
 use crate::usecases::prompt_builder::build_quick_action_prompt;
 
 /// How many of the newest transcript lines a quick action sees.
-const RECENT_LINES: usize = 50;
+pub const RECENT_LINES: usize = 50;
 
 /// The quick action on key `"1"` to `"5"`, by position.
 pub fn find_action<'t>(key: &str, template: &'t SessionTemplate) -> Option<&'t QuickAction> {
@@ -43,7 +43,8 @@ pub async fn run_quick_action(
         input.user_context,
     ) {
         Ok(prompt) => prompt,
-        Err(e) => return Some(Err(format!("Template error: {}: {e}", e.kind()))),
+        // Python lets the formatting error reach the screen, which shows `Error: {e}`.
+        Err(e) => return Some(Err(e.to_string())),
     };
     let reply = llm
         .chat_single(model, &prompt)

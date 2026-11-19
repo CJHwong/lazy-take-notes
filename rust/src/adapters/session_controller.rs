@@ -22,7 +22,7 @@ use crate::ports::persistence::Persistence;
 use crate::usecases::compact::compact_messages;
 use crate::usecases::digest::{self, DigestInput, DigestRequest, DigestResult};
 use crate::usecases::label::generate_label;
-use crate::usecases::quick_action::{QuickActionInput, run_quick_action};
+use crate::usecases::quick_action::{QuickActionInput, RECENT_LINES, run_quick_action};
 use crate::usecases::speaker_attribution::speaker_for_span;
 
 /// How far a line may sit from a turn and still take its speaker, in seconds.
@@ -232,40 +232,65 @@ impl SessionController {
 
     /// A short folder label from the latest notes. None without notes or on failure.
     pub async fn generate_label(&self) -> Option<String> {
-        let latest = self.latest_digest.as_deref()?;
-        let metadata = &self.template.metadata;
-        let label = generate_label(
-            self.llm.as_ref(),
-            &metadata.name,
-            &metadata.description,
-            latest,
-            &self.config.interactive.model,
-        )
-        .await;
-        match label {
-            Ok(label) if !label.is_empty() => Some(label),
-            Ok(_) => None,
-            Err(e) => {
-                warn!(target: "ltn.controller", "Auto-label generation failed: {e}");
-                None
+        self.label_job()?.await
+    }
+
+    /// The label request with its own copy of the inputs, to run on another task.
+    pub fn label_job(&self) -> Option<impl Future<Output = Option<String>> + Send + 'static> {
+        let latest = self.latest_digest.clone()?;
+        let llm = self.llm.clone();
+        let metadata = self.template.metadata.clone();
+        let model = self.config.interactive.model.clone();
+        Some(async move {
+            let label = generate_label(
+                llm.as_ref(),
+                &metadata.name,
+                &metadata.description,
+                &latest,
+                &model,
+            )
+            .await;
+            match label {
+                Ok(label) if !label.is_empty() => Some(label),
+                Ok(_) => None,
+                Err(e) => {
+                    warn!(target: "ltn.controller", "Auto-label generation failed: {e}");
+                    None
+                }
             }
-        }
+        })
     }
 
     /// Run the quick action on `key`: (reply, label), or None for a key with no action.
     pub async fn run_quick_action(&self, key: &str) -> Option<Result<(String, String), String>> {
-        let input = QuickActionInput {
-            latest_digest: self.latest_digest.as_deref(),
-            segments: &self.all_segments,
-            user_context: &self.user_context,
-        };
-        run_quick_action(
-            self.llm.as_ref(),
-            key,
-            &self.template,
-            &self.config.interactive.model,
-            input,
-        )
-        .await
+        self.quick_action_job(key).await
+    }
+
+    /// The quick action with its own copy of the inputs, to run on another task.
+    pub fn quick_action_job(
+        &self,
+        key: &str,
+    ) -> impl Future<Output = Option<Result<(String, String), String>>> + Send + 'static {
+        let llm = self.llm.clone();
+        let template = self.template.clone();
+        let model = self.config.interactive.model.clone();
+        let latest = self.latest_digest.clone();
+        let start = self.all_segments.len().saturating_sub(RECENT_LINES);
+        let segments = self.all_segments[start..].to_vec();
+        let context = self.user_context.clone();
+        let key = key.to_string();
+        async move {
+            let input = QuickActionInput {
+                latest_digest: latest.as_deref(),
+                segments: &segments,
+                user_context: &context,
+            };
+            run_quick_action(llm.as_ref(), &key, &template, &model, input).await
+        }
+    }
+
+    /// Point later writes at the renamed session folder.
+    pub fn relocate(&mut self, new_dir: std::path::PathBuf) {
+        self.persistence.relocate(new_dir);
     }
 }

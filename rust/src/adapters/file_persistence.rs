@@ -24,11 +24,6 @@ impl FilePersistence {
     pub fn output_dir(&self) -> &Path {
         &self.output_dir
     }
-
-    /// Point later writes at `new_dir`. The caller already moved the folder.
-    pub fn relocate(&mut self, new_dir: PathBuf) {
-        self.output_dir = new_dir;
-    }
 }
 
 /// Keep the error kind; read like Python's `str(OSError)`. An open or a mkdir names
@@ -50,6 +45,11 @@ fn notes_body(markdown: &str, digest_number: u32) -> String {
 }
 
 impl Persistence for FilePersistence {
+    /// Point later writes at `new_dir`. The caller already moved the folder.
+    fn relocate(&mut self, new_dir: PathBuf) {
+        self.output_dir = new_dir;
+    }
+
     fn save_transcript_lines(
         &mut self,
         segments: &[TranscriptSegment],
