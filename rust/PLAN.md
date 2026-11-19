@@ -42,8 +42,10 @@ The two versions must work on the same data, in both directions:
 3. [x] LLM clients (Ollama, OpenAI-compatible), whisper-rs transcriber, audio file loader
 4. [x] Audio: cpal mic source, Core Audio tap source (existing Swift binary), mixed source with retry and health, mic boost, WAV writer with backlog, test tone
    - Not verified on hardware: a headset unplugged and plugged back in. A rate change on a live input (BlackHole) covers the same stop, retry and reopen path, and an aggregate device created while running shows up in the device list without any re-init.
-5. [ ] Session controller, headless record, preflight, shutdown signals, diarization (existing NeMo runtime)
+5. [x] Session controller, headless record, preflight, shutdown signals, diarization (existing NeMo runtime)
    - CLI in this step: the `--config` and `--output-dir` options, `record --headless`, `transcribe --headless`, `status` and `diarize`. `ls`, `transcript` and `notes` are not in any step yet.
+   - Real runs: `transcribe --headless` on a 95 s recording gives a byte-identical `transcript.txt` and the same stderr lines. A blocked preflight (dead Ollama port, unwritable folder) prints the same report. A live `record --headless` muted and unmuted on SIGUSR1, ran a periodic digest, and on SIGTERM ran the final digest and exited 0. A SIGINT to the whole process group (a terminal Ctrl-C) reaches only the main process: the whisper and tap children run in their own sessions, so the last sentence was transcribed before the final digest. `transcribe --headless` prints the same provider and missing-model warnings. Each version's `status` reads the other's sessions.
+   - Bare `record` and `transcribe` (the TUI) say "not usable yet" and exit 2 until step 6.
 6. [ ] TUI: shell, pickers, record, transcribe, view, preflight screen, settings, template builder
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
 7. [ ] Cross-version run: each version opens the other's sessions and config
@@ -60,3 +62,7 @@ The two versions must work on the same data, in both directions:
 7. On a two-channel input with `channels=1`, both versions record only the first channel. Rust reads its exact level; Python's PortAudio capture reads about 3 dB low with a slow waver.
 8. A configured mic name matches an exact device name, else the one device whose name holds every word of it. sounddevice also matched the host API name.
 9. When the disk has a few bytes free but less than one chunk, a retry file gets a partial write. Python counted the bytes before the write failed, so it kept that file and wrote the chunk again in the next one. Rust deletes the partial file and reuses its name.
+10. Preflight error texts name Python's exception class only where Rust has a matching case: `RuntimeError` for whisper and the tap, `PortAudioError` for the mic. Other failures carry the Rust error text.
+11. A panic is written to `debug.log` with a backtrace. A native crash (a segfault in a C library) is not; Python's `faulthandler` wrote one.
+12. Log lines written before the session folder exists (preflight) go nowhere: `debug.log` opens with the session.
+13. `transcribe` has no subtitle replay: that came only from plugins, which are dropped.
