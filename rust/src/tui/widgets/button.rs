@@ -1,13 +1,13 @@
-//! Textual's `Button` in its default style: tall top and bottom edges, a bold
-//! centered label, and a background by variant.
+//! A one-row button: plain colored text, or `▌ Label ▐` in its variant's
+//! color while focused.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::tui::text::{center, str_width};
+use crate::tui::text::str_width;
 use crate::tui::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,40 +19,19 @@ pub enum Variant {
 }
 
 impl Variant {
-    /// The background, the top and bottom edge colors, and the label color.
-    fn colors(self) -> (&'static str, &'static str, &'static str, &'static str) {
+    /// The variant's theme color.
+    fn color(self) -> &'static str {
         match self {
-            Self::Default => (
-                "surface",
-                "surface-lighten-1",
-                "surface-darken-1",
-                "button-foreground",
-            ),
-            Self::Primary => (
-                "primary",
-                "primary-lighten-3",
-                "primary-darken-3",
-                "button-color-foreground",
-            ),
-            Self::Warning => (
-                "warning",
-                "warning-lighten-2",
-                "warning-darken-3",
-                "button-color-foreground",
-            ),
-            Self::Error => (
-                "error",
-                "error-lighten-2",
-                "error-darken-3",
-                "button-color-foreground",
-            ),
+            Self::Default | Self::Primary => "primary",
+            Self::Warning => "warning",
+            Self::Error => "error",
         }
     }
 }
 
-/// `width: auto; min-width: 16`, with `line-pad: 1` on each side of the label.
+/// The label and the two edge cells on each side.
 pub fn button_width(label: &str) -> u16 {
-    (str_width(label) as u16 + 2).max(16)
+    str_width(label.trim()) as u16 + 4
 }
 
 /// Draw one 3-row button. A disabled button shows its label at 60% (`text-opacity: 0.6`).
@@ -86,35 +65,60 @@ fn draw(
     disabled: bool,
     theme: &Theme,
 ) {
-    let (background, top, bottom, text) = variant.colors();
-    let base = match focused {
-        // `:focus` tints the background 5% toward the foreground.
-        true => theme.tinted(background, "foreground", 0.05),
-        false => theme.color(background),
-    };
-    let edge = |variable: &str, glyph: &str| {
-        Line::styled(
-            glyph.repeat(usize::from(area.width)),
-            Style::default().fg(theme.color(variable)).bg(base),
-        )
-    };
-    let mut label_color = theme.on_color(text, base);
-    if disabled {
-        label_color = crate::tui::markdown::tint(label_color, base, 0.6);
+    if area.height == 0 || area.width == 0 {
+        return;
     }
-    let mut label_style = Style::default()
-        .fg(label_color)
-        .bg(base)
-        .add_modifier(Modifier::BOLD);
-    if focused {
-        // `$button-focus-text-style` is `b reverse`.
-        label_style = label_style.add_modifier(Modifier::REVERSED);
+    // The middle row of the area, so a caller's taller slot still lines up.
+    let row = Rect::new(area.x, area.y + (area.height - 1) / 2, area.width, 1);
+    let background = frame
+        .buffer_mut()
+        .cell((row.x, row.y))
+        .map_or(theme.color("background"), |cell| cell.bg);
+    let background = if background == Color::Reset {
+        theme.color("background")
+    } else {
+        background
+    };
+    let accent = theme.color(variant.color());
+    let line = button_line(label.trim(), variant, focused, disabled, accent, background, theme);
+    let pad = row.width.saturating_sub(str_width(&line_text(&line)) as u16) / 2;
+    let rect = Rect::new(row.x + pad, row.y, row.width - pad, 1);
+    frame.render_widget(Paragraph::new(line), rect);
+}
+
+fn button_line(
+    label: &str,
+    variant: Variant,
+    focused: bool,
+    disabled: bool,
+    accent: Color,
+    background: Color,
+    theme: &Theme,
+) -> Line<'static> {
+    if focused && !disabled {
+        let face = Style::default()
+            .bg(accent)
+            .fg(theme.on_color("button-color-foreground", accent))
+            .add_modifier(Modifier::BOLD);
+        let edge = Style::default().fg(accent).bg(background);
+        return Line::from(vec![
+            Span::styled("▌", edge),
+            Span::styled(format!(" {label} "), face),
+            Span::styled("▐", edge),
+        ]);
     }
-    let middle = center(
-        Line::from(vec![Span::styled(format!(" {label} "), label_style)]),
-        area.width,
-    )
-    .style(Style::default().bg(base));
-    let lines = vec![edge(top, "\u{2594}"), middle, edge(bottom, "\u{2581}")];
-    frame.render_widget(Paragraph::new(lines).style(Style::default().bg(base)), area);
+    let color = match (disabled, variant) {
+        (true, _) => theme.on_color("foreground-disabled", background),
+        (false, Variant::Default) => theme.on_color("foreground", background),
+        (false, _) => accent,
+    };
+    let mut style = Style::default().fg(color).bg(background);
+    if !disabled {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    Line::from(Span::styled(format!("  {label}  "), style))
+}
+
+fn line_text(line: &Line<'_>) -> String {
+    line.spans.iter().map(|span| span.content.as_ref()).collect()
 }

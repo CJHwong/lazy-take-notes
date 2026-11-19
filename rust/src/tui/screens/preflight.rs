@@ -8,14 +8,14 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use tracing::{error, warn};
 
 use crate::app::preflight::{
     Check, PreflightPlan, PreflightReport, Status, new_checks, run_preflight,
 };
 use crate::ports::transcriber::Transcriber;
-use crate::tui::host::{Action, Ctx, Msg, Screen};
+use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Msg, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::text::wrap_line;
 use crate::tui::widgets::button::{Variant, button_width, draw_button, draw_disabled_button};
@@ -31,6 +31,9 @@ pub const PREFLIGHT_BINDINGS: [Binding; 6] = [
 ];
 
 /// Textual reads the markup color names as CSS colors.
+/// The heading, shown in the border.
+const TITLE: &str = "Checking everything before the meeting starts";
+
 const GREEN: Color = Color::Rgb(0x00, 0x80, 0x00);
 const YELLOW: Color = Color::Rgb(0xff, 0xff, 0x00);
 const RED: Color = Color::Rgb(0xff, 0x00, 0x00);
@@ -321,13 +324,8 @@ impl PreflightScreen {
 
     /// Every row the box scrolls through, wrapped to `width`.
     fn content(&self, width: u16, text: Style) -> Vec<Line<'static>> {
-        let mut lines = vec![
-            Line::styled(
-                "Checking everything before the meeting starts",
-                text.add_modifier(Modifier::BOLD),
-            ),
-            Line::default(),
-        ];
+        // The heading sits in the border (`TITLE`).
+        let mut lines = Vec::new();
         for check in &self.checks {
             lines.extend(Self::check_lines(check, text));
         }
@@ -353,6 +351,24 @@ impl PreflightScreen {
 
     /// The buttons that show, with their labels as Textual draws them: the
     /// `[r]` and `[Esc]` in Python's labels read as markup tags, and the space before them stays.
+    fn focus_of(index: usize) -> Focus {
+        match index {
+            1 => Focus::Retry,
+            2 => Focus::Override,
+            3 => Focus::Back,
+            _ => Focus::Box,
+        }
+    }
+
+    fn index_of(focus: Focus) -> usize {
+        match focus {
+            Focus::Box => 0,
+            Focus::Retry => 1,
+            Focus::Override => 2,
+            Focus::Back => 3,
+        }
+    }
+
     fn buttons(&self) -> Vec<(Focus, &'static str, Variant, bool)> {
         let mut buttons = vec![(Focus::Retry, "Retry ", Variant::Primary, !self.running)];
         if self.show_override {
@@ -374,69 +390,93 @@ impl Screen for PreflightScreen {
         let text = Style::default()
             .fg(theme.color("foreground"))
             .bg(theme.color("background"));
-        // `width: 90%; max-width: 110`, border, `padding: 1 2`.
+        // `width: 90%; max-width: 110`, a rounded border, `padding: 0 2`.
         let width = (u32::from(area.width) * 90 / 100).min(110) as u16;
-        if width < 8 || area.height < 6 {
+        if width < 8 || area.height < 4 {
             return;
         }
         let inner_width = width - 2 - 4;
         let mut lines = self.content(inner_width, text);
-        // Buttons: `margin-top: 1`, then 3 rows.
-        let wanted = lines.len() + 1 + 3;
+        // A blank row, then the one-row buttons.
+        let wanted = lines.len() + 2;
         let max_height = (u32::from(area.height) * 90 / 100) as usize;
-        let mut height = (wanted + 2 + 2).min(max_height);
-        let mut window = height.saturating_sub(4);
+        let mut height = (wanted + 2).min(max_height);
+        let mut window = height.saturating_sub(2);
         let overflow = wanted > window;
         if overflow {
-            // The scrollbar takes 2 columns; wrap again in what is left.
-            lines = self.content(inner_width.saturating_sub(2), text);
-            height = (lines.len() + 4 + 4).min(max_height);
-            window = height.saturating_sub(4);
+            // The scrollbar takes a column; wrap again in what is left.
+            lines = self.content(inner_width.saturating_sub(1), text);
+            height = (lines.len() + 2 + 2).min(max_height);
+            window = height.saturating_sub(2);
         }
-        let total = lines.len() + 4;
+        let total = lines.len() + 2;
         self.page = window;
         self.max_offset = total.saturating_sub(window);
         self.offset = self.offset.min(self.max_offset);
         let x = area.x + (area.width - width) / 2;
         let y = area.y + (area.height - height as u16) / 2;
         let outer = Rect::new(x, y, width, height as u16);
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(text.fg(theme.color("accent")))
-            .style(text);
-        frame.render_widget(block, outer);
-        let body = Rect::new(outer.x + 1, outer.y + 1, outer.width - 2, outer.height - 2);
+        let body = crate::tui::widgets::rounded(
+            frame,
+            outer,
+            TITLE,
+            theme.color("primary"),
+            theme.color("background"),
+            theme,
+        );
+        ctx.hit(body, "box", 0);
         let content = Rect::new(
             body.x + 2,
-            body.y + 1,
-            inner_width - if overflow { 2 } else { 0 },
+            body.y,
+            inner_width - u16::from(overflow),
             window as u16,
         );
+        let text_rows = lines.len();
         let shown: Vec<Line<'static>> = lines.into_iter().skip(self.offset).take(window).collect();
-        let used = shown.len();
         frame.render_widget(Paragraph::new(shown).style(text), content);
         // The buttons scroll with the rest: they start one row after the text.
-        let button_row = lines_top(used, self.offset, total - 4);
-        if let Some(row) = button_row.filter(|row| row + 3 <= window) {
+        let button_row = (text_rows + 1).checked_sub(self.offset);
+        if let Some(row) = button_row.filter(|row| *row < window) {
             let mut bx = content.x;
             for (focus, label, variant, enabled) in self.buttons() {
                 let bw = button_width(label);
                 if bx + bw > content.right() {
                     break;
                 }
-                let rect = Rect::new(bx, content.y + row as u16, bw, 3);
+                let rect = Rect::new(bx, content.y + row as u16, bw, 1);
                 match enabled {
                     true => draw_button(frame, rect, label, variant, self.focus == focus, theme),
                     false => draw_disabled_button(frame, rect, label, variant, theme),
                 }
-                // `margin-right: 2`.
-                bx += bw + 2;
+                if enabled {
+                    ctx.hit(rect, "button", Self::index_of(focus));
+                }
+                bx += bw + 1;
             }
         }
         if overflow {
-            let bar = Rect::new(body.right() - 2, body.y + 1, 2, window as u16);
+            let bar = Rect::new(body.right() - 1, body.y, 1, window as u16);
             draw_scrollbar(frame, bar, self.offset, total, window, theme);
+        }
+    }
+
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        match input.kind {
+            MouseKind::WheelUp => {
+                self.scroll_key("up");
+                Action::None
+            }
+            MouseKind::WheelDown => {
+                self.scroll_key("down");
+                Action::None
+            }
+            MouseKind::Click => match input.on("button") {
+                Some(index) => {
+                    self.focus = Self::focus_of(index);
+                    self.press(ctx)
+                }
+                None => Action::None,
+            },
         }
     }
 
@@ -511,11 +551,6 @@ impl Screen for PreflightScreen {
 
 /// The row inside the window where the buttons start, if they are in view.
 /// `text_rows` is the content above them, buttons take their margin plus 3 rows.
-fn lines_top(_used: usize, offset: usize, text_rows: usize) -> Option<usize> {
-    let start = text_rows + 1;
-    start.checked_sub(offset)
-}
-
 #[cfg(test)]
 mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};

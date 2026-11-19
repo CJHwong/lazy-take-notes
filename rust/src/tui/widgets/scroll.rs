@@ -119,6 +119,12 @@ impl ScrollView {
     }
 
     /// Scroll by a key. Returns true when the key was a scroll key.
+    /// Scroll by `rows`, as the wheel does.
+    pub fn scroll_by(&mut self, rows: isize) {
+        let last = self.rows.saturating_sub(self.height);
+        self.offset = self.offset.saturating_add_signed(rows).min(last);
+    }
+
     pub fn key(&mut self, name: &str) -> bool {
         let page = self.height.max(1);
         let last = self.rows.saturating_sub(self.height);
@@ -204,18 +210,13 @@ impl ScrollView {
             .collect();
         frame.render_widget(Paragraph::new(shown).style(style), text_area);
         if self.rows > height {
-            for column in 0..self.bar_width.min(region.width) {
-                let strip = Rect::new(region.x, region.y, region.width - column, region.height);
-                draw_scrollbar(frame, strip, self.offset, self.rows, height, theme);
-            }
+            draw_scrollbar(frame, region, self.offset, self.rows, height, theme);
         }
     }
 }
 
-const VERTICAL_BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", " "];
-
-/// Textual's `ScrollBarRender.render_bar`: the thumb in whole cells, with
-/// eighth-block glyphs at its ends.
+/// A thin vertical scrollbar at the right edge of `area`: a `│` track and a
+/// `┃` thumb in the primary color.
 pub fn draw_scrollbar(
     frame: &mut Frame,
     area: Rect,
@@ -242,34 +243,16 @@ pub fn draw_scrollbar_columns(
     if size == 0 || area.width == 0 {
         return;
     }
-    let back = theme.color("scrollbar-background");
-    let bar = theme.color("scrollbar");
+    let track = Style::default().fg(theme.color("border-blurred"));
+    let thumb = Style::default().fg(theme.color("primary"));
     let first_x = area.right() - columns.min(area.width);
-    let mut cells: Vec<(&str, Style)> = vec![(" ", Style::default().bg(back)); size];
-    if height > 0 && rows > 0 && rows != size && rows > height {
-        let len_bars = VERTICAL_BARS.len();
-        let bar_ratio = rows as f64 / size as f64;
-        let thumb_size = (height as f64 / bar_ratio).max(1.0);
-        let position_ratio = offset as f64 / (rows - height) as f64;
-        let position = (size as f64 - thumb_size) * position_ratio;
-        let start = (position * len_bars as f64) as usize;
-        let end = start + (thumb_size * len_bars as f64).ceil() as usize;
-        let (start_index, start_bar) = (start / len_bars, start % len_bars);
-        let (end_index, end_bar) = (end / len_bars, end % len_bars);
-        for cell in cells.iter_mut().take(end_index.min(size)).skip(start_index) {
-            *cell = (" ", Style::default().bg(bar));
-        }
-        if start_index < size && VERTICAL_BARS[len_bars - 1 - start_bar] != " " {
-            cells[start_index] = (
-                VERTICAL_BARS[len_bars - 1 - start_bar],
-                Style::default().bg(back).fg(bar),
-            );
-        }
-        if end_index < size && VERTICAL_BARS[len_bars - 1 - end_bar] != " " {
-            cells[end_index] = (
-                VERTICAL_BARS[len_bars - 1 - end_bar],
-                Style::default().bg(bar).fg(back),
-            );
+    let mut cells: Vec<(&str, Style)> = vec![("│", track); size];
+    if height > 0 && rows > height {
+        let thumb_size = ((height * size) as f64 / rows as f64).round().max(1.0) as usize;
+        let room = size.saturating_sub(thumb_size);
+        let start = (offset as f64 / (rows - height) as f64 * room as f64).round() as usize;
+        for cell in cells.iter_mut().skip(start.min(room)).take(thumb_size) {
+            *cell = ("┃", thumb);
         }
     }
     let buffer = frame.buffer_mut();

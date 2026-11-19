@@ -12,14 +12,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crossterm::event::{Event as TermEvent, EventStream, KeyEvent};
+use crossterm::event::{
+    Event as TermEvent, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph, Widget, Wrap};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{error, info, warn};
 
@@ -79,7 +82,56 @@ pub struct Ctx {
     suspend_job: Option<SuspendJob>,
     /// The id of the screen the host is calling now.
     current: u64,
+    /// What each widget drew where in the last frame, for the mouse.
+    hits: std::cell::RefCell<Vec<Hit>>,
+    /// The id of the screen the host is drawing now.
+    drawing: std::cell::Cell<u64>,
 }
+
+/// The widget a click or the wheel landed on: the key its screen gave it while
+/// drawing, and a row or item index within it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Target {
+    pub key: String,
+    pub index: usize,
+    /// Where the widget was drawn.
+    pub rect: Rect,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseKind {
+    Click,
+    WheelUp,
+    WheelDown,
+}
+
+/// A click or a wheel step, with the widget under the pointer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MouseInput {
+    pub kind: MouseKind,
+    pub column: u16,
+    pub row: u16,
+    pub target: Option<Target>,
+}
+
+impl MouseInput {
+    /// The target's index when the pointer is on the widget named `key`.
+    pub fn on(&self, key: &str) -> Option<usize> {
+        self.target
+            .as_ref()
+            .filter(|target| target.key == key)
+            .map(|target| target.index)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Hit {
+    screen: u64,
+    target: Target,
+}
+
+/// The screen id that marks the host's own toasts.
+const TOAST_SCREEN: u64 = u64::MAX;
 
 type SuspendJob = (Box<dyn FnOnce() -> Payload + Send>, u64);
 
@@ -112,6 +164,32 @@ impl Ctx {
     }
 
     /// Texts of the toasts on screen, oldest first.
+    /// Mark `rect` as the widget `key` (item `index`) for clicks and the wheel.
+    /// A widget drawn later sits on top of one drawn before it.
+    pub fn hit(&self, rect: Rect, key: &str, index: usize) {
+        if rect.width == 0 || rect.height == 0 {
+            return;
+        }
+        self.hits.borrow_mut().push(Hit {
+            screen: self.drawing.get(),
+            target: Target {
+                key: key.into(),
+                index,
+                rect,
+            },
+        });
+    }
+
+    fn target_at(&self, screen: u64, column: u16, row: u16) -> Option<Target> {
+        let point = ratatui::layout::Position::new(column, row);
+        self.hits
+            .borrow()
+            .iter()
+            .rev()
+            .find(|hit| hit.screen == screen && hit.target.rect.contains(point))
+            .map(|hit| hit.target.clone())
+    }
+
     pub fn toast_texts(&self) -> Vec<String> {
         self.toasts.iter().map(|toast| toast.text.clone()).collect()
     }
@@ -283,6 +361,17 @@ pub trait Screen {
         Action::None
     }
 
+    /// A click or a wheel step. Unless a screen handles it, the wheel moves as
+    /// up and down do, and a click does nothing.
+    fn mouse(&mut self, input: &MouseInput, ctx: &mut Ctx) -> Action {
+        let (code, name) = match input.kind {
+            MouseKind::WheelUp => (KeyCode::Up, "up"),
+            MouseKind::WheelDown => (KeyCode::Down, "down"),
+            MouseKind::Click => return Action::None,
+        };
+        self.key(&KeyEvent::new(code, KeyModifiers::NONE), name, ctx)
+    }
+
     /// A worker event or task result. Give it back when this screen does not own it.
     fn message(&mut self, msg: Msg, _ctx: &mut Ctx) -> (Option<Msg>, Action) {
         (Some(msg), Action::None)
@@ -435,6 +524,8 @@ impl Host {
                 exit_now: false,
                 suspend_job: None,
                 current: 0,
+                hits: std::cell::RefCell::new(Vec::new()),
+                drawing: std::cell::Cell::new(0),
             },
             receiver,
             errors: ErrorTracker::default(),
@@ -587,6 +678,35 @@ impl Host {
         );
     }
 
+    /// A mouse event from the terminal: a click closes the toast under it, or
+    /// goes with the wheel to the top screen with the widget under the pointer.
+    pub fn mouse(&mut self, event: &MouseEvent) {
+        let kind = match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => MouseKind::Click,
+            MouseEventKind::ScrollUp => MouseKind::WheelUp,
+            MouseEventKind::ScrollDown => MouseKind::WheelDown,
+            _ => return,
+        };
+        let (column, row) = (event.column, event.row);
+        if kind == MouseKind::Click
+            && let Some(toast) = self.ctx.target_at(TOAST_SCREEN, column, row)
+        {
+            if toast.index < self.ctx.toasts.len() {
+                self.ctx.toasts.remove(toast.index);
+            }
+            return;
+        }
+        let top = self.ids.last().copied().unwrap_or(0);
+        let input = MouseInput {
+            kind,
+            column,
+            row,
+            target: self.ctx.target_at(top, column, row),
+        };
+        let action = self.guarded(|screen, ctx| screen.mouse(&input, ctx));
+        self.apply(action);
+    }
+
     pub fn paste(&mut self, text: &str) {
         let action = self.guarded(|screen, ctx| screen.paste(text, ctx));
         self.apply(action);
@@ -685,6 +805,7 @@ impl Host {
             .bg(background)
             .fg(self.ctx.theme.color("foreground"));
         frame.render_widget(Block::default().style(base_style), area);
+        self.ctx.hits.borrow_mut().clear();
         let base = self
             .stack
             .iter()
@@ -696,11 +817,13 @@ impl Host {
             }
             let screen = &mut self.stack[index];
             let ctx = &self.ctx;
+            ctx.drawing.set(self.ids[index]);
             if let Err(message) = catching(|| screen.render(frame, area, ctx)) {
                 let session = self.session_running();
                 self.errors.record(&message, session, &mut self.ctx);
             }
         }
+        self.ctx.drawing.set(TOAST_SCREEN);
         render_toasts(frame, area, &self.ctx);
         resolve_dim(frame.buffer_mut(), area);
     }
@@ -782,6 +905,7 @@ impl Host {
         match event {
             TermEvent::Key(key) => self.key(&key),
             TermEvent::Paste(text) => self.paste(&text),
+            TermEvent::Mouse(event) => self.mouse(&event),
             TermEvent::FocusGained => {
                 let action = self.guarded(|screen, ctx| screen.app_focus(ctx));
                 self.apply(action);
@@ -936,7 +1060,7 @@ fn dim(buffer: &mut Buffer, area: Rect, background: Color) {
     let toward = |color: Color| match (color, background) {
         (Color::Rgb(r, g, b), Color::Rgb(br, bg, bb)) => {
             let mix = |from: u8, to: u8| {
-                (f64::from(from) + (f64::from(to) - f64::from(from)) * 0.6) as u8
+                (f64::from(from) + (f64::from(to) - f64::from(from)) * 0.4) as u8
             };
             Color::Rgb(mix(r, br), mix(g, bg), mix(b, bb))
         }
@@ -955,57 +1079,51 @@ fn dim(buffer: &mut Buffer, area: Rect, background: Color) {
 /// Toasts stack at the bottom right, newest lowest, as Textual's toast rack does.
 fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
     let theme = &ctx.theme;
-    // The rack scrolls (`overflow-y: scroll`) with a 2-column scrollbar; a toast
-    // is `width: 60; max-width: 50%` of the columns left of it.
-    let rack = area.width.saturating_sub(2);
-    let width = 60.min(rack / 2).max(20).min(rack);
+    // Newest at the bottom right, older ones stacked above it. A click closes one.
+    let width = 50.min(area.width.saturating_sub(2) / 2).max(24).min(area.width);
     let mut bottom = area.bottom().saturating_sub(1);
-    for toast in ctx.toasts.iter().rev() {
-        let (edge, title_color) = match toast.severity {
-            Severity::Information => ("success", "text-success"),
-            Severity::Warning => ("warning", "text-warning"),
-            Severity::Error => ("error", "text-error"),
+    for (index, toast) in ctx.toasts.iter().enumerate().rev() {
+        let edge = match toast.severity {
+            Severity::Information => "success",
+            Severity::Warning => "warning",
+            Severity::Error => "error",
         };
-        let background = theme.on("panel-lighten-1", "background");
-        let mut lines = Vec::new();
-        if !toast.title.is_empty() {
-            lines.push(Line::from(Span::styled(
-                toast.title.clone(),
-                Style::default()
-                    .fg(theme.on(title_color, "panel-lighten-1"))
-                    .add_modifier(Modifier::BOLD),
-            )));
-        }
-        lines.extend(toast.text.lines().map(|line| Line::from(line.to_string())));
-        let inner_width = width.saturating_sub(3).max(1);
+        let background = theme.color("surface");
+        let lines: Vec<Line> = toast
+            .text
+            .lines()
+            .map(|line| Line::from(line.to_string()))
+            .collect();
+        let inner_width = width.saturating_sub(4).max(1);
         let text_rows = crate::tui::text::wrapped_height(&lines, inner_width);
         let height = (text_rows + 2).min(bottom.saturating_sub(area.top()));
         if height < 3 {
             break;
         }
         let rect = Rect::new(
-            area.right().saturating_sub(width + 2),
+            area.right().saturating_sub(width + 1),
             bottom - height,
             width,
             height,
         );
         frame.render_widget(Clear, rect);
+        let inner = crate::tui::widgets::rounded(
+            frame,
+            rect,
+            &toast.title,
+            theme.color(edge),
+            background,
+            theme,
+        );
         let style = Style::default()
             .bg(background)
-            .fg(theme.on("foreground", "panel-lighten-1"));
-        frame.render_widget(Block::default().style(style), rect);
-        let edge_style = Style::default().fg(theme.color(edge)).bg(background);
-        for y in rect.top()..rect.bottom() {
-            Span::styled("▌", edge_style).render(Rect::new(rect.x, y, 1, 1), frame.buffer_mut());
-        }
-        let text_area = Rect::new(rect.x + 2, rect.y + 1, inner_width, height - 2);
+            .fg(theme.on_color("foreground", background));
         frame.render_widget(
-            Paragraph::new(lines)
-                .style(style)
-                .wrap(Wrap { trim: false }),
-            text_area,
+            Paragraph::new(lines).style(style).wrap(Wrap { trim: false }),
+            Rect::new(inner.x + 1, inner.y, inner_width, inner.height),
         );
-        bottom = rect.top().saturating_sub(1);
+        ctx.hit(rect, "toast", index);
+        bottom = rect.top();
     }
 }
 
