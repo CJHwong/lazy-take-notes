@@ -5,7 +5,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
 use super::*;
 use crate::adapters::paths::Paths;
@@ -142,6 +142,22 @@ impl Run {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// A mouse event at a cell of the last drawn 110x32 screen.
+    fn mouse(&mut self, kind: MouseEventKind, column: u16, row: u16) {
+        self.screen();
+        self.host.mouse(&MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+        self.settle();
+    }
+
+    fn click(&mut self, column: u16, row: u16) {
+        self.mouse(MouseEventKind::Down(MouseButton::Left), column, row);
     }
 
     fn saved(&self, name: &str) -> std::path::PathBuf {
@@ -380,4 +396,41 @@ fn a_panicking_call_shows_an_error_and_the_builder_still_works() {
     assert!(screen.contains("client bug"), "{screen}");
     run.send("second");
     assert!(run.screen().contains("AI: Which language?"));
+}
+
+#[test]
+fn a_click_moves_the_focus_between_the_chat_and_the_input() {
+    let mut run = start(Vec::new(), None);
+    // The chat fills the left column above the 3-row input (rows 28 to 30).
+    run.click(10, 5);
+    run.host.paste("typed-in-chat");
+    assert!(!run.screen().contains("typed-in-chat"));
+    run.click(10, 29);
+    run.host.paste("typed-in-input");
+    assert!(run.screen().contains("typed-in-input"));
+}
+
+#[test]
+fn the_wheel_scrolls_the_chat_under_the_pointer() {
+    let lines: Vec<String> = (0..60).map(|n| format!("reply line {n}")).collect();
+    let mut run = start(vec![Ok(lines.join("\n"))], None);
+    run.send("make it");
+    let chat = |screen: &str| -> Vec<String> {
+        screen
+            .lines()
+            .skip(1)
+            .take(27)
+            .map(|line| line.chars().take(55).collect())
+            .collect()
+    };
+    let at_end = chat(&run.screen());
+    assert!(at_end.iter().any(|line| line.contains("reply line 59")));
+    run.mouse(MouseEventKind::ScrollUp, 10, 5);
+    let scrolled = chat(&run.screen());
+    assert_ne!(scrolled, at_end);
+    // The wheel over the preview leaves the chat alone.
+    run.mouse(MouseEventKind::ScrollDown, 80, 5);
+    assert_eq!(chat(&run.screen()), scrolled);
+    run.mouse(MouseEventKind::ScrollDown, 10, 5);
+    assert_eq!(chat(&run.screen()), at_end);
 }

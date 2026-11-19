@@ -16,7 +16,9 @@ use crate::adapters::templates::YamlTemplates;
 use crate::domain::chat::ChatMessage;
 use crate::domain::template::SessionTemplate;
 use crate::ports::llm::{LlmClient, LlmError};
-use crate::tui::host::{Action, Ctx, Msg, NOTIFICATION_TIMEOUT, Payload, Screen, Severity};
+use crate::tui::host::{
+    Action, Ctx, MouseInput, MouseKind, Msg, NOTIFICATION_TIMEOUT, Payload, Screen, Severity,
+};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::markdown::tint;
 use crate::tui::screens::template_picker::{Answer, Confirm};
@@ -24,7 +26,7 @@ use crate::tui::text::center;
 use crate::tui::widgets::button::Variant;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::scroll::ScrollView;
-use crate::tui::widgets::{bar, centered, split_bars, tall_edges, thick_box};
+use crate::tui::widgets::{bar, border_color, centered, rounded, split_bars};
 use crate::usecases::template_builder::{BuilderResult, TemplateBuilder};
 use crate::usecases::template_diff::diff_templates;
 
@@ -378,12 +380,12 @@ impl TemplateBuilderScreen {
         };
         let mut chat_view = ScrollView::log();
         chat_view.always_bar = false;
-        chat_view.bar_width = 2;
+        chat_view.bar_width = 1;
         chat_view.content_padding = 1;
         let mut preview = ScrollView::markdown();
         preview.padding = 0;
         preview.markdown_padding = 1;
-        preview.bar_width = 2;
+        preview.bar_width = 1;
         let mut screen = Self {
             setup,
             ready: None,
@@ -690,30 +692,6 @@ fn fade(frame: &mut Frame, area: Rect, under: Color, alpha: f64) {
     }
 }
 
-/// A `border: tall` box around a scroll container. Returns the inside.
-fn tall_box(frame: &mut Frame, area: Rect, border: Color, inner: Color, outer: Color) -> Rect {
-    if area.width < 2 || area.height < 2 {
-        return Rect::default();
-    }
-    let edges = tall_edges(border, inner, outer);
-    let width = usize::from(area.width - 2);
-    let mut lines = Vec::new();
-    for row in 0..area.height {
-        let (fill, style) = match row {
-            0 => ("▔", edges.fill),
-            r if r == area.height - 1 => ("▁", edges.fill),
-            _ => (" ", Style::default().bg(inner)),
-        };
-        lines.push(Line::from(vec![
-            Span::styled("▊", edges.left),
-            Span::styled(fill.repeat(width), style),
-            Span::styled("▎", edges.right),
-        ]));
-    }
-    frame.render_widget(Paragraph::new(lines), area);
-    Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 2)
-}
-
 impl Screen for TemplateBuilderScreen {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
@@ -729,7 +707,6 @@ impl Screen for TemplateBuilderScreen {
             theme,
         );
         let background = theme.color("background");
-        let border = theme.color("surface-lighten-2");
         let text = Style::default()
             .fg(theme.color("foreground"))
             .bg(background);
@@ -749,15 +726,46 @@ impl Screen for TemplateBuilderScreen {
             left.width,
             input_height,
         );
-        let chat_inner = tall_box(frame, chat_area, border, background, background);
+        let chat_border = border_color(self.focus == Focus::Chat, theme);
+        let chat_inner = rounded(frame, chat_area, "", chat_border, background, theme);
         self.chat_view.render(frame, chat_inner, text, theme);
+        ctx.hit(chat_area, "chat", 0);
         self.input
             .render(frame, input_area, self.focus == Focus::Input, theme);
         if self.busy {
             fade(frame, input_area, background, 0.7);
+        } else {
+            ctx.hit(input_area, "input", 0);
         }
-        let preview_inner = tall_box(frame, right, border, background, background);
+        let preview_border = border_color(self.focus == Focus::Preview, theme);
+        let preview_inner = rounded(frame, right, "", preview_border, background, theme);
         self.preview.render(frame, preview_inner, text, theme);
+        ctx.hit(right, "preview", 0);
+    }
+
+    /// A click focuses the chat, the input, or the preview; the wheel scrolls
+    /// the chat or the preview under the pointer.
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        let step = match input.kind {
+            MouseKind::WheelUp => -1,
+            MouseKind::WheelDown => 1,
+            MouseKind::Click => {
+                if input.on("chat").is_some() {
+                    self.focus = Focus::Chat;
+                } else if input.on("input").is_some() {
+                    self.focus = Focus::Input;
+                } else if input.on("preview").is_some() {
+                    self.focus = Focus::Preview;
+                }
+                return Action::None;
+            }
+        };
+        if input.on("chat").is_some() {
+            self.chat_view.scroll_by(step);
+        } else if input.on("preview").is_some() {
+            self.preview.scroll_by(step);
+        }
+        Action::None
     }
 
     fn key(&mut self, key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {
@@ -873,44 +881,60 @@ impl SaveTemplate {
 impl Screen for SaveTemplate {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
-        // Border, padding, then: title + margin, label, input + margin, label, input + margin, hint.
-        let outer = centered(area, 60, 2 + 2 + 2 + 1 + 4 + 1 + 4 + 1);
-        let inner = thick_box(frame, outer, "primary", "surface", theme);
-        if inner.height < 15 || inner.width < 10 {
+        // A rounded box titled "Save Template": the two titled inputs, a blank row, the hint.
+        let outer = centered(area, 60, 2 + 3 + 3 + 1 + 1);
+        frame.render_widget(ratatui::widgets::Clear, outer);
+        let inner = rounded(
+            frame,
+            outer,
+            "Save Template",
+            theme.color("primary"),
+            theme.color("surface"),
+            theme,
+        );
+        if inner.height < 8 || inner.width < 10 {
             return;
         }
-        let padded = Rect::new(inner.x + 2, inner.y + 1, inner.width - 4, inner.height - 2);
-        let text = Style::default()
-            .fg(theme.on("foreground", "surface"))
+        let padded = Rect::new(inner.x + 1, inner.y, inner.width - 2, inner.height);
+        let muted = Style::default()
+            .fg(theme.on("text-muted", "surface"))
             .bg(theme.color("surface"));
-        let muted = text.fg(theme.on("text-muted", "surface"));
-        let row = |y: u16| Rect::new(padded.x, padded.y + y, padded.width, 1);
-        frame.render_widget(
-            Paragraph::new(center(Line::from("Save Template"), padded.width)).style(text),
-            row(0),
-        );
-        frame.render_widget(Paragraph::new("File name").style(muted), row(2));
-        self.file_name.render(
-            frame,
-            Rect::new(padded.x, padded.y + 3, padded.width, 3),
-            !self.on_display,
-            theme,
-        );
-        frame.render_widget(Paragraph::new("Display name").style(muted), row(7));
-        self.display_name.render(
-            frame,
-            Rect::new(padded.x, padded.y + 8, padded.width, 3),
-            self.on_display,
-            theme,
-        );
+        let file_area = Rect::new(padded.x, padded.y, padded.width, 3);
+        self.file_name
+            .render_titled(frame, file_area, "File name", !self.on_display, theme);
+        ctx.hit(file_area, "file_name", 0);
+        let display_area = Rect::new(padded.x, padded.y + 3, padded.width, 3);
+        self.display_name
+            .render_titled(frame, display_area, "Display name", self.on_display, theme);
+        ctx.hit(display_area, "display_name", 0);
         frame.render_widget(
             Paragraph::new(center(
                 Line::from("Enter to save, Esc to cancel"),
                 padded.width,
             ))
             .style(muted),
-            row(12),
+            Rect::new(padded.x, padded.y + 7, padded.width, 1),
         );
+    }
+
+    /// A click on an input moves the focus there, as Tab does.
+    fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        if input.kind != MouseKind::Click {
+            return Action::None;
+        }
+        let on_display = match (input.on("file_name"), input.on("display_name")) {
+            (Some(_), _) => false,
+            (_, Some(_)) => true,
+            _ => return Action::None,
+        };
+        if on_display != self.on_display {
+            self.on_display = on_display;
+            match on_display {
+                true => self.display_name.select_all(),
+                false => self.file_name.select_all(),
+            }
+        }
+        Action::None
     }
 
     fn key(&mut self, key: &KeyEvent, name: &str, _ctx: &mut Ctx) -> Action {
