@@ -5,13 +5,17 @@ edition = "2024"
 
 [dependencies]
 async-trait = "0.1.92"
+dirs = "7.0.0"
 fancy-regex = "0.20.2"
 indexmap = { version = "2.14.2", features = ["serde"] }
+libc = "0.2.191"
 regex = "1.13.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 thiserror = "2.0.21"
 tracing = "0.1.44"
+yaml_serde = "0.10.7"
 
 [dev-dependencies]
+tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["macros", "rt", "sync", "time"] }
