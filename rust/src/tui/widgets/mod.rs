@@ -1,5 +1,6 @@
 //! Widgets shared by the screens, drawn in Textual's styles.
 
+pub mod button;
 pub mod input;
 pub mod list;
 pub mod scroll;

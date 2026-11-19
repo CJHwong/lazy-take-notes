@@ -79,3 +79,5 @@ The two versions must work on the same data, in both directions:
 23. An editor that fails to start after `e` in the template picker is logged, and the picker stays open. Python crashed.
 24. Home, End, Page Up and Page Down in a list scroll the list and leave the highlight where it is, as Textual's `ListView` does. Earlier Rust builds moved the highlight.
 25. A few colors differ by up to 4 levels per channel: inline code in Markdown, and dim text after Textual's rounding. The left edge of an input's border sits on the theme background, not the terminal's default background.
+26. `record` without `--headless` shows the preflight screen in the saved theme. Python showed it in Textual's default theme there, and in the saved theme only inside the kiosk shell.
+27. The "Quick actions disabled" warning shows once when a recording starts. Python showed the same toast twice.

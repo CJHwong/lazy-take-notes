@@ -81,3 +81,13 @@ fn transcribe_screen_and_its_modals() {
     assert_table("widgets.query_modal.QueryModal", &QUERY_BINDINGS);
     assert_table("widgets.label_modal.LabelModal", &LABEL_BINDINGS);
 }
+
+#[test]
+fn record_preflight_and_consent() {
+    use lazy_take_notes::tui::screens::modals::NOTICE_BINDINGS;
+    use lazy_take_notes::tui::screens::preflight::PREFLIGHT_BINDINGS;
+    use lazy_take_notes::tui::screens::record::RECORD_BINDINGS;
+    assert_table("apps.record.RecordApp", &RECORD_BINDINGS);
+    assert_table("apps.preflight_screen.PreflightScreen", &PREFLIGHT_BINDINGS);
+    assert_table("widgets.consent_notice.ConsentNotice", &NOTICE_BINDINGS);
+}

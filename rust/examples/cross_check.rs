@@ -111,6 +111,8 @@ fn main() {
             serde_json::Value::Null
         }
         "mic-levels" => mic_levels(&args[1], args[2].parse().unwrap()),
+        "mic-blocks" => mic_blocks(args[1].parse().unwrap()),
+        "tap-blocks" => tap_blocks(args[1].parse().unwrap()),
         "record" => record(
             &paths,
             &arg(1),
@@ -389,6 +391,57 @@ fn tone_reaches_tap() -> serde_json::Value {
 }
 
 /// RMS of SECONDS from one input device through MicrophoneSource, with channels=1.
+/// The default mic's first blocks: (length, RMS) each, to see how the stream starts.
+fn mic_blocks(seconds: f64) -> serde_json::Value {
+    use std::time::{Duration, Instant};
+
+    use lazy_take_notes::adapters::audio::microphone::MicrophoneSource;
+    use lazy_take_notes::ports::audio_source::AudioSource;
+
+    let mic = MicrophoneSource::new(None);
+    mic.open(16_000, 1).unwrap();
+    let (started, mut blocks) = (Instant::now(), Vec::new());
+    while started.elapsed().as_secs_f64() < seconds {
+        if let Some(block) = mic.read(Duration::from_millis(50)).unwrap() {
+            let sum: f64 = block.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+            let rms = (sum / block.len().max(1) as f64).sqrt();
+            blocks.push(serde_json::json!([block.len(), (rms * 1e5).round() / 1e5]));
+        }
+    }
+    mic.close().unwrap();
+    serde_json::json!(blocks)
+}
+
+/// The system audio tap's RMS per second, and the share of exact zeros.
+fn tap_blocks(seconds: f64) -> serde_json::Value {
+    use std::time::{Duration, Instant};
+
+    use lazy_take_notes::adapters::audio::coreaudio_tap::CoreAudioTapSource;
+    use lazy_take_notes::ports::audio_source::AudioSource;
+
+    let tap = CoreAudioTapSource::new(false);
+    tap.open(16_000, 1).unwrap();
+    let (started, mut samples) = (Instant::now(), Vec::new());
+    while started.elapsed().as_secs_f64() < seconds {
+        if let Some(block) = tap.read(Duration::from_millis(50)).unwrap() {
+            samples.extend(block);
+        }
+    }
+    tap.close().unwrap();
+    let per_second: Vec<serde_json::Value> = samples
+        .chunks(16_000)
+        .map(|chunk| {
+            let sum: f64 = chunk.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+            let zeros = chunk.iter().filter(|&&s| s == 0.0).count();
+            serde_json::json!([
+                ((sum / chunk.len() as f64).sqrt() * 1e4).round() / 1e4,
+                zeros * 100 / chunk.len()
+            ])
+        })
+        .collect();
+    serde_json::json!(per_second)
+}
+
 fn mic_levels(device: &str, seconds: f64) -> serde_json::Value {
     use std::time::{Duration, Instant};
 

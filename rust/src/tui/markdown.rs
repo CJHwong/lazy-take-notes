@@ -525,7 +525,7 @@ fn list_marker_width(list: &ListState) -> usize {
 }
 
 /// `color` at `alpha` over `under`.
-fn tint(color: Color, under: Color, alpha: f64) -> Color {
+pub(crate) fn tint(color: Color, under: Color, alpha: f64) -> Color {
     match (color, under) {
         (Color::Rgb(r, g, b), Color::Rgb(ur, ug, ub)) => {
             let mix = |from: u8, to: u8| {

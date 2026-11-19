@@ -69,8 +69,12 @@ fn centered_row(frame: &mut Frame, area: Rect, text: &str, style: Style) {
 enum Kind {
     Help,
     Query,
-    /// The built-in templates notice; `d` writes this flag file.
-    Notice(PathBuf),
+    /// A one-time notice: any key closes it, and `suppress_key` also writes `flag`.
+    Notice {
+        flag: PathBuf,
+        suppress_key: &'static str,
+        color: &'static str,
+    },
 }
 
 /// A `VerticalScroll` modal: a bold title, a Markdown body and a hint docked at the bottom.
@@ -130,11 +134,33 @@ impl MarkdownModal {
         Self {
             max_width: 72,
             max_height_percent: 60,
-            kind: Kind::Notice(noticed),
+            kind: Kind::Notice {
+                flag: noticed,
+                suppress_key: "d",
+                color: "accent",
+            },
             ..Self::new(
                 "Built-in Templates",
                 BUILTIN_NOTICE_BODY,
                 "Press any key to dismiss, or [d] to stop showing this.",
+            )
+        }
+    }
+
+    /// Python's `ConsentNotice`, shown when a recording starts. `n` writes `noticed`.
+    pub fn consent_notice(noticed: PathBuf) -> Self {
+        Self {
+            max_width: 72,
+            max_height_percent: 60,
+            kind: Kind::Notice {
+                flag: noticed,
+                suppress_key: "n",
+                color: "warning",
+            },
+            ..Self::new(
+                "Recording Notice",
+                CONSENT_NOTICE_BODY,
+                "Press any key to dismiss, or [n] to stop showing this.",
             )
         }
     }
@@ -145,15 +171,15 @@ impl MarkdownModal {
 
     fn border_var(&self) -> &'static str {
         match (&self.kind, self.is_error) {
-            (Kind::Notice(_), _) => "accent",
+            (Kind::Notice { color, .. }, _) => color,
             (_, true) => "error",
             (_, false) => "primary",
         }
     }
 
-    /// A key on the notice: any key closes it, and `d` stops it for good.
-    fn notice_key(noticed: &Path, name: &str, ctx: &mut Ctx) -> Action {
-        if name == "d" {
+    /// A key on a notice: any key closes it, and the suppress key stops it for good.
+    fn notice_key(noticed: &Path, suppress: bool, ctx: &mut Ctx) -> Action {
+        if suppress {
             let written = noticed
                 .parent()
                 .map_or(Ok(()), std::fs::create_dir_all)
@@ -168,6 +194,14 @@ impl MarkdownModal {
         Action::Pop(None)
     }
 }
+
+/// Python's `ConsentNotice.NOTICE_BODY`.
+const CONSENT_NOTICE_BODY: &str = "This session will **record audio** and generate a transcript.
+
+- **Inform all participants** that recording is active.
+- Recording without consent may violate local laws.
+- You are responsible for compliance.
+";
 
 const BUILTIN_NOTICE_BODY: &str =
     "Built-in templates are **example sessions** for common use cases \
@@ -186,7 +220,7 @@ impl Screen for MarkdownModal {
             .fg(theme.on("foreground", "surface"))
             .bg(surface);
         let title_style = match (&self.kind, self.is_error) {
-            (Kind::Notice(_), _) => text.fg(theme.on("accent", "surface")),
+            (Kind::Notice { color, .. }, _) => text.fg(theme.on(color, "surface")),
             (_, true) => text.fg(theme.on("error", "surface")),
             (_, false) => text,
         }
@@ -230,8 +264,11 @@ impl Screen for MarkdownModal {
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {
-        if let Kind::Notice(noticed) = &self.kind {
-            return Self::notice_key(noticed, name, ctx);
+        if let Kind::Notice {
+            flag, suppress_key, ..
+        } = &self.kind
+        {
+            return Self::notice_key(flag, *suppress_key == name, ctx);
         }
         let table: &[Binding] = if self.is_help() {
             &HELP_BINDINGS
