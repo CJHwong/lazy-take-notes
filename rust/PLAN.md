@@ -85,7 +85,7 @@ The two versions must work on the same data, in both directions:
 
 Python plugins keep working: the Rust app runs them in a separate Python process, the plugin host, and talks to it in JSON. Nothing in a plugin changes.
 
-**Launch.** The host is the Python package's `lazy-take-notes-plugin-host` script, started as `uvx --from <host> --with <each line of plugins.txt> lazy-take-notes-plugin-host`. `<host>` is `lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git`; `LTN_PLUGIN_HOST_FROM` replaces it (a local checkout while developing). uv supplies Python, so the user needs only uv. If the launch fails, it runs again with `--offline` to use uv's cache. With no plugins.txt lines, no host starts.
+**Launch.** The host is the Python package's `lazy-take-notes-plugin-host` script, started as `uvx --from <host> --with <each line of plugins.txt> lazy-take-notes-plugin-host`. `<host>` is `lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git`; `LTN_PLUGIN_HOST_FROM` replaces it: a local checkout (built with `--no-cache`, since uv caches a folder's build by its pyproject.toml only) or another spec. The plugins pin the released URL, so another source goes to uv as an `--overrides` file too. uv supplies Python, so the user needs only uv. If the launch fails, it runs again with `--offline` to use uv's cache. With no plugins.txt lines, no host starts.
 
 **Transport.** One JSON-RPC 2.0 object per line on the host's stdin and stdout, UTF-8. A message with `method` is a request (with `id`) or a notification (no `id`); a message with `result` or `error` answers the receiver's own request. Each side numbers its own requests. The host's stderr goes to the terminal (a plugin's `click.echo(err=True)` and tracebacks); the host moves Python's `sys.stdout` to stderr, so a plugin's print never breaks the stream.
 
@@ -93,8 +93,8 @@ Python plugins keep working: the Rust app runs them in a separate Python process
 
 | From | Method | Params | Result |
 |---|---|---|---|
-| host | `hello` (notification, first line) | `protocol: 1`, `llm_providers: [name]`, `commands: [{name, help}]`, `load_errors: [{plugin, group, error}]` | |
-| app | `llm.create` | `provider`, `config_path`, `output_dir` (null when not given) | `{client}` |
+| host | `hello` (notification, first line) | `protocol: 1`, `llm_providers: [name]`, `commands: [{name, help}]`, `load_errors: [{plugin, dist, group, error}]` (`dist`: the package, or null) | |
+| app | `llm.create` | `provider`, `config`: the merged `InfraConfig` as an object, plugin keys included | `{client}` |
 | app | `llm.chat` | `client`, `model`, `messages: [{role, content}]` | `{content, prompt_tokens}` |
 | app | `llm.chat_single` | `client`, `model`, `prompt` | `{content}` |
 | app | `llm.check_connectivity` | `client` | `{ok, message}` |
@@ -133,7 +133,7 @@ An error is `{code, message, data: {type}}`, where `type` is the Python exceptio
 10. Preflight error texts name Python's exception class only where Rust has a matching case: `RuntimeError` for whisper and the tap, `PortAudioError` for the mic. Other failures carry the Rust error text.
 11. A panic is written to `debug.log` with a backtrace. A native crash (a segfault in a C library) is not; Python's `faulthandler` wrote one.
 12. Log lines written before the session folder exists (preflight) go nowhere: `debug.log` opens with the session.
-13. `transcribe` has no subtitle replay: that came only from plugins, which are dropped.
+13. Plugins run in a Python host process (see "Plugins"), not in the app's own process. Plugin commands do not show in `--help`: listing them would start Python on every help. `transcribe` itself has no subtitle option; only a plugin's `run_transcribe` replays subtitles.
 14. A Markdown heading wider than its panel wraps. Textual cut an H3 to one row (`width: auto`), so its end was lost.
 15. A fenced code block shows no horizontal scrollbar glyph; Textual drew one even when it had no size.
 16. An unexpected error toast reads `Unexpected error: <panic message>`. Python named the exception class (`Unexpected error: KeyError: 'x'`).
@@ -155,7 +155,7 @@ An error is `{code, message, data: {type}}`, where `type` is the Python exceptio
 32. A worker or task result from a screen that has closed is dropped, as Textual drops a message to a removed screen. Before the kiosk shell, each Rust screen ran in its own host, so this could not happen.
 33. In the kiosk, a second Transcribe asks for a file again. Python kept the first file and skipped the file picker, because the shell stored the picked path in its options.
 34. `--help` uses clap's layout, not click's. The commands, flags and their descriptions are the same.
-35. The `plugin` command is dropped with the plugins. `ls`, `notes` and `transcript` are ported: on 99 real sessions, `ls`, `ls -a`, `ls --json`, both readers by name and by default, a labeled transcript, and each error print the same bytes and exit code as Python. Piped into `head`, `transcript` and `notes` end with exit 1 and no message, as click does; a plain `print!` panicked there with exit 101. `ls` and `status` write through the same path.
+35. `plugin add` checks a spec by starting the host with it, so a plugin that installs but fails to import is refused; Python only ran `--version`. It no longer prints the setup.sh hint: the app reads plugins.txt itself. `ls`, `notes` and `transcript` are ported: on 99 real sessions, `ls`, `ls -a`, `ls --json`, both readers by name and by default, a labeled transcript, and each error print the same bytes and exit code as Python. Piped into `head`, `transcript` and `notes` end with exit 1 and no message, as click does; a plain `print!` panicked there with exit 101. `ls` and `status` write through the same path.
 36. In Settings, a model row is a Tab stop and Enter chooses it. Python chose a row only with the mouse, so Tab went from one row's buttons to the next row's.
 37. When config.yaml cannot be parsed, the toast quotes the Rust YAML parser's message. The sentences around it are the same.
 38. A value that fails validation shows the Rust validator's message, not pydantic's.

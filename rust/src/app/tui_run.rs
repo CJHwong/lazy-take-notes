@@ -186,6 +186,22 @@ pub fn pick_file() -> Result<Option<std::path::PathBuf>, String> {
 
 /// The transcription TUI for one file. Returns the exit code.
 pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, String> {
+    transcribe_source(args, TranscribeSource::Audio(audio_path.to_path_buf())).map(|_| 0)
+}
+
+/// What a transcription session reads: an audio file, or a plugin's subtitle
+/// segments replayed without whisper.
+pub enum TranscribeSource {
+    Audio(std::path::PathBuf),
+    Subtitles(Vec<crate::domain::transcript::TranscriptSegment>),
+}
+
+/// Run a transcription session in the TUI. Returns the session folder, or None
+/// when the template picker was cancelled before a session existed.
+pub fn transcribe_source(
+    args: &HeadlessArgs<'_>,
+    source: TranscribeSource,
+) -> Result<Option<std::path::PathBuf>, String> {
     let Loaded {
         config,
         infra,
@@ -193,7 +209,7 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
     } = load_config(args.config_path, args.output_dir)?;
     let template = match choose_template(&paths, infra.show_builtin_templates, args)? {
         Ok(template) => template,
-        Err(code) => return Ok(code),
+        Err(_) => return Ok(None),
     };
     let loaded = Loaded {
         config,
@@ -201,16 +217,19 @@ pub fn transcribe(args: &HeadlessArgs<'_>, audio_path: &Path) -> Result<i32, Str
         paths,
     };
     let start = TranscribeStart::new(&loaded, &template, args.output_dir, args.label)?;
+    let session_dir = start.out_dir.clone();
     let runtime = new_runtime()?;
     let missing = runtime.block_on(preflight_llm(start.llm.as_ref(), &start.config, |line| {
         eprintln!("{line}")
     }));
-    let screen = start.screen(audio_path, missing)?;
+    let screen = start.screen(&source, missing)?;
     let outcome = run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone());
     close_file_logging();
     // The file worker and any LLM call end with the process; do not wait for them.
     runtime.shutdown_background();
-    outcome.map(|_| 0).map_err(|e| e.to_string())
+    outcome
+        .map(|_| Some(session_dir))
+        .map_err(|e| e.to_string())
 }
 
 /// A transcription session up to its LLM preflight, as Python's
@@ -220,7 +239,7 @@ pub struct TranscribeStart {
     pub config: AppConfig,
     template: SessionTemplate,
     paths: Paths,
-    out_dir: std::path::PathBuf,
+    pub out_dir: std::path::PathBuf,
     label: String,
 }
 
@@ -247,7 +266,7 @@ impl TranscribeStart {
     /// The screen, given the missing (digest, interactive) models. Opens `debug.log`.
     pub fn screen(
         self,
-        audio_path: &Path,
+        source: &TranscribeSource,
         (missing_digest, missing_interactive): (Vec<String>, Vec<String>),
     ) -> Result<TranscribeScreen, String> {
         let config = self.config;
@@ -258,8 +277,20 @@ impl TranscribeStart {
             self.llm,
             Box::new(persistence),
         );
-        let store = Arc::new(CachedModelStore::new(&self.paths));
-        let launcher = file_launcher(store, &config, &self.template, audio_path)?;
+        let launcher: Launcher = match source {
+            TranscribeSource::Audio(audio_path) => {
+                let store = Arc::new(CachedModelStore::new(&self.paths));
+                file_launcher(store, &config, &self.template, audio_path)?
+            }
+            TranscribeSource::Subtitles(segments) => {
+                let segments = segments.clone();
+                Box::new(move |poster, cancel| {
+                    crate::app::workers::file_transcription::run_subtitle_replay(
+                        &poster, &cancel, segments,
+                    );
+                })
+            }
+        };
         setup_file_logging(&self.out_dir, config.output.save_debug_log);
         let session = Session::new(
             controller,

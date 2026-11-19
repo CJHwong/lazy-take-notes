@@ -181,6 +181,10 @@ pub struct InfraConfig {
     pub show_builtin_templates: bool,
     pub ollama: OllamaConfig,
     pub openai: OpenAiConfig,
+    /// Every other key, for plugin providers: Python's `InfraConfig` keeps them
+    /// (`extra='allow'`) and a plugin reads its own from `model_extra`.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for InfraConfig {
@@ -192,6 +196,7 @@ impl Default for InfraConfig {
             show_builtin_templates: true,
             ollama: OllamaConfig::default(),
             openai: OpenAiConfig::default(),
+            extra: serde_json::Map::new(),
         }
     }
 }

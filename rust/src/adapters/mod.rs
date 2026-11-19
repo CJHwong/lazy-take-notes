@@ -10,6 +10,7 @@ pub mod model_catalog;
 pub mod nemo_diarizer;
 pub mod os_error;
 pub mod paths;
+pub mod plugins;
 pub mod pyrepr;
 pub mod session_controller;
 pub mod session_reader;

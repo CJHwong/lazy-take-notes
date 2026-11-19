@@ -14,6 +14,8 @@ use crate::adapters::config_file::load_raw;
 use crate::adapters::llm::ollama::OllamaLlmClient;
 use crate::adapters::llm::openai::OpenAiCompatClient;
 use crate::adapters::paths::Paths;
+use crate::adapters::plugins::llm::PluginLlmClient;
+use crate::adapters::plugins::manifest::Manifest;
 use crate::adapters::pyrepr::py_repr_json;
 use crate::config::{InfraConfig, build_app_config, build_infra_config};
 use crate::domain::config::AppConfig;
@@ -100,8 +102,24 @@ pub fn build_llm_client(infra: &InfraConfig) -> Result<Arc<dyn LlmClient>, Strin
             &infra.openai.base_url,
         ))),
         "ollama" => Ok(Arc::new(OllamaLlmClient::new(&infra.ollama.host))),
-        other => Err(unknown(other, &LLM_PROVIDERS)),
+        other => plugin_llm_client(other, infra),
     }
+}
+
+/// A provider no built-in client has: a plugin's, when plugins are installed.
+/// The host checks the name on the first call, against what the plugins provide.
+fn plugin_llm_client(provider: &str, infra: &InfraConfig) -> Result<Arc<dyn LlmClient>, String> {
+    let specs = Paths::for_user()
+        .map(|paths| Manifest::in_dir(&paths.config_dir).launch_specs())
+        .unwrap_or_default();
+    if specs.is_empty() {
+        return Err(unknown(provider, &LLM_PROVIDERS));
+    }
+    let config = serde_json::to_value(infra).map_err(|e| e.to_string())?;
+    let builtin = LLM_PROVIDERS.iter().map(|name| name.to_string()).collect();
+    Ok(Arc::new(PluginLlmClient::new(
+        provider, config, specs, builtin,
+    )))
 }
 
 /// Only whisper.cpp is built in; provider plugins are not ported.
