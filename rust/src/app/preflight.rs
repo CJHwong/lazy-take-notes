@@ -736,4 +736,4 @@ pub fn format_report_line(check: &Check) -> String {
 
 #[cfg(test)]
 #[path = "preflight_tests.rs"]
-mod tests;
+pub(crate) mod tests;

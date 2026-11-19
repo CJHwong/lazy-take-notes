@@ -141,6 +141,11 @@ impl Ctx {
         }
     }
 
+    /// A sender a thread keeps to post several results, each as `Msg::Task`.
+    pub fn task_sender(&self) -> TaskSender {
+        TaskSender(self.sender.clone())
+    }
+
     /// A poster whose events arrive as `Msg::Worker`.
     pub fn poster(&self) -> Poster {
         let (events, mut received) = unbounded_channel();
@@ -181,6 +186,16 @@ impl Ctx {
     /// The job a screen asked to run suspended, for tests.
     pub fn take_suspend_job(&mut self) -> Option<Box<dyn FnOnce() -> Payload + Send>> {
         self.suspend_job.take()
+    }
+}
+
+/// Posts payloads to the loop from any thread. A post after the loop ended is dropped.
+#[derive(Clone)]
+pub struct TaskSender(UnboundedSender<Msg>);
+
+impl TaskSender {
+    pub fn post<T: Send + 'static>(&self, payload: T) {
+        let _ = self.0.send(Msg::Task(Box::new(payload)));
     }
 }
 
@@ -602,14 +617,15 @@ impl Host {
     }
 
     async fn event_loop(&mut self, terminal: &mut Term) -> std::io::Result<()> {
-        let mut input = EventStream::new();
+        // None once the terminal is gone (a closed window): keys stop, the loop goes on.
+        let mut input = Some(EventStream::new());
         let mut ticks = tokio::time::interval(TICK);
         while !self.finished() {
             if let Some(job) = self.ctx.suspend_job.take() {
                 // The input reader must stop first, or it takes the editor's keys.
                 drop(input);
                 let payload = terminal::suspended(job)?;
-                input = EventStream::new();
+                input = Some(EventStream::new());
                 // `Terminal::clear` asks the terminal where the cursor is, and that
                 // read times out right after the editor gives the terminal back.
                 // Clear without it, and blank both buffers so the next draw
@@ -623,12 +639,28 @@ impl Host {
                 self.message(Msg::Task(payload));
                 continue;
             }
-            terminal.draw(|frame| self.draw(frame))?;
+            // A closed window fails every write. The session must still stop and save,
+            // so the frame is dropped and the loop goes on, as Python's terminal writer does.
+            if let Err(e) = terminal.draw(|frame| self.draw(frame)) {
+                warn!(target: "ltn.app", "Terminal output failed ({e}); frame dropped");
+            }
+            let next_key = async {
+                match input.as_mut() {
+                    Some(stream) => stream.next().await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
-                event = input.next() => match event {
+                event = next_key => match event {
                     Some(Ok(event)) => self.terminal_event(event),
-                    Some(Err(e)) => return Err(e),
-                    None => break,
+                    Some(Err(e)) => {
+                        warn!(target: "ltn.app", "Terminal input failed ({e}); keys stop");
+                        input = None;
+                    }
+                    None => {
+                        warn!(target: "ltn.app", "Terminal input closed; keys stop");
+                        input = None;
+                    }
                 },
                 msg = self.receiver.recv() => {
                     if let Some(msg) = msg {
@@ -669,6 +701,9 @@ pub fn run_screen(
     host.push(screen);
     let outcome = host.run(&mut terminal);
     terminal::restore();
+    // `restore` showed the cursor. Ratatui's own drop shows it again and prints any
+    // error to stderr, which panics when the window is already closed.
+    std::mem::forget(terminal);
     outcome.map(|()| host.take_result())
 }
 

@@ -104,7 +104,7 @@ pub fn resolve_language(
 }
 
 /// --language, then --template, then default_en.
-fn select_template(
+pub(crate) fn select_template(
     templates: &YamlTemplates,
     args: &HeadlessArgs<'_>,
 ) -> Result<SessionTemplate, String> {
@@ -114,7 +114,7 @@ fn select_template(
     }
 }
 
-fn settings(config: &AppConfig) -> TranscribeSettings {
+pub(crate) fn settings(config: &AppConfig) -> TranscribeSettings {
     let transcription = &config.transcription;
     TranscribeSettings {
         chunk_duration: transcription.chunk_duration,
@@ -125,7 +125,7 @@ fn settings(config: &AppConfig) -> TranscribeSettings {
     }
 }
 
-fn language_of(template: &SessionTemplate) -> String {
+pub(crate) fn language_of(template: &SessionTemplate) -> String {
     template
         .metadata
         .locale
@@ -136,7 +136,7 @@ fn language_of(template: &SessionTemplate) -> String {
 }
 
 /// The config's hints, then the template's, without repeats.
-fn hints(config: &AppConfig, template: &SessionTemplate) -> Vec<String> {
+pub(crate) fn hints(config: &AppConfig, template: &SessionTemplate) -> Vec<String> {
     let mut all: Vec<String> = Vec::new();
     for hint in config
         .recognition_hints
@@ -157,7 +157,7 @@ fn eprint_lines(lines: &[String]) {
 }
 
 /// A resolver that posts download progress as events.
-fn resolver_posting(
+pub(crate) fn resolver_posting(
     store: Arc<CachedModelStore>,
     poster: &Poster,
     model_name: &str,

@@ -21,6 +21,8 @@ use crate::adapters::os_error::OsError;
 use crate::adapters::session_controller::SessionController;
 use crate::app::container::safe_label;
 use crate::app::logging::see_debug_log;
+use crate::domain::session_files::SPEAKER_TRANSCRIPT;
+use crate::domain::speaker_turn::SpeakerTurn;
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::ports::llm::{ChatResponse, LlmError};
 use crate::tui::host::{Action, Ctx, Payload};
@@ -205,6 +207,18 @@ pub struct Session {
     download_open: bool,
 }
 
+/// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
+pub fn format_spoken_time(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    if total >= 3600 {
+        return format!("{}h{}m", total / 3600, (total % 3600) / 60);
+    }
+    if total >= 60 {
+        return format!("{}m{}s", total / 60, total % 60);
+    }
+    format!("{total}s")
+}
+
 impl Session {
     pub fn new(
         controller: SessionController,
@@ -289,12 +303,19 @@ impl Session {
         let (top, body, bottom) = split_bars(area, 1, self.status.height());
         header(frame, top, &self.header_text(), theme);
         let left = body.width / 2;
+        // The speaker bar is `height: auto`: one row once a speaker is heard.
+        let chips = self.speaker_chips();
+        let bar_rows = u16::from(!chips.is_empty()).min(body.height);
         self.transcript.render(
             frame,
-            Rect::new(body.x, body.y, left, body.height),
+            Rect::new(body.x, body.y, left, body.height - bar_rows),
             self.focus == Focus::Transcript,
             theme,
         );
+        if bar_rows > 0 {
+            let bar = Rect::new(body.x, body.bottom() - 1, left, 1);
+            render_speaker_bar(frame, bar, &chips, theme);
+        }
         let column = Rect::new(body.x + left, body.y, body.width - left, body.height);
         // `height: 6`, and 40% of the column while it has the focus.
         let context_rows = match self.focus {
@@ -450,8 +471,14 @@ impl Session {
         );
         let should_digest = self.controller.on_transcript_segments(segments);
         self.report_persist_error(ctx);
-        for segment in segments {
-            self.append_line(segment, None);
+        if self.controller.speaker_turns.is_empty() {
+            for segment in segments {
+                self.append_line(segment, None);
+            }
+        } else {
+            self.render_all_lines();
+            // The screen labels each new line now; the saved file must not lag until the next pass.
+            self.save_speaker_transcript(ctx);
         }
         self.status.buf_count = self.controller.digest_state.buffer.len();
         if self.auto_digest
@@ -480,6 +507,99 @@ impl Session {
             ),
             Span::raw(format!(" {plain}")),
         ]));
+    }
+
+    /// Rewrite every line with its speaker label (a diarization pass relabels old lines).
+    fn render_all_lines(&mut self) {
+        self.transcript.view.clear();
+        self.transcript.all_text.clear();
+        let lines: Vec<(TranscriptSegment, Option<String>)> = self
+            .controller
+            .all_segments
+            .iter()
+            .map(|segment| (segment.clone(), self.controller.speaker_label(segment)))
+            .collect();
+        for (segment, label) in lines {
+            self.append_line(&segment, label.as_deref());
+        }
+    }
+
+    /// Each speaker heard so far: number, name, and seconds of speech.
+    fn speaker_chips(&self) -> Vec<(u32, String, f64)> {
+        let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
+        for turn in &self.controller.speaker_turns {
+            *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
+        }
+        speech
+            .into_iter()
+            .map(|(speaker, seconds)| {
+                let name = self
+                    .controller
+                    .speaker_names
+                    .get(&speaker)
+                    .cloned()
+                    .unwrap_or_default();
+                (speaker, name, seconds)
+            })
+            .collect()
+    }
+
+    /// A diarization pass: keep the turns, save them, relabel the lines.
+    pub fn on_speaker_turns(&mut self, turns: Vec<SpeakerTurn>, ctx: &mut Ctx) {
+        self.controller.set_speaker_turns(turns);
+        self.persist_speakers(ctx);
+        self.render_all_lines();
+    }
+
+    fn persist_speakers(&mut self, ctx: &mut Ctx) {
+        let names: std::collections::BTreeMap<String, &String> = self
+            .controller
+            .speaker_names
+            .iter()
+            .map(|(speaker, name)| (speaker.to_string(), name))
+            .collect();
+        let payload = serde_json::json!({
+            "names": names,
+            "turns": self.controller.speaker_turns,
+        });
+        let text = serde_json::to_string_pretty(&payload).unwrap_or_default();
+        if let Err(e) = std::fs::write(self.output_dir.join("speakers.json"), text) {
+            self.speakers_not_saved("speakers.json", &e, ctx);
+            return;
+        }
+        self.save_speaker_transcript(ctx);
+    }
+
+    /// The transcript with the labels shown on screen, in the format `diarize` writes.
+    fn save_speaker_transcript(&mut self, ctx: &mut Ctx) {
+        let text: String = self
+            .controller
+            .all_segments
+            .iter()
+            .map(|segment| {
+                let line = match self.controller.speaker_label(segment) {
+                    Some(label) => format!("{label}: {}", segment.text),
+                    None => segment.text.clone(),
+                };
+                format!("[{}] {line}\n", format_wall_time(segment.wall_start))
+            })
+            .collect();
+        let path = self.output_dir.join(SPEAKER_TRANSCRIPT);
+        if let Err(e) = std::fs::write(path, text) {
+            self.speakers_not_saved(SPEAKER_TRANSCRIPT, &e, ctx);
+        }
+    }
+
+    fn speakers_not_saved(&mut self, name: &str, e: &std::io::Error, ctx: &mut Ctx) {
+        let shown = OsError::from_io(e, Some(&self.output_dir.join(name)), None);
+        error!(target: "ltn.app", "Could not save {name}: {e}");
+        if self.last_persist_error.as_deref() != Some("speakers") {
+            self.last_persist_error = Some("speakers".into());
+            ctx.warn(
+                format!("Could not save speakers: {shown}"),
+                Duration::from_secs(10),
+            );
+        }
     }
 
     /// Warn once per distinct disk failure; the session keeps going.
@@ -882,6 +1002,38 @@ impl Session {
             flight.task.abort();
         }
     }
+}
+
+/// One chip per speaker: `padding: 0 1` on the bar, and each chip `padding: 0 1`,
+/// `margin-right: 1` on `$surface`. Names are the user's text, drawn as typed.
+fn render_speaker_bar(
+    frame: &mut Frame,
+    area: Rect,
+    chips: &[(u32, String, f64)],
+    theme: &crate::tui::theme::Theme,
+) {
+    let chip = Style::default()
+        .bg(theme.color("surface"))
+        .fg(theme.on("foreground", "surface"));
+    let mut spans = vec![Span::raw(" ")];
+    for (speaker, name, seconds) in chips {
+        let shown = match name.is_empty() {
+            true => format!("S{speaker}"),
+            false => name.clone(),
+        };
+        spans.push(Span::styled(
+            format!(" {shown} {} ", format_spoken_time(*seconds)),
+            chip,
+        ));
+        spans.push(Span::raw(" "));
+    }
+    let base = Style::default()
+        .bg(theme.color("background"))
+        .fg(theme.color("foreground"));
+    frame.render_widget(
+        ratatui::widgets::Paragraph::new(Line::from(spans)).style(base),
+        area,
+    );
 }
 
 #[cfg(test)]

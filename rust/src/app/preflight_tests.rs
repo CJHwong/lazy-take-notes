@@ -13,7 +13,7 @@ use crate::ports::transcriber::TranscribeError;
 
 /// What the fake provider does.
 #[derive(Clone)]
-enum Provider {
+pub(crate) enum Provider {
     Down,
     Missing(Vec<&'static str>),
     Refuses,
@@ -69,7 +69,7 @@ fn store(dir: &Path) -> Arc<CachedModelStore> {
     ))
 }
 
-fn plan(
+pub(crate) fn plan(
     dir: &Path,
     config_yaml: &str,
     provider: Provider,
@@ -94,7 +94,7 @@ fn plan(
     }
 }
 
-fn runtime() -> tokio::runtime::Runtime {
+pub(crate) fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -258,7 +258,7 @@ fn the_ai_check_names_the_failure_and_its_fix() {
 
 /// Loads any path; fails the test transcription when asked to.
 #[derive(Default)]
-struct Whisper {
+pub(crate) struct Whisper {
     loaded: Option<String>,
     fail: bool,
 }

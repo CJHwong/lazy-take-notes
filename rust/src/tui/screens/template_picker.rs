@@ -19,7 +19,7 @@ use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::modals::MarkdownModal;
 use crate::tui::screens::picker::{Picker, PickerKey};
 use crate::tui::text::center;
-use crate::tui::theme::Theme;
+use crate::tui::widgets::button::{Variant, draw_button};
 use crate::tui::widgets::{centered, thick_box};
 
 /// What the picker closed with.
@@ -481,57 +481,6 @@ impl ConfirmDelete {
     }
 }
 
-/// A Textual `Button` in the default style: a tall top and bottom edge, a bold label.
-fn draw_button(
-    frame: &mut Frame,
-    area: Rect,
-    label: &str,
-    error: bool,
-    focused: bool,
-    theme: &Theme,
-) {
-    let (background, top, bottom, text) = match error {
-        true => (
-            "error",
-            "error-lighten-2",
-            "error-darken-3",
-            "button-color-foreground",
-        ),
-        false => (
-            "surface",
-            "surface-lighten-1",
-            "surface-darken-1",
-            "button-foreground",
-        ),
-    };
-    let base = match focused {
-        // `:focus` tints the background 5% toward the foreground.
-        true => theme.tinted(background, "foreground", 0.05),
-        false => theme.color(background),
-    };
-    let edge = |variable: &str, glyph: &str| {
-        Line::styled(
-            glyph.repeat(usize::from(area.width)),
-            Style::default().fg(theme.color(variable)).bg(base),
-        )
-    };
-    let mut label_style = Style::default()
-        .fg(theme.on(text, background))
-        .bg(base)
-        .add_modifier(Modifier::BOLD);
-    if focused {
-        // `$button-focus-text-style` is `b reverse`.
-        label_style = label_style.add_modifier(Modifier::REVERSED);
-    }
-    let middle = center(
-        Line::from(vec![Span::styled(format!(" {label} "), label_style)]),
-        area.width,
-    )
-    .style(Style::default().bg(base));
-    let lines = vec![edge(top, "\u{2594}"), middle, edge(bottom, "\u{2581}")];
-    frame.render_widget(Paragraph::new(lines), area);
-}
-
 impl Screen for ConfirmDelete {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
@@ -563,7 +512,7 @@ impl Screen for ConfirmDelete {
             frame,
             Rect::new(x, padded.y + 2, 16, 3),
             "No (n)",
-            false,
+            Variant::Default,
             !self.yes_focused,
             theme,
         );
@@ -571,7 +520,7 @@ impl Screen for ConfirmDelete {
             frame,
             Rect::new(x, padded.y + 5, 16, 3),
             "Yes (y)",
-            true,
+            Variant::Error,
             self.yes_focused,
             theme,
         );

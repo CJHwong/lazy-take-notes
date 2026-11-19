@@ -156,7 +156,7 @@ fn record(
 ) -> Result<i32, String> {
     check_template_language(options)?;
     if !options.headless {
-        return Ok(not_ported("the recording TUI"));
+        return crate::app::tui_run::record(&headless_args(config, output_dir, options), mute_mic);
     }
     require_headless_template(options)?;
     headless_run::record(&headless_args(config, output_dir, options), mute_mic)
