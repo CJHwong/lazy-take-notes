@@ -8,6 +8,7 @@ use super::*;
 use crate::adapters::assets::store::LegacyDirs;
 use crate::domain::chat::ChatMessage;
 use crate::domain::transcript::TranscriptSegment;
+use crate::ports::audio_source::AudioError;
 use crate::ports::llm::{ChatResponse, LlmError};
 use crate::ports::transcriber::TranscribeError;
 
@@ -329,4 +330,35 @@ fn an_unknown_speech_model_names_the_setting() {
         check.fix,
         "Set transcription.model to a model listed in Settings > Models."
     );
+}
+
+struct NoHelper;
+
+impl AudioSource for NoHelper {
+    fn open(&self, _sample_rate: u32, _channels: u16) -> Result<(), AudioError> {
+        Err(AudioError(
+            "Native binary not found: /nowhere/coreaudio-tap\nRun: bash scripts/build_native.sh"
+                .into(),
+        ))
+    }
+    fn read(&self, _timeout: Duration) -> Result<Option<Vec<f32>>, AudioError> {
+        Ok(None)
+    }
+    fn close(&self) -> Result<(), AudioError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_missing_tap_helper_says_to_restore_it_not_to_grant_permission() {
+    let mut check = Check::new("system", "System audio", false);
+    let notify: Notify<'_> = &|_: &Check| {};
+    let mut running = Running {
+        check: &mut check,
+        notify,
+    };
+    let error = check_system_source(&mut running, &NoHelper).unwrap_err();
+    assert!(error.starts_with("RuntimeError: Native binary not found"));
+    assert!(check.fix.contains("coreaudio-tap"));
+    assert!(!check.fix.contains("Privacy"));
 }
