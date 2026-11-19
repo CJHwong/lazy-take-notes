@@ -1,5 +1,6 @@
 //! Gateways to the file system and other outside systems. They implement `crate::ports`.
 
+pub mod assets;
 pub mod config_file;
 pub mod file_persistence;
 pub mod model_catalog;

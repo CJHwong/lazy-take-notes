@@ -12,6 +12,8 @@ pub struct Paths {
     pub config_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub home: PathBuf,
+    /// Where pywhispercpp kept its models: legacy copies the cache adopts.
+    pub pywhispercpp_models: PathBuf,
 }
 
 impl Paths {
@@ -22,6 +24,7 @@ impl Paths {
             config_dir: dirs::config_dir()?.join(APP_DIR),
             cache_dir: dirs::cache_dir()?.join(APP_DIR),
             home: dirs::home_dir()?,
+            pywhispercpp_models: dirs::data_dir()?.join("pywhispercpp").join("models"),
         })
     }
 
@@ -31,6 +34,7 @@ impl Paths {
             config_dir: root.join("config"),
             cache_dir: root.join("cache"),
             home: root.join("home"),
+            pywhispercpp_models: root.join("pywhispercpp").join("models"),
         }
     }
 

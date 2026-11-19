@@ -10,15 +10,23 @@ Run from the repo root: uv run python rust/scripts/cross_check.py
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess  # noqa: S404 -- fixed cargo command, no shell
 import tempfile
 from pathlib import Path
 
 import yaml
+from pywhispercpp.constants import MODELS_DIR
 
 from lazy_take_notes.l1_entities.template import SessionTemplate
-from lazy_take_notes.l3_interface_adapters.gateways.paths import DEFAULT_CONFIG_PATHS, USER_TEMPLATES_DIR
+from lazy_take_notes.l3_interface_adapters.gateways.cached_model_store import CachedModelStore
+from lazy_take_notes.l3_interface_adapters.gateways.paths import (
+    CACHE_DIR,
+    DEFAULT_CONFIG_PATHS,
+    LEGACY_NEMOTRON_STORE,
+    USER_TEMPLATES_DIR,
+)
 from lazy_take_notes.l3_interface_adapters.gateways.session_reader import list_sessions
 from lazy_take_notes.l4_frameworks_and_drivers.config import InfraConfig, build_app_config
 
@@ -66,6 +74,29 @@ def python_config(path: Path) -> dict:
     return {'app': build_app_config(raw).model_dump(), 'infra': infra}
 
 
+def linked_copy(source: Path, target: Path) -> Path:
+    """A copy of the cache whose files are hard links: same inode and mtime, no extra space."""
+    for path in sorted(source.rglob('*')):
+        destination = target / path.relative_to(source)
+        if path.is_symlink():
+            destination.symlink_to(path.readlink())
+        elif path.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+        elif path.name == 'state.json':
+            shutil.copy2(path, destination)
+        else:
+            os.link(path, destination)
+    return target
+
+
+def python_assets(root: Path) -> dict:
+    rows = {}
+    for state in CachedModelStore(root).list_assets():
+        path = str(Path(state.path).relative_to(root)) if state.path else None
+        rows[state.asset.id] = [state.status.value, state.installed_bytes, state.legacy_bytes, path]
+    return rows
+
+
 def main() -> None:
     work = Path(tempfile.mkdtemp(prefix='ltn-cross-'))
     config = next((p for p in DEFAULT_CONFIG_PATHS if p.exists()), None)
@@ -95,6 +126,14 @@ def main() -> None:
         rust('sessions', str(output)),
         [s.name for s in list_sessions(output)],
     )
+
+    if CACHE_DIR.exists():
+        python_root, rust_root = linked_copy(CACHE_DIR, work / 'cache-py'), linked_copy(CACHE_DIR, work / 'cache-rs')
+        check(
+            'model cache status',
+            rust('assets', str(rust_root), str(MODELS_DIR), str(LEGACY_NEMOTRON_STORE)),
+            python_assets(python_root),
+        )
 
     shutil.rmtree(work)
     raise SystemExit(1 if failures else 0)
