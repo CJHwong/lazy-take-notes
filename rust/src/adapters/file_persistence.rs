@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tracing::debug;
 
+use crate::adapters::os_error::OsError;
 use crate::domain::session_files::{CONTEXT, NOTES, TRANSCRIPT};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::ports::persistence::Persistence;
@@ -30,6 +31,20 @@ impl FilePersistence {
     }
 }
 
+/// Keep the error kind; read like Python's `str(OSError)`. An open or a mkdir names
+/// the path, as Python does. A failed write does not, as in Python.
+fn python_error(error: io::Error, path: Option<&Path>) -> io::Error {
+    let text = OsError::from_io(&error, path, None).to_string();
+    io::Error::new(error.kind(), text)
+}
+
+/// Python's `Path.write_text`: the open names the file, the write does not.
+fn write_text(path: &Path, text: &str) -> io::Result<()> {
+    let mut file = fs::File::create(path).map_err(|e| python_error(e, Some(path)))?;
+    file.write_all(text.as_bytes())
+        .map_err(|e| python_error(e, None))
+}
+
 fn notes_body(markdown: &str, digest_number: u32) -> String {
     format!("# Digest #{digest_number}\n\n{markdown}\n")
 }
@@ -46,12 +61,14 @@ impl Persistence for FilePersistence {
             .append(append)
             .write(true)
             .truncate(!append)
-            .open(&path)?;
+            .open(&path)
+            .map_err(|e| python_error(e, Some(&path)))?;
         let text: String = segments
             .iter()
             .map(|s| format!("[{}] {}\n", format_wall_time(s.wall_start), s.text))
             .collect();
-        file.write_all(text.as_bytes())?;
+        file.write_all(text.as_bytes())
+            .map_err(|e| python_error(e, None))?;
         let last = segments
             .last()
             .map_or("?".into(), |s| format_wall_time(s.wall_start));
@@ -61,7 +78,7 @@ impl Persistence for FilePersistence {
 
     fn save_digest_md(&mut self, markdown: &str, digest_number: u32) -> io::Result<PathBuf> {
         let path = self.output_dir.join(NOTES.name);
-        fs::write(&path, notes_body(markdown, digest_number))?;
+        write_text(&path, &notes_body(markdown, digest_number))?;
         Ok(path)
     }
 
@@ -72,16 +89,16 @@ impl Persistence for FilePersistence {
         is_final: bool,
     ) -> io::Result<PathBuf> {
         let history = self.output_dir.join("history");
-        fs::create_dir_all(&history)?;
+        fs::create_dir_all(&history).map_err(|e| python_error(e, Some(&history)))?;
         let suffix = if is_final { "_final" } else { "" };
         let path = history.join(format!("notes_{digest_number:03}{suffix}.md"));
-        fs::write(&path, notes_body(markdown, digest_number))?;
+        write_text(&path, &notes_body(markdown, digest_number))?;
         Ok(path)
     }
 
     fn save_session_context(&mut self, context: &str) -> io::Result<PathBuf> {
         let path = self.output_dir.join(CONTEXT.name);
-        fs::write(&path, context)?;
+        write_text(&path, context)?;
         Ok(path)
     }
 }
@@ -89,6 +106,20 @@ impl Persistence for FilePersistence {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_save_names_the_file_as_python_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FilePersistence::new(dir.path().join("s")).unwrap();
+        fs::remove_dir(dir.path().join("s")).unwrap();
+        let error = store.save_digest_md("## A", 1).unwrap_err();
+        let expected = format!(
+            "[Errno 2] No such file or directory: '{}'",
+            dir.path().join("s/notes.md").display()
+        );
+        assert_eq!(error.to_string(), expected);
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+    }
 
     #[test]
     fn writes_the_files_python_writes() {

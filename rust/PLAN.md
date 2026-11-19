@@ -15,7 +15,7 @@ The two versions must work on the same data, in both directions:
 
 - `config.yaml`: same path, same schema, `null` language overrides
 - template YAML, built-in and user
-- session folders: transcript, notes, history, context, `recording.wav` and `recording_N.wav`, `debug.log`, `.status.json`
+- session folders: transcript, notes, history, context, `recording.wav` and `recording_N.wav`, `debug.log`, `.status.json`, `speakers.json` and `transcript_speakers.txt` (written by `diarize`)
 - model cache: `assets/`, `downloads/`, `locks/`, `state.json`
 - CLI subcommands and flags, key bindings
 
@@ -43,6 +43,7 @@ The two versions must work on the same data, in both directions:
 4. [x] Audio: cpal mic source, Core Audio tap source (existing Swift binary), mixed source with retry and health, mic boost, WAV writer with backlog, test tone
    - Not verified on hardware: a headset unplugged and plugged back in. A rate change on a live input (BlackHole) covers the same stop, retry and reopen path, and an aggregate device created while running shows up in the device list without any re-init.
 5. [ ] Session controller, headless record, preflight, shutdown signals, diarization (existing NeMo runtime)
+   - CLI in this step: the `--config` and `--output-dir` options, `record --headless`, `transcribe --headless`, `status` and `diarize`. `ls`, `transcript` and `notes` are not in any step yet.
 6. [ ] TUI: shell, pickers, record, transcribe, view, preflight screen, settings, template builder
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
 7. [ ] Cross-version run: each version opens the other's sessions and config
