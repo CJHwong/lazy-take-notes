@@ -245,6 +245,11 @@ pub trait Screen {
         false
     }
 
+    /// Closes on any key, and Tab still moves the focus of the screen below.
+    fn passes_focus_keys(&self) -> bool {
+        false
+    }
+
     /// A live session: an error toast says it continues.
     fn hosts_session(&self) -> bool {
         false
@@ -475,8 +480,19 @@ impl Host {
             self.help_quit();
             return;
         }
+        // Tab is an app binding in Textual: a notice that closes on any key
+        // lets it through, so the screen below moves its focus too.
+        let passes = matches!(name.as_str(), "tab" | "shift+tab")
+            && self
+                .stack
+                .last()
+                .is_some_and(|screen| screen.passes_focus_keys());
         let action = self.guarded(|screen, ctx| screen.key(key, &name, ctx));
         self.apply(action);
+        if passes {
+            let action = self.guarded(|screen, ctx| screen.key(key, &name, ctx));
+            self.apply(action);
+        }
     }
 
     fn help_quit(&mut self) {

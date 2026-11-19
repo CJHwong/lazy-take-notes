@@ -298,6 +298,10 @@ impl Screen for MarkdownModal {
         Action::None
     }
 
+    fn passes_focus_keys(&self) -> bool {
+        matches!(self.kind, Kind::Notice { .. })
+    }
+
     fn is_modal(&self) -> bool {
         true
     }
@@ -314,6 +318,7 @@ impl LabelModal {
         let mut input = Input::new(placeholder);
         input.parent_background = Some("surface");
         input.set_value(current);
+        input.select_all();
         Self {
             title: title.into(),
             input,

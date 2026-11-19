@@ -48,6 +48,9 @@ The two versions must work on the same data, in both directions:
    - Real runs: `transcribe --headless` on a 95 s recording gives a byte-identical `transcript.txt` and the same stderr lines. A blocked preflight (dead Ollama port, unwritable folder) prints the same report. A live `record --headless` muted and unmuted on SIGUSR1, ran a periodic digest, and on SIGTERM ran the final digest and exited 0. A SIGINT to the whole process group (a terminal Ctrl-C) reaches only the main process: the whisper and tap children run in their own sessions, so the last sentence was transcribed before the final digest. `transcribe --headless` prints the same provider and missing-model warnings. Each version's `status` reads the other's sessions.
    - Bare `record` and `transcribe` (the TUI) say "not usable yet" and exit 2 until step 6.
 6. [ ] TUI: shell, pickers, record, transcribe, view, preflight screen, settings, template builder
+   - Done: pickers, record (with the preflight screen), transcribe, view, template builder. Left: the kiosk shell (bare `lazy-take-notes`) and settings.
+   - Real runs: each screen next to Python's in tmux, the same keys sent to both. The builder ran against a stub OpenAI-compatible server: both sent the same requests, and the screens matched through generate, auto-fix, save, edit and the quit confirm.
+   - A closed window (SIGHUP) during a recording: the audio flushes and the transcript is saved; failed draws are dropped.
    - Python's `drivers/terminal_output.py` (retry EBADF on fd 2) exists only because PortAudio calls `dup2()` onto fd 2 when it re-initializes. cpal never re-initializes and never touches fd 2, so the Rust TUI does not need it.
 7. [ ] Cross-version run: each version opens the other's sessions and config
    - Ship `coreaudio-tap` next to the executable. A release build looks for it only there.
@@ -74,10 +77,13 @@ The two versions must work on the same data, in both directions:
 18. The session context box has no selection, undo, redo, cut, copy or paste keys of its own. The terminal's paste still works. Up and down move by logical lines, not by wrapped rows.
 19. A speaker chip cannot be clicked to rename the speaker, because there is no mouse (see 17).
 20. Python's Textual highlighted numbers and strings in plain text (Rich `repr` highlighting). The Rust TUI does not.
-21. In the file picker, a typed path that opens a folder can leave Python showing the old folder's preview, because a late highlight event arrives after the rebuild. The Rust picker always previews the new folder's first entry.
+21. In the file picker, a typed path that opens a folder can leave Python showing the old folder's preview, because a late highlight event arrives after the rebuild. The Rust picker always previews the new folder's first entry. The template picker has the same race: a filter that matches nothing can leave Python showing, and acting on, the last template that matched. Rust shows "No matching templates" and `a`, `e` and `x` do nothing.
 22. A template that does not load is left out of the template picker, with a warning in `debug.log`. Python crashed the picker.
 23. An editor that fails to start after `e` in the template picker is logged, and the picker stays open. Python crashed.
 24. Home, End, Page Up and Page Down in a list scroll the list and leave the highlight where it is, as Textual's `ListView` does. Earlier Rust builds moved the highlight.
-25. A few colors differ by up to 4 levels per channel: inline code in Markdown, and dim text after Textual's rounding. The left edge of an input's border sits on the theme background, not the terminal's default background.
+25. A few colors differ by up to 5 levels per channel: inline code in Markdown, and dim text after Textual's rounding. The left edge of an input's border sits on the theme background, not the terminal's default background.
 26. `record` without `--headless` shows the preflight screen in the saved theme. Python showed it in Textual's default theme there, and in the saved theme only inside the kiosk shell.
 27. The "Quick actions disabled" warning shows once when a recording starts. Python showed the same toast twice.
+28. A template that the builder saves, and a `config.yaml` that Settings saves, hold the same data as Python's files but not the same bytes. PyYAML writes a multi-line string in single quotes and folds long lines at 80 columns; Rust writes a `|-` block and keeps each line whole. Each version reads the other's files.
+29. A setup error in the template builder (an unreadable `config.yaml`, an unknown provider) shows as `Error: <message>`. Python put the exception's class name before the message.
+30. The template builder's "Thinking" dots step every 0.5 s. Python stepped every 0.4 s; the Rust screen updates four times a second.

@@ -91,3 +91,19 @@ fn record_preflight_and_consent() {
     assert_table("apps.preflight_screen.PreflightScreen", &PREFLIGHT_BINDINGS);
     assert_table("widgets.consent_notice.ConsentNotice", &NOTICE_BINDINGS);
 }
+
+#[test]
+fn template_builder_and_its_modals() {
+    use lazy_take_notes::tui::screens::template_builder::{
+        BUILDER_BINDINGS, CONFIRM_QUIT_BINDINGS, SAVE_BINDINGS,
+    };
+    assert_table(
+        "apps.template_builder.TemplateBuilderApp",
+        &BUILDER_BINDINGS,
+    );
+    assert_table("apps.template_builder._SaveTemplateScreen", &SAVE_BINDINGS);
+    assert_table(
+        "apps.template_builder._ConfirmQuitScreen",
+        &CONFIRM_QUIT_BINDINGS,
+    );
+}

@@ -84,47 +84,78 @@ fn choose_template(
     if let Some(template) = template_from_flags(&YamlTemplates::new(paths), args) {
         return Ok(Ok(template?));
     }
-    Ok(match pick_template(paths, show_builtins)? {
-        TemplatePick::Chosen(template) => Ok(*template),
-        TemplatePick::Cancelled => Err(0),
-        TemplatePick::NeedsBuilder => {
-            eprintln!(
-                "lazy-take-notes (Rust): the template builder is not usable yet; pass --template or --language"
-            );
-            Err(2)
-        }
-    })
+    Ok(
+        match pick_template(paths, show_builtins, args.config_path)? {
+            Some(template) => Ok(template),
+            None => Err(0),
+        },
+    )
 }
 
-pub enum TemplatePick {
-    Chosen(Box<SessionTemplate>),
-    Cancelled,
-    /// `n` or `a`: the builder, which this version does not have yet.
-    NeedsBuilder,
-}
-
-/// The template picker, as Python's `pick_template`.
-pub fn pick_template(paths: &Paths, show_builtins: bool) -> Result<TemplatePick, String> {
+/// The template picker, as Python's `pick_template`. `n` and `a` run the
+/// builder, then show the picker again. None when the user cancels.
+pub fn pick_template(
+    paths: &Paths,
+    show_builtins: bool,
+    config_path: Option<&Path>,
+) -> Result<Option<SessionTemplate>, String> {
     use crate::tui::screens::template_picker::{TemplateChoice, TemplatePicker};
-    let runtime = new_runtime()?;
     crate::tui::terminal::clear_normal_screen();
-    let picker = TemplatePicker::new(
-        YamlTemplates::new(paths),
-        show_builtins,
-        paths.builtin_templates_noticed(),
-    );
-    let result = run_screen(Box::new(picker), &saved_theme(), runtime.handle().clone())
+    loop {
+        let runtime = new_runtime()?;
+        let picker = TemplatePicker::new(
+            YamlTemplates::new(paths),
+            show_builtins,
+            paths.builtin_templates_noticed(),
+        );
+        let result = run_screen(Box::new(picker), &saved_theme(), runtime.handle().clone())
+            .map_err(|e| e.to_string())?;
+        runtime.shutdown_background();
+        let choice = result.and_then(|payload| payload.downcast::<TemplateChoice>().ok());
+        match choice.map(|choice| *choice) {
+            None => return Ok(None),
+            Some(TemplateChoice::Key(key)) => {
+                return load_template_key(&YamlTemplates::new(paths), &key).map(Some);
+            }
+            Some(TemplateChoice::Create) => run_builder(paths, config_path, None)?,
+            Some(TemplateChoice::EditWithAi(key)) => {
+                let base = load_template_key(&YamlTemplates::new(paths), &key)?;
+                run_builder(paths, config_path, Some((base, key)))?;
+            }
+        }
+    }
+}
+
+/// The template builder, as its own app between two pickers.
+fn run_builder(
+    paths: &Paths,
+    config_path: Option<&Path>,
+    base: Option<(SessionTemplate, String)>,
+) -> Result<(), String> {
+    use crate::tui::screens::template_builder::{BuilderSetup, TemplateBuilderScreen};
+    let config_path = config_path.map(Path::to_path_buf);
+    let example_paths = paths.clone();
+    // Read config.yaml on the first send, as Python does, so an edit made in
+    // Settings meanwhile counts.
+    let setup = Box::new(move || {
+        let loaded = load_config(config_path.as_deref(), None)?;
+        let example = YamlTemplates::new(&example_paths)
+            .load_template("default_en")
+            .map_err(|e| e.to_string())?;
+        Ok(BuilderSetup {
+            llm: build_llm_client(&loaded.infra)?,
+            model: loaded.config.digest.model.clone(),
+            provider: loaded.infra.llm_provider.clone(),
+            example,
+        })
+    });
+    let runtime = new_runtime()?;
+    let screen = TemplateBuilderScreen::new(setup, YamlTemplates::new(paths), base);
+    run_screen(Box::new(screen), &saved_theme(), runtime.handle().clone())
         .map_err(|e| e.to_string())?;
+    // A call still running ends with the builder.
     runtime.shutdown_background();
-    let choice = result.and_then(|payload| payload.downcast::<TemplateChoice>().ok());
-    Ok(match choice.map(|choice| *choice) {
-        None => TemplatePick::Cancelled,
-        Some(TemplateChoice::Key(key)) => TemplatePick::Chosen(Box::new(load_template_key(
-            &YamlTemplates::new(paths),
-            &key,
-        )?)),
-        Some(TemplateChoice::Create | TemplateChoice::EditWithAi(_)) => TemplatePick::NeedsBuilder,
-    })
+    Ok(())
 }
 
 /// The file picker, from the current folder. None when the user cancels.

@@ -39,7 +39,7 @@ pub struct ScrollView {
     /// The Markdown widget's own `padding: 0 N`, inside `content_padding`.
     pub markdown_padding: u16,
     /// `overflow-y: scroll`: the scrollbar column is there even when nothing overflows.
-    always_bar: bool,
+    pub always_bar: bool,
     /// Columns the vertical scrollbar takes: 1 where the CSS says `scrollbar-size: 1 1`,
     /// Textual's default 2 elsewhere.
     pub bar_width: u16,
@@ -139,10 +139,12 @@ impl ScrollView {
         let text_width = width
             .saturating_sub((self.padding + self.content_padding) * 2)
             .max(1);
-        self.lines_at(text_width, theme).len() + usize::from(self.dock_rows)
+        self.lines_at(text_width, theme, Style::default()).len() + usize::from(self.dock_rows)
     }
 
-    fn lines_at(&self, width: u16, theme: &Theme) -> Vec<Line<'static>> {
+    /// The wrapped lines. `base` styles the Markdown's own padding, which a quote's
+    /// background does not cover.
+    fn lines_at(&self, width: u16, theme: &Theme, base: Style) -> Vec<Line<'static>> {
         let mut all = wrap_lines(&self.prefix, width);
         match &self.content {
             Content::Lines(lines) => all.extend(wrap_lines(lines, width)),
@@ -150,7 +152,10 @@ impl ScrollView {
                 let pad = self.markdown_padding;
                 let rendered = markdown::render(text, width.saturating_sub(pad * 2).max(1), theme);
                 all.extend(rendered.into_iter().map(|line| {
-                    let mut spans = vec![ratatui::text::Span::raw(" ".repeat(usize::from(pad)))];
+                    let mut spans = vec![ratatui::text::Span::styled(
+                        " ".repeat(usize::from(pad)),
+                        base,
+                    )];
                     spans.extend(line.spans);
                     Line::from(spans).style(line.style)
                 }));
@@ -171,10 +176,10 @@ impl ScrollView {
         let height = usize::from(region.height);
         let full = region.width.saturating_sub(self.content_padding * 2).max(1);
         let dock = usize::from(self.dock_rows);
-        let mut lines = self.lines_at(full, theme);
+        let mut lines = self.lines_at(full, theme, style);
         let bar_column = lines.len() + dock > height || self.always_bar;
         if bar_column {
-            lines = self.lines_at(full.saturating_sub(self.bar_width).max(1), theme);
+            lines = self.lines_at(full.saturating_sub(self.bar_width).max(1), theme, style);
         }
         self.rows = lines.len() + dock;
         self.height = height;

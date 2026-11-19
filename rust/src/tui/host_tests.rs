@@ -197,3 +197,42 @@ fn a_modal_draws_over_the_dimmed_screen_and_toasts_go_on_top() {
         "the screen below the modal is dimmed"
     );
 }
+
+/// Records the keys it gets.
+struct KeyLog(Arc<Mutex<Vec<String>>>);
+
+impl Screen for KeyLog {
+    fn render(&mut self, _frame: &mut Frame, _area: Rect, _ctx: &Ctx) {}
+
+    fn key(&mut self, _key: &KeyEvent, name: &str, _ctx: &mut Ctx) -> Action {
+        self.0.lock().unwrap().push(name.to_string());
+        Action::None
+    }
+}
+
+#[test]
+fn tab_closes_a_notice_and_still_moves_the_focus_below() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let keys = Arc::new(Mutex::new(Vec::new()));
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    host.push(Box::new(KeyLog(keys.clone())));
+    let notice = || {
+        Box::new(
+            crate::tui::screens::modals::MarkdownModal::builtin_templates_notice(
+                std::path::PathBuf::from("/nonexistent/flag"),
+            ),
+        )
+    };
+    host.push(notice());
+    host.key(&KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(host.depth(), 1);
+    assert_eq!(*keys.lock().unwrap(), vec!["tab".to_string()]);
+    // Any other key only closes it, as in Python.
+    host.push(notice());
+    host.key(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
+    assert_eq!(host.depth(), 1);
+    assert_eq!(keys.lock().unwrap().len(), 1);
+}

@@ -65,7 +65,7 @@ enum Row {
 struct Edited(String);
 
 /// The delete confirmation's answer.
-struct DeleteAnswer(bool);
+pub struct Answer(pub bool);
 
 pub struct TemplatePicker {
     picker: Picker,
@@ -310,7 +310,7 @@ impl TemplatePicker {
             ctx.warn("Only user templates can be deleted", Duration::from_secs(5));
             return Action::None;
         }
-        Action::Push(Box::new(ConfirmDelete::new(&name)))
+        Action::Push(Box::new(Confirm::delete(&name)))
     }
 
     fn on_delete_confirmed(&mut self, ctx: &mut Ctx) {
@@ -434,7 +434,7 @@ impl Screen for TemplatePicker {
 
     fn resumed(&mut self, result: Option<Payload>, ctx: &mut Ctx) -> Action {
         let confirmed = result
-            .and_then(|payload| payload.downcast::<DeleteAnswer>().ok())
+            .and_then(|payload| payload.downcast::<Answer>().ok())
             .is_some_and(|answer| answer.0);
         if confirmed {
             self.on_delete_confirmed(ctx);
@@ -462,31 +462,51 @@ pub const CONFIRM_DELETE_BINDINGS: [Binding; 9] = [
     bind("right", "app.focus_next", "Focus next").hidden(),
 ];
 
-/// "Delete user template?" with a No and a Yes button. No has the focus.
-pub struct ConfirmDelete {
-    name: String,
+/// A question with a No and a Yes button, stacked. No has the focus. Pops with `Answer`.
+pub struct Confirm {
+    message: Line<'static>,
+    border: &'static str,
+    yes: Variant,
     yes_focused: bool,
+    /// The arrow keys move the focus too (the delete dialog binds them).
+    pub arrows: bool,
 }
 
-impl ConfirmDelete {
-    pub fn new(name: &str) -> Self {
+impl Confirm {
+    pub fn new(message: Line<'static>, border: &'static str, yes: Variant) -> Self {
         Self {
-            name: name.into(),
+            message,
+            border,
+            yes,
             yes_focused: false,
+            arrows: true,
         }
     }
 
+    /// "Delete user template?"
+    pub fn delete(name: &str) -> Self {
+        let message = Line::from(vec![
+            Span::raw("Delete user template "),
+            Span::styled(
+                format!("\"{name}\""),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("?"),
+        ]);
+        Self::new(message, "error", Variant::Error)
+    }
+
     fn answer(yes: bool) -> Action {
-        Action::Pop(Some(Box::new(DeleteAnswer(yes))))
+        Action::Pop(Some(Box::new(Answer(yes))))
     }
 }
 
-impl Screen for ConfirmDelete {
+impl Screen for Confirm {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
         let theme = &ctx.theme;
         // Border, padding, the message, its margin, then two buttons stacked in a `Center`.
         let outer = centered(area, 50, 2 + 2 + 1 + 1 + 3 + 3);
-        let inner = thick_box(frame, outer, "error", "surface", theme);
+        let inner = thick_box(frame, outer, self.border, "surface", theme);
         if inner.height < 10 || inner.width < 20 {
             return;
         }
@@ -494,16 +514,8 @@ impl Screen for ConfirmDelete {
         let text = Style::default()
             .fg(theme.on("foreground", "surface"))
             .bg(theme.color("surface"));
-        let message = Line::from(vec![
-            Span::raw("Delete user template "),
-            Span::styled(
-                format!("\"{}\"", self.name),
-                Style::default().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("?"),
-        ]);
         frame.render_widget(
-            Paragraph::new(center(message, padded.width)).style(text),
+            Paragraph::new(center(self.message.clone(), padded.width)).style(text),
             Rect::new(padded.x, padded.y, padded.width, 1),
         );
         // Each button is 16 wide (its `min-width`) with `margin: 0 1`.
@@ -520,7 +532,7 @@ impl Screen for ConfirmDelete {
             frame,
             Rect::new(x, padded.y + 5, 16, 3),
             "Yes (y)",
-            Variant::Error,
+            self.yes,
             self.yes_focused,
             theme,
         );
@@ -531,7 +543,11 @@ impl Screen for ConfirmDelete {
             "y" => Self::answer(true),
             "n" | "escape" => Self::answer(false),
             "enter" | "space" => Self::answer(self.yes_focused),
-            "tab" | "shift+tab" | "left" | "right" | "up" | "down" => {
+            "tab" | "shift+tab" => {
+                self.yes_focused = !self.yes_focused;
+                Action::None
+            }
+            "left" | "right" | "up" | "down" if self.arrows => {
                 self.yes_focused = !self.yes_focused;
                 Action::None
             }
