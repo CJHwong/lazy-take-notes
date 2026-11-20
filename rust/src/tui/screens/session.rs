@@ -204,6 +204,8 @@ pub struct Session {
     in_flight: Option<InFlight>,
     last_persist_error: Option<String>,
     awaiting_label: bool,
+    /// The speaker whose name prompt is open.
+    awaiting_speaker: Option<u32>,
     download_open: bool,
 }
 
@@ -244,6 +246,7 @@ impl Session {
             in_flight: None,
             last_persist_error: None,
             awaiting_label: false,
+            awaiting_speaker: None,
             download_open: false,
         }
     }
@@ -316,7 +319,7 @@ impl Session {
         ctx.hit(transcript_area, "transcript", 0);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - 1, left, 1);
-            render_speaker_bar(frame, bar, &chips, theme);
+            render_speaker_bar(frame, bar, &chips, ctx);
         }
         let column = Rect::new(body.x + left, body.y, body.width - left, body.height);
         // `height: 6`, and 40% of the column while it has the focus.
@@ -350,7 +353,23 @@ impl Session {
 
     /// A click focuses the panel under it; the wheel scrolls the transcript or
     /// the digest under the pointer.
-    pub fn mouse(&mut self, input: &MouseInput) {
+    /// A click on a speaker chip opens its name prompt, as Python's `on_click`.
+    pub fn mouse(&mut self, input: &MouseInput) -> Action {
+        if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
+            let speaker = index as u32;
+            let current = self.controller.speaker_names.get(&speaker).cloned().unwrap_or_default();
+            self.awaiting_speaker = Some(speaker);
+            return Action::Push(Box::new(LabelModal::new(
+                &current,
+                &format!("Name for S{speaker}"),
+                "Speaker name...",
+            )));
+        }
+        self.scroll_or_focus(input);
+        Action::None
+    }
+
+    fn scroll_or_focus(&mut self, input: &MouseInput) {
         let focus = if input.on("transcript").is_some() {
             Focus::Transcript
         } else if input.on("digest").is_some() {
@@ -981,6 +1000,15 @@ impl Session {
 
     /// The label modal or another screen this one pushed closed.
     pub fn resumed(&mut self, result: Option<Payload>, mode: &mut dyn Mode, ctx: &mut Ctx) {
+        if let Some(speaker) = self.awaiting_speaker.take() {
+            // Escape or an empty name keeps the old one.
+            if let Some(name) = result.and_then(|payload| payload.downcast::<String>().ok()) {
+                self.controller.set_speaker_name(speaker, *name);
+                self.persist_speakers(ctx);
+                self.render_all_lines();
+            }
+            return;
+        }
         if !std::mem::take(&mut self.awaiting_label) {
             return;
         }
@@ -1055,21 +1083,25 @@ fn render_speaker_bar(
     frame: &mut Frame,
     area: Rect,
     chips: &[(u32, String, f64)],
-    theme: &crate::tui::theme::Theme,
+    ctx: &Ctx,
 ) {
+    let theme = &ctx.theme;
     let chip = Style::default()
         .bg(theme.color("surface"))
         .fg(theme.on("foreground", "surface"));
     let mut spans = vec![Span::raw(" ")];
+    let mut x = area.x + 1;
     for (speaker, name, seconds) in chips {
         let shown = match name.is_empty() {
             true => format!("S{speaker}"),
             false => name.clone(),
         };
-        spans.push(Span::styled(
-            format!(" {shown} {} ", format_spoken_time(*seconds)),
-            chip,
-        ));
+        let text = format!(" {shown} {} ", format_spoken_time(*seconds));
+        let width = unicode_width::UnicodeWidthStr::width(text.as_str()) as u16;
+        let visible = width.min(area.right().saturating_sub(x));
+        ctx.hit(Rect::new(x, area.y, visible, 1), "speaker", *speaker as usize);
+        x = x.saturating_add(width + 1);
+        spans.push(Span::styled(text, chip));
         spans.push(Span::raw(" "));
     }
     let base = Style::default()
