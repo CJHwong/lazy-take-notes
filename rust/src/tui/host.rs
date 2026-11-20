@@ -910,18 +910,17 @@ impl Host {
                         self.terminal_event(event);
                         // A wheel or key-repeat burst: take every event that already
                         // waits, then draw once, so the screen never trails the input.
-                        while !self.finished()
-                            && let Some(stream) = input.as_mut()
-                            && let Some(ready) = futures_util::FutureExt::now_or_never(stream.next())
-                        {
-                            match ready {
-                                Some(Ok(event)) => self.terminal_event(event),
-                                Some(Err(e)) => {
+                        // Not `now_or_never` on the stream: its empty poll hands a dummy
+                        // waker to crossterm's wake thread, and the loop then sleeps
+                        // through input until the next tick (250 ms per key).
+                        while !self.finished() && input.is_some() {
+                            match crossterm::event::poll(Duration::ZERO)
+                                .and_then(|ready| ready.then(crossterm::event::read).transpose())
+                            {
+                                Ok(Some(event)) => self.terminal_event(event),
+                                Ok(None) => break,
+                                Err(e) => {
                                     warn!(target: "ltn.app", "Terminal input failed ({e}); keys stop");
-                                    input = None;
-                                }
-                                None => {
-                                    warn!(target: "ltn.app", "Terminal input closed; keys stop");
                                     input = None;
                                 }
                             }
