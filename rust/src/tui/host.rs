@@ -165,11 +165,21 @@ impl Ctx {
         timeout: Duration,
         title: &str,
     ) {
+        let (title, text, until) = (title.into(), text.into(), Instant::now() + timeout);
+        // A repeated press renews the toast it already showed instead of stacking copies.
+        if let Some(shown) = self
+            .toasts
+            .iter_mut()
+            .find(|toast| toast.text == text && toast.title == title && toast.severity == severity)
+        {
+            shown.until = shown.until.max(until);
+            return;
+        }
         self.toasts.push(Toast {
-            title: title.into(),
-            text: text.into(),
+            title,
+            text,
             severity,
-            until: Instant::now() + timeout,
+            until,
         });
     }
 
@@ -896,7 +906,27 @@ impl Host {
             };
             tokio::select! {
                 event = next_key => match event {
-                    Some(Ok(event)) => self.terminal_event(event),
+                    Some(Ok(event)) => {
+                        self.terminal_event(event);
+                        // A wheel or key-repeat burst: take every event that already
+                        // waits, then draw once, so the screen never trails the input.
+                        while !self.finished()
+                            && let Some(stream) = input.as_mut()
+                            && let Some(ready) = futures_util::FutureExt::now_or_never(stream.next())
+                        {
+                            match ready {
+                                Some(Ok(event)) => self.terminal_event(event),
+                                Some(Err(e)) => {
+                                    warn!(target: "ltn.app", "Terminal input failed ({e}); keys stop");
+                                    input = None;
+                                }
+                                None => {
+                                    warn!(target: "ltn.app", "Terminal input closed; keys stop");
+                                    input = None;
+                                }
+                            }
+                        }
+                    }
                     Some(Err(e)) => {
                         warn!(target: "ltn.app", "Terminal input failed ({e}); keys stop");
                         input = None;

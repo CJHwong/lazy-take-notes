@@ -111,7 +111,8 @@ fn an_error_loop_shows_one_sticky_alert_instead_of_more_toasts() {
         press(&mut host, KeyCode::Char('x'), KeyModifiers::NONE);
     }
     let toasts = host.ctx().toast_texts();
-    assert_eq!(toasts.len(), ERROR_BURST_LIMIT + 1, "{toasts:?}");
+    // The same error renews its one toast; the burst adds the sticky alert.
+    assert_eq!(toasts.len(), 2, "{toasts:?}");
     assert!(toasts.last().unwrap().starts_with("Errors keep repeating"));
     assert!(
         toasts
@@ -706,4 +707,25 @@ fn a_signal_the_os_refuses_leaves_the_host_without_handlers() {
 fn a_second_host_in_the_same_process_still_catches_sigterm() {
     let (status, _elapsed) = run_child("second");
     assert_eq!(status.code(), Some(128 + 15), "{status:?}");
+}
+
+#[test]
+fn a_repeated_toast_renews_the_one_on_screen_instead_of_stacking() {
+    let runtime = runtime();
+    let mut host = Host::new("textual-dark", runtime.handle().clone());
+    let ctx = host.ctx();
+    for _ in 0..4 {
+        ctx.warn("Quick action already running, please wait", Duration::from_secs(3));
+    }
+    ctx.warn("Digest in progress, please wait", Duration::from_secs(3));
+    ctx.notify("Quick action already running, please wait");
+    assert_eq!(
+        host.ctx().toast_texts(),
+        [
+            "Quick action already running, please wait",
+            "Digest in progress, please wait",
+            "Quick action already running, please wait",
+        ],
+        "same text, other severity: its own toast"
+    );
 }
