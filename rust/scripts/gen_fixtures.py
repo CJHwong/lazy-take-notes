@@ -9,7 +9,7 @@ import asyncio
 import json
 from importlib import resources
 from pathlib import Path
-from typing import NamedTuple, TypedDict
+from typing import NamedTuple
 
 import numpy as np
 import yaml
@@ -28,7 +28,6 @@ from lazy_take_notes.l2_use_cases.utils.prompt_builder import (
 )
 from lazy_take_notes.l2_use_cases.utils.template_diff import diff_templates
 from lazy_take_notes.l2_use_cases.utils.template_validator import validate_template
-from lazy_take_notes.l3_interface_adapters.gateways.mic_boost import MicBoost
 
 OUT = Path(__file__).resolve().parent.parent / 'tests' / 'fixtures'
 SCHEMA_OUT = Path(__file__).resolve().parent.parent / 'src' / 'usecases' / 'session_template_schema.json'
@@ -293,89 +292,6 @@ def misc() -> dict:
     }
 
 
-# Each scenario is rebuilt in Rust from the same parts: LCG clips added to a track
-# at a start time, and for bleed a delayed, scaled copy of the system track in the mic.
-class BoostScenario(TypedDict):
-    name: str
-    seconds: float
-    mic: list[list]  # [seed, amplitude, syllables, start_s, length_s] per clip
-    system: list[list]
-    bleed: list[float] | None  # [scale, delay_s] of the system track in the mic
-
-
-BOOST_SCENARIOS: list[BoostScenario] = [
-    {
-        'name': 'quiet_speaker',
-        'seconds': 8.0,
-        'mic': [[11, 0.004, True, 0.5, 7.0], [12, 0.0003, False, 0.0, 8.0]],
-        'system': [],
-        'bleed': None,
-    },
-    {
-        'name': 'speech_over_unrelated_call',
-        'seconds': 8.0,
-        'mic': [[13, 0.004, True, 0.0, 8.0], [12, 0.0003, False, 0.0, 8.0]],
-        'system': [[14, 0.05, False, 0.0, 8.0]],
-        'bleed': None,
-    },
-    {
-        'name': 'speakers_bleed_into_mic',
-        'seconds': 8.0,
-        'mic': [[16, 0.0003, False, 0.0, 8.0]],
-        'system': [[15, 0.05, True, 0.0, 8.0]],
-        'bleed': [0.3, 0.1],
-    },
-    {
-        'name': 'call_pause_starts_a_new_turn',
-        'seconds': 10.0,
-        'mic': [[17, 0.004, True, 0.0, 10.0], [12, 0.0003, False, 0.0, 10.0]],
-        'system': [[18, 0.05, False, 0.0, 4.0], [19, 0.05, False, 7.0, 3.0]],
-        'bleed': None,
-    },
-    {
-        'name': 'sudden_loud_voice',
-        'seconds': 8.0,
-        'mic': [[20, 0.004, True, 0.0, 5.0], [21, 0.2, True, 5.0, 3.0], [12, 0.0003, False, 0.0, 8.0]],
-        'system': [],
-        'bleed': None,
-    },
-    {
-        'name': 'steady_noise_raises_the_floor',
-        'seconds': 10.0,
-        'mic': [[22, 0.01, False, 0.0, 10.0]],
-        'system': [],
-        'bleed': None,
-    },
-]
-
-
-def boost_track(parts: list, seconds: float) -> np.ndarray:
-    track = np.zeros(int(seconds * 16000), dtype=np.float32)
-    for seed, amplitude, syllables, start, length in parts:
-        clip = lcg_audio(seed, length, amplitude, syllables)
-        begin = int(start * 16000)
-        track[begin : begin + clip.size] += clip[: track.size - begin]
-    return track
-
-
-def mic_boost() -> list[dict]:
-    cases = []
-    for scenario in BOOST_SCENARIOS:
-        mic = boost_track(scenario['mic'], scenario['seconds'])
-        system = boost_track(scenario['system'], scenario['seconds'])
-        if scenario['bleed'] is not None:
-            scale, delay = scenario['bleed']
-            shift = int(delay * 16000)
-            mic[shift:] += (system[: mic.size - shift] * np.float32(scale)).astype(np.float32)
-        boost = MicBoost(target_rms=0.05, max_gain=10.0)
-        blocks = []
-        for start in range(0, mic.size - 511, 512):
-            out = boost.apply(mic[start : start + 512].copy(), system[start : start + 512])
-            blocks.append([boost.gain, boost.bleeding, float(np.sqrt(np.mean(out.astype(np.float64) ** 2)))])
-        cases.append({**scenario, 'blocks': blocks})
-    return cases
-
-
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     loaded = templates()
@@ -388,7 +304,6 @@ def main() -> None:
         'labels': labels(),
         'cleaning': cleaning(),
         'gate': gate(),
-        'mic_boost': mic_boost(),
         'builder': builder(loaded),
         'misc': misc(),
     }
