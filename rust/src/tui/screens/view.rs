@@ -11,9 +11,12 @@ use ratatui::text::Line;
 use tracing::error;
 
 use crate::adapters::os_error::OsError;
-use crate::domain::session_files::{NOTES, TRANSCRIPT};
+use crate::adapters::saved_speakers::{self, SavedSpeakers};
+use crate::domain::session_files::{NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
+use crate::tui::screens::modals::LabelModal;
+use crate::tui::screens::session::{render_speaker_bar, wrap_chips};
 use crate::tui::screens::session_picker::{SessionPicker, picked_dir, utf8_error};
 use crate::tui::system::{copy_to_clipboard, open_folder};
 use crate::tui::theme::Theme;
@@ -78,7 +81,8 @@ impl TranscriptPanel {
     pub fn render(&mut self, frame: &mut Frame, area: Rect, focused: bool, theme: &Theme) {
         let background = theme.color("background");
         let border = crate::tui::widgets::border_color(focused, theme);
-        let inner = crate::tui::widgets::rounded(frame, area, "Transcript", border, background, theme);
+        let inner =
+            crate::tui::widgets::rounded(frame, area, "Transcript", border, background, theme);
         let style = Style::default()
             .bg(background)
             .fg(theme.color("foreground"));
@@ -179,6 +183,10 @@ pub fn header(frame: &mut Frame, area: Rect, text: &str, theme: &Theme) {
 
 pub struct ViewScreen {
     session_dir: PathBuf,
+    /// None: the session has no speakers.json.
+    speakers: Option<SavedSpeakers>,
+    /// The speaker whose name prompt is open.
+    awaiting_speaker: Option<u32>,
     transcript: TranscriptPanel,
     digest: DigestPanel,
     status: StatusBar,
@@ -193,6 +201,8 @@ impl ViewScreen {
         status.set_stopped(true);
         Self {
             session_dir,
+            speakers: None,
+            awaiting_speaker: None,
             transcript: TranscriptPanel::default(),
             digest: DigestPanel::default(),
             status,
@@ -224,6 +234,49 @@ impl ViewScreen {
         String::new()
     }
 
+    /// The labeled transcript when the session has one, else the plain one.
+    fn load_transcript(&mut self, ctx: &mut Ctx) {
+        self.transcript.view.clear();
+        self.transcript.all_text.clear();
+        let labeled = self.session_dir.join(SPEAKER_TRANSCRIPT);
+        let path = match labeled.is_file() {
+            true => Some(labeled),
+            false => TRANSCRIPT.resolve(&self.session_dir),
+        };
+        let text = self.read_saved(path, ctx);
+        // The saved lines already carry their timestamps; write them as they are.
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            self.transcript.all_text.push(line.to_string());
+            self.transcript.view.write(Line::from(line.to_string()));
+        }
+    }
+
+    fn load_speakers(&mut self, ctx: &mut Ctx) {
+        match saved_speakers::load(&self.session_dir) {
+            Ok(speakers) => self.speakers = speakers,
+            Err(message) => {
+                error!(target: "ltn.view", "{message}");
+                ctx.warn(message, Duration::from_secs(8));
+            }
+        }
+    }
+
+    fn rename_speaker(&mut self, speaker: u32, name: &str, ctx: &mut Ctx) {
+        match saved_speakers::rename(&self.session_dir, speaker, name) {
+            Ok(speakers) => {
+                self.speakers = Some(speakers);
+                self.load_transcript(ctx);
+            }
+            Err(message) => {
+                error!(target: "ltn.view", "Cannot rename S{speaker}: {message}");
+                ctx.error(
+                    format!("Cannot rename S{speaker}: {message}"),
+                    Duration::from_secs(8),
+                );
+            }
+        }
+    }
+
     fn has_recording(&self) -> bool {
         std::fs::read_dir(&self.session_dir).is_ok_and(|entries| {
             entries.filter_map(Result::ok).any(|entry| {
@@ -236,12 +289,8 @@ impl ViewScreen {
 
 impl Screen for ViewScreen {
     fn mounted(&mut self, ctx: &mut Ctx) -> Action {
-        let text = self.read_saved(TRANSCRIPT.resolve(&self.session_dir), ctx);
-        // The saved lines already carry their timestamps; write them as they are.
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            self.transcript.all_text.push(line.to_string());
-            self.transcript.view.write(Line::from(line.to_string()));
-        }
+        self.load_speakers(ctx);
+        self.load_transcript(ctx);
         if TRANSCRIPT.resolve(&self.session_dir).is_none() && self.has_recording() {
             // A failed transcription keeps only the audio.
             self.transcript.view.write(Line::from(
@@ -270,7 +319,18 @@ impl Screen for ViewScreen {
             theme,
         );
         let left = body.width / 2;
-        let transcript_area = Rect::new(body.x, body.y, left, body.height);
+        let chips = self
+            .speakers
+            .as_ref()
+            .map(SavedSpeakers::chips)
+            .unwrap_or_default();
+        let chip_rows = wrap_chips(&chips, left);
+        let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
+        if bar_rows > 0 {
+            let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
+            render_speaker_bar(frame, bar, &chip_rows, ctx);
+        }
+        let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
         let digest_area = Rect::new(body.x + left, body.y, body.width - left, body.height);
         self.transcript
             .render(frame, transcript_area, !self.digest_focused, theme);
@@ -282,8 +342,33 @@ impl Screen for ViewScreen {
         crate::tui::widgets::hint_targets(frame, bottom, ctx);
     }
 
+    /// The speaker name prompt closed: Escape or an empty name changes nothing.
+    fn resumed(&mut self, result: Option<Payload>, ctx: &mut Ctx) -> Action {
+        let Some(speaker) = self.awaiting_speaker.take() else {
+            return Action::None;
+        };
+        if let Some(name) = result.and_then(|payload| payload.downcast::<String>().ok()) {
+            self.rename_speaker(speaker, &name, ctx);
+        }
+        Action::None
+    }
+
     /// A click focuses the panel under it; the wheel scrolls that panel.
     fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
+        if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
+            let speaker = index as u32;
+            let current = self
+                .speakers
+                .as_ref()
+                .and_then(|saved| saved.names.get(&speaker).cloned())
+                .unwrap_or_default();
+            self.awaiting_speaker = Some(speaker);
+            return Action::Push(Box::new(LabelModal::new(
+                &current,
+                &format!("Name for S{speaker}"),
+                "Speaker name...",
+            )));
+        }
         let digest = input.on("digest").is_some();
         if !digest && input.on("transcript").is_none() {
             return Action::None;

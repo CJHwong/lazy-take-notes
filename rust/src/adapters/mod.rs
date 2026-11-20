@@ -12,6 +12,7 @@ pub mod os_error;
 pub mod paths;
 pub mod plugins;
 pub mod pyrepr;
+pub mod saved_speakers;
 pub mod session_controller;
 pub mod session_reader;
 pub mod session_status;

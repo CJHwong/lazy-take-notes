@@ -542,7 +542,8 @@ impl Run {
             modifiers: KeyModifiers::NONE,
         };
         let left = crossterm::event::MouseButton::Left;
-        self.host.mouse(&at(crossterm::event::MouseEventKind::Down(left)));
+        self.host
+            .mouse(&at(crossterm::event::MouseEventKind::Down(left)));
         self.settle();
     }
 }
@@ -558,7 +559,11 @@ fn a_click_on_a_speaker_chip_names_that_speaker() {
         speaker: 0,
     }]));
     run.click(" S0 2s ");
-    assert!(run.screen_text().contains("Name for S0"), "{}", run.screen_text());
+    assert!(
+        run.screen_text().contains("Name for S0"),
+        "{}",
+        run.screen_text()
+    );
     run.type_text("Andy");
     run.enter();
     let screen = run.screen_text();
@@ -571,5 +576,39 @@ fn a_click_on_a_speaker_chip_names_that_speaker() {
     assert!(labeled.ends_with("Andy: hello\n"), "{labeled}");
     // The named chip opens with the name to edit.
     run.click(" Andy 2s ");
-    assert!(run.screen_text().contains("Name for S0"), "{}", run.screen_text());
+    assert!(
+        run.screen_text().contains("Name for S0"),
+        "{}",
+        run.screen_text()
+    );
+}
+
+#[test]
+fn eight_speakers_wrap_onto_more_rows_and_each_chip_still_opens_its_prompt() {
+    let mut run = start(true);
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment("hello", 0.0, 80.0)]));
+    let turns = (0..8)
+        .map(|speaker| SpeakerTurn {
+            start: f64::from(speaker) * 10.0,
+            end: f64::from(speaker) * 10.0 + 9.0,
+            speaker,
+        })
+        .collect();
+    run.post(Event::SpeakerTurns(turns));
+    let screen = run.screen_text();
+    for speaker in 0..8 {
+        assert!(
+            screen.contains(&format!(" S{speaker} 9s ")),
+            "S{speaker}:\n{screen}"
+        );
+    }
+    let rows = screen.lines().filter(|line| line.contains(" 9s ")).count();
+    assert!(rows >= 2, "{screen}");
+    run.click(" S7 9s ");
+    assert!(
+        run.screen_text().contains("Name for S7"),
+        "{}",
+        run.screen_text()
+    );
 }

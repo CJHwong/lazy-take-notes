@@ -308,7 +308,8 @@ impl Session {
         let left = body.width / 2;
         // The speaker bar is `height: auto`: one row once a speaker is heard.
         let chips = self.speaker_chips();
-        let bar_rows = u16::from(!chips.is_empty()).min(body.height);
+        let chip_rows = wrap_chips(&chips, body.width / 2);
+        let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
         self.transcript.render(
             frame,
@@ -318,8 +319,8 @@ impl Session {
         );
         ctx.hit(transcript_area, "transcript", 0);
         if bar_rows > 0 {
-            let bar = Rect::new(body.x, body.bottom() - 1, left, 1);
-            render_speaker_bar(frame, bar, &chips, ctx);
+            let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
+            render_speaker_bar(frame, bar, &chip_rows, ctx);
         }
         let column = Rect::new(body.x + left, body.y, body.width - left, body.height);
         // `height: 6`, and 40% of the column while it has the focus.
@@ -357,7 +358,12 @@ impl Session {
     pub fn mouse(&mut self, input: &MouseInput) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
-            let current = self.controller.speaker_names.get(&speaker).cloned().unwrap_or_default();
+            let current = self
+                .controller
+                .speaker_names
+                .get(&speaker)
+                .cloned()
+                .unwrap_or_default();
             self.awaiting_speaker = Some(speaker);
             return Action::Push(Box::new(LabelModal::new(
                 &current,
@@ -472,6 +478,8 @@ impl Session {
         if index == 0 || index > count {
             return None;
         }
+        // The key that started it: a press, or a click on its hint (the host logs those).
+        tracing::info!(target: "ltn.app", "quick action {index} started by key {name:?}");
         self.quick_action(name, ctx);
         Some(Action::None)
     }
@@ -1079,38 +1087,59 @@ impl Session {
 
 /// One chip per speaker: `padding: 0 1` on the bar, and each chip `padding: 0 1`,
 /// `margin-right: 1` on `$surface`. Names are the user's text, drawn as typed.
-fn render_speaker_bar(
-    frame: &mut Frame,
-    area: Rect,
-    chips: &[(u32, String, f64)],
-    ctx: &Ctx,
-) {
-    let theme = &ctx.theme;
-    let chip = Style::default()
-        .bg(theme.color("surface"))
-        .fg(theme.on("foreground", "surface"));
-    let mut spans = vec![Span::raw(" ")];
-    let mut x = area.x + 1;
+/// One chip: the speaker, its text (` name 4m12s `), and its width in cells.
+pub type Chip = (u32, String, u16);
+
+/// The chips in rows of `width` cells: a leading space, then each chip and a gap.
+/// A chip wider than the row gets a row of its own.
+pub fn wrap_chips(chips: &[(u32, String, f64)], width: u16) -> Vec<Vec<Chip>> {
+    let mut rows: Vec<Vec<Chip>> = Vec::new();
+    let mut used = 0u16;
     for (speaker, name, seconds) in chips {
         let shown = match name.is_empty() {
             true => format!("S{speaker}"),
             false => name.clone(),
         };
         let text = format!(" {shown} {} ", format_spoken_time(*seconds));
-        let width = unicode_width::UnicodeWidthStr::width(text.as_str()) as u16;
-        let visible = width.min(area.right().saturating_sub(x));
-        ctx.hit(Rect::new(x, area.y, visible, 1), "speaker", *speaker as usize);
-        x = x.saturating_add(width + 1);
-        spans.push(Span::styled(text, chip));
-        spans.push(Span::raw(" "));
+        let cells = unicode_width::UnicodeWidthStr::width(text.as_str()) as u16;
+        let needed = cells + 1;
+        if rows.is_empty() || used + needed > width {
+            rows.push(Vec::new());
+            used = 1;
+        }
+        used = used.saturating_add(needed);
+        if let Some(row) = rows.last_mut() {
+            row.push((*speaker, text, cells));
+        }
     }
+    rows
+}
+
+/// The chips under the transcript, one line per row; each chip is a click target.
+pub fn render_speaker_bar(frame: &mut Frame, area: Rect, rows: &[Vec<Chip>], ctx: &Ctx) {
+    let theme = &ctx.theme;
+    let chip = Style::default()
+        .bg(theme.color("surface"))
+        .fg(theme.on("foreground", "surface"));
     let base = Style::default()
         .bg(theme.color("background"))
         .fg(theme.color("foreground"));
-    frame.render_widget(
-        ratatui::widgets::Paragraph::new(Line::from(spans)).style(base),
-        area,
-    );
+    for (offset, row) in rows.iter().take(area.height as usize).enumerate() {
+        let y = area.y + offset as u16;
+        let mut spans = vec![Span::raw(" ")];
+        let mut x = area.x + 1;
+        for (speaker, text, cells) in row {
+            let visible = (*cells).min(area.right().saturating_sub(x));
+            ctx.hit(Rect::new(x, y, visible, 1), "speaker", *speaker as usize);
+            x = x.saturating_add(cells + 1);
+            spans.push(Span::styled(text.clone(), chip));
+            spans.push(Span::raw(" "));
+        }
+        frame.render_widget(
+            ratatui::widgets::Paragraph::new(Line::from(spans)).style(base),
+            Rect::new(area.x, y, area.width, 1),
+        );
+    }
 }
 
 #[cfg(test)]
