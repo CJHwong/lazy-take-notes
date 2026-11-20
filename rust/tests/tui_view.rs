@@ -54,6 +54,24 @@ impl Viewer {
         });
     }
 
+    /// The background of the last cell of the line that holds `text`.
+    fn background_of(&mut self, text: &str) -> ratatui::style::Color {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| self.host.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if let Some(at) = row.find(text) {
+                let x = (row[..at].chars().count() + text.chars().count() - 1) as u16;
+                return buffer[(x, y)].bg;
+            }
+        }
+        panic!("{text:?} is not on screen");
+    }
+
     fn type_text(&mut self, text: &str) {
         for ch in text.chars() {
             self.host
@@ -94,6 +112,12 @@ fn the_view_shows_the_labels_and_a_chip_click_renames_a_speaker() {
         screen.contains(" S1 4s ") && screen.contains(" S2 1s "),
         "{screen}"
     );
+    // The first click highlights S2's lines and nobody else's.
+    viewer.click(" S2 1s ");
+    let plain = viewer.background_of("[00:00:00] S1: hello");
+    assert_ne!(viewer.background_of("[00:00:05] S2: hi"), plain);
+    assert!(!viewer.screen().contains("Name for S2"));
+    // A second click on it opens the name prompt.
     viewer.click(" S2 1s ");
     assert!(
         viewer.screen().contains("Name for S2"),
@@ -104,6 +128,10 @@ fn the_view_shows_the_labels_and_a_chip_click_renames_a_speaker() {
     let screen = viewer.screen();
     assert!(screen.contains("[00:00:05] Andy: hi"), "{screen}");
     assert!(screen.contains(" Andy 1s "), "{screen}");
+    // The renamed lines stay highlighted; a click in the transcript clears it.
+    assert_ne!(viewer.background_of("[00:00:05] Andy: hi"), plain);
+    viewer.click("[00:00:00] S1: hello");
+    assert_eq!(viewer.background_of("[00:00:05] Andy: hi"), plain);
     let labeled = std::fs::read_to_string(dir.path().join("transcript_speakers.txt")).unwrap();
     assert_eq!(labeled, "[00:00:00] S1: hello\n[00:00:05] Andy: hi\n");
     let json = std::fs::read_to_string(dir.path().join("speakers.json")).unwrap();

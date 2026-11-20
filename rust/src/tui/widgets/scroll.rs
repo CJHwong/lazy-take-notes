@@ -101,6 +101,11 @@ impl ScrollView {
         self.offset = 0;
     }
 
+    /// Replace the lines and keep the scroll position (a restyle, not new content).
+    pub fn restyle_lines(&mut self, lines: Vec<Line<'static>>) {
+        self.content = Content::Lines(lines);
+    }
+
     pub fn set_markdown(&mut self, text: &str) {
         self.content = Content::Markdown(text.to_string());
     }

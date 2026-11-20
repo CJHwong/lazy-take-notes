@@ -6,8 +6,8 @@ use std::time::Duration;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
-use ratatui::text::Line;
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use tracing::error;
 
 use crate::adapters::os_error::OsError;
@@ -61,6 +61,10 @@ pub const DIGEST_PANEL_BINDINGS: [Binding; 7] = [
 pub struct TranscriptPanel {
     pub view: ScrollView,
     pub all_text: Vec<String>,
+    /// The speaker label whose lines have a highlighted background.
+    pub highlight: Option<String>,
+    /// What the drawn lines show: (label, background, line count).
+    styled: Option<(Option<String>, Color, usize)>,
 }
 
 impl Default for TranscriptPanel {
@@ -73,8 +77,38 @@ impl Default for TranscriptPanel {
                 view
             },
             all_text: Vec::new(),
+            highlight: None,
+            styled: None,
         }
     }
+}
+
+/// One saved line, `[hh:mm:ss] text`: the timestamp dim, then the text. `background`
+/// marks a line of the selected speaker.
+pub fn transcript_line(text: &str, background: Option<Color>) -> Line<'static> {
+    let line = match text.starts_with('[') {
+        true => match text.find("] ") {
+            Some(at) => Line::from(vec![
+                Span::styled(
+                    text[..=at].to_string(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::raw(text[at + 1..].to_string()),
+            ]),
+            None => Line::from(text.to_string()),
+        },
+        false => Line::from(text.to_string()),
+    };
+    match background {
+        Some(color) => line.style(Style::default().bg(color)),
+        None => line,
+    }
+}
+
+/// True when `text` is a line of the speaker shown as `label`.
+fn spoken_by(text: &str, label: &str) -> bool {
+    text.find("] ")
+        .is_some_and(|at| text[at + 2..].starts_with(&format!("{label}: ")))
 }
 
 impl TranscriptPanel {
@@ -86,7 +120,41 @@ impl TranscriptPanel {
         let style = Style::default()
             .bg(background)
             .fg(theme.color("foreground"));
+        self.restyle(theme);
         self.view.render(frame, inner, style, theme);
+    }
+
+    /// Drop every line; the next render styles the new ones from scratch.
+    pub fn clear(&mut self) {
+        self.view.clear();
+        self.all_text.clear();
+        self.styled = None;
+    }
+
+    /// Redraw the lines when the highlighted speaker, the theme or the lines changed.
+    fn restyle(&mut self, theme: &Theme) {
+        let marked = theme.tinted("background", "primary", 0.35);
+        let wanted = (self.highlight.clone(), marked, self.all_text.len());
+        let was_marked = self
+            .styled
+            .as_ref()
+            .is_some_and(|(label, _, _)| label.is_some());
+        if self.styled.as_ref() == Some(&wanted) || (self.highlight.is_none() && !was_marked) {
+            return;
+        }
+        let lines = self
+            .all_text
+            .iter()
+            .map(|text| {
+                let mine = self
+                    .highlight
+                    .as_deref()
+                    .is_some_and(|label| spoken_by(text, label));
+                transcript_line(text, mine.then_some(marked))
+            })
+            .collect();
+        self.view.restyle_lines(lines);
+        self.styled = Some(wanted);
     }
 
     /// Copy every line, with the session context when the screen has a locked one.
@@ -187,6 +255,8 @@ pub struct ViewScreen {
     speakers: Option<SavedSpeakers>,
     /// The speaker whose name prompt is open.
     awaiting_speaker: Option<u32>,
+    /// The chip clicked once: its lines are highlighted, a second click renames.
+    selected_speaker: Option<u32>,
     transcript: TranscriptPanel,
     digest: DigestPanel,
     status: StatusBar,
@@ -203,6 +273,7 @@ impl ViewScreen {
             session_dir,
             speakers: None,
             awaiting_speaker: None,
+            selected_speaker: None,
             transcript: TranscriptPanel::default(),
             digest: DigestPanel::default(),
             status,
@@ -236,8 +307,7 @@ impl ViewScreen {
 
     /// The labeled transcript when the session has one, else the plain one.
     fn load_transcript(&mut self, ctx: &mut Ctx) {
-        self.transcript.view.clear();
-        self.transcript.all_text.clear();
+        self.transcript.clear();
         let labeled = self.session_dir.join(SPEAKER_TRANSCRIPT);
         let path = match labeled.is_file() {
             true => Some(labeled),
@@ -247,7 +317,7 @@ impl ViewScreen {
         // The saved lines already carry their timestamps; write them as they are.
         for line in text.lines().filter(|line| !line.trim().is_empty()) {
             self.transcript.all_text.push(line.to_string());
-            self.transcript.view.write(Line::from(line.to_string()));
+            self.transcript.view.write(transcript_line(line, None));
         }
     }
 
@@ -266,6 +336,7 @@ impl ViewScreen {
             Ok(speakers) => {
                 self.speakers = Some(speakers);
                 self.load_transcript(ctx);
+                self.sync_highlight();
             }
             Err(message) => {
                 error!(target: "ltn.view", "Cannot rename S{speaker}: {message}");
@@ -275,6 +346,14 @@ impl ViewScreen {
                 );
             }
         }
+    }
+
+    /// Highlight the selected speaker's lines under the label they carry now.
+    fn sync_highlight(&mut self) {
+        self.transcript.highlight = self
+            .selected_speaker
+            .zip(self.speakers.as_ref())
+            .map(|(speaker, saved)| saved.label(speaker));
     }
 
     fn has_recording(&self) -> bool {
@@ -328,7 +407,7 @@ impl Screen for ViewScreen {
         let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
-            render_speaker_bar(frame, bar, &chip_rows, ctx);
+            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, ctx);
         }
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
         let digest_area = Rect::new(body.x + left, body.y, body.width - left, body.height);
@@ -357,6 +436,12 @@ impl Screen for ViewScreen {
     fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
+            // The first click shows the speaker's lines; a second click on it renames.
+            if self.selected_speaker != Some(speaker) {
+                self.selected_speaker = Some(speaker);
+                self.sync_highlight();
+                return Action::None;
+            }
             let current = self
                 .speakers
                 .as_ref()
@@ -378,7 +463,14 @@ impl Screen for ViewScreen {
             false => &mut self.transcript.view,
         };
         match input.kind {
-            MouseKind::Click => self.digest_focused = digest,
+            MouseKind::Click => {
+                self.digest_focused = digest;
+                if !digest {
+                    // A click in the transcript drops the highlight.
+                    self.selected_speaker = None;
+                    self.sync_highlight();
+                }
+            }
             MouseKind::WheelUp => view.scroll_by(-1),
             MouseKind::WheelDown => view.scroll_by(1),
         }
