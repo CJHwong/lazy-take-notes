@@ -31,28 +31,47 @@ impl Default for DiarizationTiming {
 /// Speaker numbers follow arrival order, so labels already on screen stay valid
 /// when a new voice joins. `audio_path` is asked each pass, so a renamed session
 /// folder is followed. A failed pass is skipped: one bad pass must not end the session.
+///
+/// `finish` says the recording is complete: one last pass covers whatever the
+/// earlier passes did not, then `DiarizationFinished` is posted. `cancel` stops
+/// at once, with no last pass (a shutdown).
 pub fn run_diarization_worker(
     poster: &Poster,
     cancel: &Cancel,
+    finish: &Cancel,
     audio_path: &dyn Fn() -> PathBuf,
     diarizer: &dyn Diarizer,
     timing: &DiarizationTiming,
 ) {
     let mut processed: Option<u64> = None;
-    while !cancel.is_cancelled() {
-        let path = audio_path();
-        let size = std::fs::metadata(&path)
+    let size_of = |path: &PathBuf| {
+        std::fs::metadata(path)
             .ok()
             .filter(std::fs::Metadata::is_file)
-            .map(|meta| meta.len());
+            .map(|meta| meta.len())
+    };
+    while !cancel.is_cancelled() {
+        let last = finish.is_cancelled();
+        let path = audio_path();
+        // The last pass takes any new audio; a running one waits for a real gain.
+        let growth = if last { 0 } else { MIN_GROWTH_BYTES };
         if let Some(size) =
-            size.filter(|&size| processed.is_none_or(|done| size > done + MIN_GROWTH_BYTES))
+            size_of(&path).filter(|&size| processed.is_none_or(|done| size > done + growth))
         {
+            if last {
+                info!(target: "ltn.diarize", "last diarization pass over the whole recording");
+            }
             run_pass(poster, diarizer, &path, timing.timeout);
             processed = Some(size);
         }
+        if last {
+            if !cancel.is_cancelled() {
+                poster.post(Event::DiarizationFinished);
+            }
+            return;
+        }
         let deadline = Instant::now() + timing.interval;
-        while !cancel.is_cancelled() && Instant::now() < deadline {
+        while !cancel.is_cancelled() && !finish.is_cancelled() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
@@ -125,7 +144,15 @@ mod tests {
             interval: Duration::ZERO,
             timeout: Duration::from_secs(1),
         };
-        run_diarization_worker(&Poster::new(sender), &cancel, &path, &diarizer, &timing);
+        let finish = Cancel::default();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &path,
+            &diarizer,
+            &timing,
+        );
         assert_eq!(*diarizer.calls.lock().unwrap(), 2);
         assert_eq!(
             events.try_recv().unwrap(),
@@ -159,11 +186,104 @@ mod tests {
             interval: Duration::ZERO,
             timeout: Duration::from_secs(1),
         };
-        run_diarization_worker(&Poster::new(sender), &cancel, &path, &diarizer, &timing);
+        let finish = Cancel::default();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &path,
+            &diarizer,
+            &timing,
+        );
         assert_eq!(
             *diarizer.calls.lock().unwrap(),
             1,
             "the same size runs once"
         );
+    }
+
+    /// A diarizer that answers every call and counts them.
+    struct Steady(Mutex<u32>);
+
+    impl Diarizer for Steady {
+        fn diarize(&self, _path: &Path, _timeout: Duration) -> Result<Vec<SpeakerTurn>, String> {
+            *self.0.lock().unwrap() += 1;
+            Ok(vec![turn(0)])
+        }
+    }
+
+    #[test]
+    fn finish_runs_one_last_pass_over_new_audio_then_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        std::fs::write(&wav, vec![0u8; 4096]).unwrap();
+        let (cancel, finish) = (Cancel::default(), Cancel::default());
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let calls = Mutex::new(0);
+        let path = || {
+            let mut count = calls.lock().unwrap();
+            *count += 1;
+            if *count == 2 {
+                // A tail smaller than a running pass waits for, then the stop.
+                std::fs::write(&wav, vec![0u8; 4096 + 100]).unwrap();
+                finish.cancel();
+            }
+            wav.clone()
+        };
+        let timing = DiarizationTiming {
+            interval: Duration::ZERO,
+            timeout: Duration::from_secs(1),
+        };
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(*diarizer.0.lock().unwrap(), 2, "the tail got its own pass");
+        assert_eq!(
+            events.try_recv().unwrap(),
+            Event::SpeakerTurns(vec![turn(0)])
+        );
+        assert_eq!(
+            events.try_recv().unwrap(),
+            Event::SpeakerTurns(vec![turn(0)])
+        );
+        assert_eq!(events.try_recv().unwrap(), Event::DiarizationFinished);
+    }
+
+    #[test]
+    fn finish_with_nothing_new_still_says_it_is_done_and_cancel_says_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        let (cancel, finish) = (Cancel::default(), Cancel::default());
+        finish.cancel();
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let path = || wav.clone();
+        let timing = DiarizationTiming::default();
+        run_diarization_worker(
+            &Poster::new(sender.clone()),
+            &cancel,
+            &finish,
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(*diarizer.0.lock().unwrap(), 0, "no recording, no pass");
+        assert_eq!(events.try_recv().unwrap(), Event::DiarizationFinished);
+        cancel.cancel();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert!(events.try_recv().is_err());
     }
 }
