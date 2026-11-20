@@ -257,3 +257,20 @@ impl lazy_take_notes::ports::persistence::Persistence for FakePersistence {
         Ok(path)
     }
 }
+
+/// Seeded uniform noise of `amplitude`, as Python's fixtures make it. `syllables`
+/// silences the last 0.1 s of every 0.5 s, like the gaps between words.
+pub fn lcg_audio(seed: u64, seconds: f64, amplitude: f64, syllables: bool) -> Vec<f32> {
+    let count = (seconds * 16000.0) as usize;
+    let mut state = seed;
+    (0..count)
+        .map(|index| {
+            state = (1_664_525 * state + 1_013_904_223) % (1 << 32);
+            let mut value = state as f64 / (1u64 << 32) as f64 * 2.0 - 1.0;
+            if syllables && (index as f64 / 16000.0) % 0.5 >= 0.4 {
+                value = 0.0;
+            }
+            (value * amplitude) as f32
+        })
+        .collect()
+}
