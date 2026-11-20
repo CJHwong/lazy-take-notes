@@ -1,11 +1,18 @@
 //! Gain for a quiet microphone that is mixed with system audio.
 //!
 //! Whisper writes the louder voice in the mix, so a quiet mic loses every turn
-//! to the call audio. Two sounds must not be boosted: room noise, and the call
-//! itself when the speakers play it into the mic, which would put the remote
-//! voice in the mix twice. The gain therefore follows the level of the user's
-//! speech only, and holds at 1x while the mic's loudness follows the call's
-//! loudness, and while a call turn is too new to judge.
+//! to the call audio. Two sounds must not be raised much: room noise, and the
+//! call itself when the speakers play it into the mic, which would put the
+//! remote voice in the mix twice. So the gain follows the level of the user's
+//! speech, and two limits cap it:
+//!
+//! - Room noise: up to `max_gain` always, and more only while the boosted noise
+//!   floor stays under the silence gate (a mic that a call turned far down).
+//! - Echo: while the call sounds, the boosted echo stays under `ECHO_SHARE` of
+//!   the call audio. The echo is measured as the mic's pickup of the speakers
+//!   while the mic's loudness follows the call's. Headphones measure near zero,
+//!   so they keep the full gain; laptop speakers get what their echo allows.
+//!   Until a pickup is measured, a new call turn holds 1x for `JUDGE_S`.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -19,7 +26,8 @@ const JUDGE_S: f64 = 1.0; // call audio the window needs before the match means 
 const QUIET_CALL_S: f64 = 0.25; // no call sound for this long: nothing can bleed
 const TURN_GAP_S: f64 = 2.0; // a call pause this long starts a new turn; older audio leaves the match
 const SPEECH_OVER_FLOOR: f64 = 3.0;
-const MIN_SPEECH_RMS: f64 = 0.001;
+// A call's processing can turn a mic down about 30x, to near 0.0016 for speech.
+const MIN_SPEECH_RMS: f64 = 0.0004;
 const MIN_SPEECH_S: f64 = 0.5; // one click or cough must not set the gain
 const LEVEL_UP_TAU_S: f64 = 0.2;
 const LEVEL_DOWN_TAU_S: f64 = 2.0;
@@ -28,17 +36,29 @@ const RELEASE_TAU_S: f64 = 2.0; // slow, so the gain holds through the gaps betw
 const LOUDER_TAU_S: f64 = 0.05; // fast: a louder voice must not stay boosted and clip
 const BLEED_ON: f64 = 0.7;
 const BLEED_OFF: f64 = 0.5;
-const SYSTEM_ACTIVE_RMS: f32 = 0.003;
+/// Call audio counts as sound above this many times its own floor, so steady
+/// comfort noise or a remote room's hum is not a call turn that never ends.
+const CALL_OVER_FLOOR: f32 = 3.0;
+const CALL_MIN_RMS: f32 = 0.0005; // below this the call is silent, whatever its floor
+/// A mic block this many times louder than the predicted echo is the user's voice.
+const ECHO_MARGIN: f64 = 2.0;
+/// The boosted echo stays at most this share of the call audio (-12 dB).
+const ECHO_SHARE: f64 = 0.25;
+/// The ceiling for a mic that a call turned far down, where the floor allows it.
+const HARD_MAX_GAIN: f64 = 50.0;
+/// `target_rms` is this many times the silence gate (`silence_threshold * 5`).
+const TARGET_OVER_GATE: f64 = 5.0;
+/// A measured pickup fades this slowly while the mic stops following the call.
+const PICKUP_DOWN_TAU_S: f64 = 60.0;
 const LOG_COOLDOWN_S: f64 = 10.0;
+const STATS_S: f64 = 30.0;
 
 /// The floor doubles every 2 s, so a steady sound stops counting as speech.
 fn floor_rise_per_s() -> f64 {
     std::f64::consts::LN_2 / 2.0
 }
 
-/// Python takes `np.dot` in float32, and its order depends on the BLAS numpy was
-/// built with (Accelerate, OpenBLAS), so no fixed order matches it. A sum in f64,
-/// rounded to f32 once, lands closest to it.
+/// A sum in f64, rounded to f32 once.
 fn rms(samples: &[f32]) -> f64 {
     let dot: f64 = samples.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
     (f64::from(dot as f32) / samples.len() as f64).sqrt()
@@ -56,6 +76,20 @@ fn follow(value: f64, target: f64, seconds: f64, tau: f64) -> f64 {
     value + (target - value) * (1.0 - (-seconds / tau).exp())
 }
 
+/// A floor rises from here, so one that sat on digital silence can still reach
+/// a steady sound that starts later (12 doublings, about 24 s, to 0.004).
+const FLOOR_RISE_FROM: f64 = 1e-6;
+
+/// A floor that drops to any lower level at once and rises slowly. It starts at
+/// infinity, so the first level sets it.
+fn track_floor(floor: f64, level: f64, seconds: f64) -> f64 {
+    if level < floor {
+        level
+    } else {
+        floor.max(FLOOR_RISE_FROM) * (floor_rise_per_s() * seconds).exp()
+    }
+}
+
 fn pearson(a: &[f32], b: &[f32]) -> Option<f64> {
     let n = a.len() as f64;
     let mean_a = a.iter().map(|&x| f64::from(x)).sum::<f64>() / n;
@@ -70,21 +104,57 @@ fn pearson(a: &[f32], b: &[f32]) -> Option<f64> {
     (var_a > 0.0 && var_b > 0.0).then(|| (cov / (var_a * var_b).sqrt()).clamp(-1.0, 1.0))
 }
 
-/// Highest Pearson correlation of the two loudness curves, with the mic up to `max_lag` frames late.
-fn best_correlation(mic_env: &[f32], sys_env: &[f32], max_lag: usize) -> f64 {
-    let mut best = 0.0f64;
-    let lags = max_lag.min(mic_env.len().saturating_sub(2));
+/// The best match of the two loudness curves, with the mic up to `max_lag` frames late.
+struct Match {
+    correlation: f64,
+    /// Mic loudness over call loudness at that lag (least squares): the echo's share.
+    pickup: f64,
+}
+
+fn best_match(mic_env: &[f32], sys_env: &[f32], max_lag: usize) -> Match {
+    let mut best = Match {
+        correlation: 0.0,
+        pickup: 0.0,
+    };
     if mic_env.len() < 2 {
         return best;
     }
-    for lag in 0..=lags {
+    for lag in 0..=max_lag.min(mic_env.len().saturating_sub(2)) {
         let later_mic = &mic_env[lag..];
         let earlier_sys = &sys_env[..sys_env.len() - lag];
-        if let Some(correlation) = pearson(later_mic, earlier_sys) {
-            best = best.max(correlation);
+        let Some(correlation) = pearson(later_mic, earlier_sys) else {
+            continue;
+        };
+        if correlation > best.correlation {
+            let (mut both, mut call) = (0.0, 0.0);
+            for (&m, &s) in later_mic.iter().zip(earlier_sys) {
+                both += f64::from(m) * f64::from(s);
+                call += f64::from(s) * f64::from(s);
+            }
+            let pickup = if call > 0.0 { both / call } else { 0.0 };
+            best = Match {
+                correlation,
+                pickup,
+            };
         }
     }
     best
+}
+
+/// Sums for the stats line, over `STATS_S` of audio.
+#[derive(Default)]
+struct Stats {
+    seconds: f64,
+    total_seconds: f64,
+    blocks: u32,
+    mic: f64,
+    call: f64,
+    gain: f64,
+    call_blocks: u32,
+    speech_blocks: u32,
+    boosted_blocks: u32,
+    judging_blocks: u32,
+    bleed_blocks: u32,
 }
 
 /// Smart gain for the mic side of the mix. One reader calls `apply`.
@@ -93,55 +163,70 @@ pub struct MicBoost {
     max_gain: f64,
     pub sample_rate: u32,
     floor: f64,
+    call_floor: f64,
     speech_level: f64,
     speech_seconds: f64,
     gain: f64,
     bleeding: bool,
     judging: bool,
+    /// The echo's share of the call, once measured. None: not known yet.
+    pickup: Option<f64>,
     turn_frames: usize,
     quiet_frames: usize,
     mic_env: VecDeque<f32>,
     sys_env: VecDeque<f32>,
     boost_logged: bool,
     last_bleed_log: Option<Instant>,
+    stats: Stats,
 }
 
 impl MicBoost {
+    /// `max_gain`: the gain always allowed. More is allowed, up to `HARD_MAX_GAIN`,
+    /// only while the boosted noise floor stays under the silence gate.
     pub fn new(target_rms: f64, max_gain: f64, sample_rate: u32) -> Self {
         let mut boost = Self {
             target_rms,
             max_gain,
             sample_rate,
             floor: 0.0,
+            call_floor: 0.0,
             speech_level: 0.0,
             speech_seconds: 0.0,
             gain: 1.0,
             bleeding: false,
             judging: false,
+            pickup: None,
             turn_frames: 0,
             quiet_frames: 0,
             mic_env: VecDeque::new(),
             sys_env: VecDeque::new(),
             boost_logged: false,
             last_bleed_log: None,
+            stats: Stats::default(),
         };
         boost.reset();
         boost
     }
 
     pub fn reset(&mut self) {
-        self.floor = 0.0;
+        self.floor = f64::INFINITY;
+        // Low, so the first call sound counts at once: a first frame taken as the
+        // floor would hide the call until its first pause.
+        self.call_floor = f64::from(CALL_MIN_RMS / CALL_OVER_FLOOR);
         self.speech_level = 0.0;
         self.speech_seconds = 0.0;
         self.gain = 1.0;
         self.bleeding = false;
         self.judging = false;
+        self.pickup = None;
         self.turn_frames = 0;
-        self.quiet_frames = 0;
+        // No call heard yet: the call starts quiet.
+        self.quiet_frames = usize::MAX / 2;
         self.mic_env.clear();
         self.sys_env.clear();
         self.boost_logged = false;
         self.last_bleed_log = None;
+        self.stats = Stats::default();
     }
 
     pub fn gain(&self) -> f64 {
@@ -156,12 +241,18 @@ impl MicBoost {
         self.judging
     }
 
-    fn holding(&self) -> bool {
-        self.bleeding || self.judging
+    /// The measured echo share of the call audio, once known.
+    pub fn pickup(&self) -> Option<f64> {
+        self.pickup
     }
 
     fn frames_per_s(&self) -> f64 {
         f64::from(self.sample_rate) / FRAME_SAMPLES as f64
+    }
+
+    /// Call sound within the last `QUIET_CALL_S`: the mic may be hearing it.
+    fn call_active(&self) -> bool {
+        (self.quiet_frames as f64) < QUIET_CALL_S * self.frames_per_s()
     }
 
     /// The mic block with the gain applied. `system` covers the same time window.
@@ -170,13 +261,17 @@ impl MicBoost {
             return Vec::new();
         }
         let seconds = mic.len() as f64 / f64::from(self.sample_rate);
-        let speaking = self.track_level(rms(mic), seconds);
-        self.remember(mic, system);
-        self.update_bleed();
+        let level = rms(mic);
+        self.floor = track_floor(self.floor, level, seconds);
+        self.remember(mic, system, seconds);
+        self.update_bleed(seconds);
+        let speaking = self.track_speech(level, seconds, self.louder_than_echo(level));
         let start = self.gain;
-        let wanted = self.wanted_gain(speaking);
-        self.gain = self.next_gain(wanted, speaking, seconds);
+        let cap = self.gain_cap();
+        let wanted = self.wanted_gain(speaking, cap);
+        self.gain = self.next_gain(wanted, speaking, seconds, cap);
         self.log_boost();
+        self.count(level, system, speaking, seconds);
         if start == 1.0 && self.gain == 1.0 {
             return mic.to_vec();
         }
@@ -195,16 +290,30 @@ impl MicBoost {
             .collect()
     }
 
-    /// Update the noise floor and the speech level. Return whether this block is speech.
-    fn track_level(&mut self, level: f64, seconds: f64) -> bool {
-        if self.floor == 0.0 || level < self.floor {
-            self.floor = level;
-        } else {
-            self.floor *= (floor_rise_per_s() * seconds).exp();
+    /// Echo is not the user's voice, so it must not set the speech level. While
+    /// the call sounds, a block counts as the user only when it is clearly louder
+    /// than the echo the measured pickup predicts. With no pickup yet, it does not.
+    fn louder_than_echo(&self, level: f64) -> bool {
+        if !self.call_active() {
+            return true;
         }
+        let lag = (MAX_LAG_S * self.frames_per_s()) as usize + 2;
+        let call = self
+            .sys_env
+            .iter()
+            .rev()
+            .take(lag)
+            .copied()
+            .fold(0.0f32, f32::max);
+        self.pickup
+            .is_some_and(|pickup| level > ECHO_MARGIN * pickup * f64::from(call))
+    }
+
+    /// Whether this block is speech. `learn`: let it move the speech level.
+    fn track_speech(&mut self, level: f64, seconds: f64, learn: bool) -> bool {
         let speaking = level >= MIN_SPEECH_RMS && level > SPEECH_OVER_FLOOR * self.floor;
-        if !speaking {
-            return false;
+        if !speaking || !learn {
+            return speaking;
         }
         let tau = if level > self.speech_level {
             LEVEL_UP_TAU_S
@@ -216,7 +325,7 @@ impl MicBoost {
         true
     }
 
-    fn remember(&mut self, mic: &[f32], system: &[f32]) {
+    fn remember(&mut self, mic: &[f32], system: &[f32], seconds: f64) {
         let keep = (HISTORY_S * self.frames_per_s()) as usize;
         let push = |history: &mut VecDeque<f32>, frames: &[f32]| {
             history.extend(frames);
@@ -228,11 +337,14 @@ impl MicBoost {
         let system_env = frame_rms(system);
         push(&mut self.sys_env, &system_env);
         let turn_gap = TURN_GAP_S * self.frames_per_s();
+        let frame_s = seconds / system_env.len().max(1) as f64;
         for level in system_env {
-            self.quiet_frames = if level >= SYSTEM_ACTIVE_RMS {
+            self.call_floor = track_floor(self.call_floor, f64::from(level), frame_s);
+            let sounding = level >= CALL_MIN_RMS.max(CALL_OVER_FLOOR * self.call_floor as f32);
+            self.quiet_frames = if sounding {
                 0
             } else {
-                self.quiet_frames + 1
+                self.quiet_frames.saturating_add(1)
             };
             self.turn_frames = if self.quiet_frames as f64 >= turn_gap {
                 0
@@ -242,15 +354,16 @@ impl MicBoost {
         }
     }
 
-    fn update_bleed(&mut self) {
+    fn update_bleed(&mut self, seconds: f64) {
         let frames_per_s = self.frames_per_s();
         self.judging = false;
-        if self.quiet_frames as f64 >= QUIET_CALL_S * frames_per_s {
+        if !self.call_active() {
             self.set_bleeding(false, 0.0);
             return;
         }
         if (self.turn_frames as f64) < JUDGE_S * frames_per_s {
-            self.judging = true;
+            // A known pickup already limits the gain; only an unknown one holds 1x.
+            self.judging = self.pickup.is_none();
             return;
         }
         let turn = self.turn_frames.min(self.sys_env.len());
@@ -266,9 +379,26 @@ impl MicBoost {
             .skip(self.sys_env.len() - turn)
             .copied()
             .collect();
-        let correlation = best_correlation(&mic, &sys, (MAX_LAG_S * frames_per_s) as usize);
+        let found = best_match(&mic, &sys, (MAX_LAG_S * frames_per_s) as usize);
         let threshold = if self.bleeding { BLEED_OFF } else { BLEED_ON };
-        self.set_bleeding(correlation >= threshold, correlation);
+        let bleeding = found.correlation >= threshold;
+        self.update_pickup(bleeding, found.pickup, &sys, seconds);
+        self.set_bleeding(bleeding, found.correlation);
+    }
+
+    /// While the mic follows the call, its pickup is measured; a higher one counts
+    /// at once. Otherwise any echo hides under the mic's floor, and the pickup
+    /// fades toward that bound.
+    fn update_pickup(&mut self, bleeding: bool, measured: f64, sys: &[f32], seconds: f64) {
+        let call = sys.iter().map(|&s| f64::from(s)).sum::<f64>() / sys.len().max(1) as f64;
+        let bound = if call > 0.0 { self.floor / call } else { 0.0 };
+        self.pickup = Some(match (self.pickup, bleeding) {
+            (None, true) => measured,
+            (None, false) => bound,
+            (Some(known), true) if measured > known => measured,
+            (Some(known), true) => follow(known, measured, seconds, PICKUP_DOWN_TAU_S),
+            (Some(known), false) => follow(known, known.min(bound), seconds, PICKUP_DOWN_TAU_S),
+        });
     }
 
     fn set_bleeding(&mut self, bleeding: bool, correlation: f64) {
@@ -284,23 +414,38 @@ impl MicBoost {
         }
         self.last_bleed_log = Some(Instant::now());
         if bleeding {
-            info!(target: "ltn.audio", "mic boost held: the mic hears the speakers (correlation {correlation:.2})");
+            let pickup = self.pickup.unwrap_or(0.0);
+            info!(target: "ltn.audio", "mic boost limited: the mic hears the speakers (correlation {correlation:.2}, pickup {pickup:.3}, gain up to {:.1}x)", self.gain_cap());
         } else {
             info!(target: "ltn.audio", "mic boost resumed: the mic no longer follows the speakers");
         }
     }
 
-    fn wanted_gain(&self, speaking: bool) -> f64 {
-        if !speaking || self.holding() || self.speech_seconds < MIN_SPEECH_S {
-            return 1.0;
+    /// The most gain this block allows: the room's noise, then the call's echo.
+    fn gain_cap(&self) -> f64 {
+        let gate = self.target_rms / TARGET_OVER_GATE;
+        let quiet_room = match self.floor > 0.0 {
+            true => gate / self.floor,
+            false => HARD_MAX_GAIN,
+        };
+        let mut cap = quiet_room.min(HARD_MAX_GAIN).max(self.max_gain).max(1.0);
+        if self.call_active()
+            && let Some(pickup) = self.pickup.filter(|&pickup| pickup > 0.0)
+        {
+            cap = cap.min(ECHO_SHARE / pickup);
         }
-        (self.target_rms / self.speech_level)
-            .max(1.0)
-            .min(self.max_gain)
+        cap.max(1.0)
     }
 
-    fn next_gain(&self, wanted: f64, speaking: bool, seconds: f64) -> f64 {
-        if self.holding() {
+    fn wanted_gain(&self, speaking: bool, cap: f64) -> f64 {
+        if !speaking || self.judging || self.speech_seconds < MIN_SPEECH_S {
+            return 1.0;
+        }
+        (self.target_rms / self.speech_level).max(1.0).min(cap)
+    }
+
+    fn next_gain(&self, wanted: f64, speaking: bool, seconds: f64, cap: f64) -> f64 {
+        if self.judging {
             return 1.0; // within this block: the bleed reaches the mic about 0.1 s after the tap
         }
         let tau = if wanted > self.gain {
@@ -310,7 +455,8 @@ impl MicBoost {
         } else {
             RELEASE_TAU_S
         };
-        let gain = follow(self.gain, wanted, seconds, tau);
+        // The echo cap applies within the block, for the same reason as the hold.
+        let gain = follow(self.gain, wanted, seconds, tau).min(cap);
         if wanted == 1.0 && gain < 1.01 {
             1.0
         } else {
@@ -324,5 +470,58 @@ impl MicBoost {
         }
         self.boost_logged = true;
         info!(target: "ltn.audio", "mic boost on: speech level {:.4}, gain {:.1}x", self.speech_level, self.gain);
+    }
+
+    /// Add this block to the stats, and log them every `STATS_S` of audio.
+    fn count(&mut self, level: f64, system: &[f32], speaking: bool, seconds: f64) {
+        let call_active = self.call_active();
+        let stats = &mut self.stats;
+        stats.seconds += seconds;
+        stats.total_seconds += seconds;
+        stats.blocks += 1;
+        stats.mic += level;
+        stats.call += if system.is_empty() { 0.0 } else { rms(system) };
+        stats.gain += self.gain;
+        stats.call_blocks += u32::from(call_active);
+        stats.speech_blocks += u32::from(speaking);
+        stats.boosted_blocks += u32::from(speaking && self.gain >= 1.5);
+        stats.judging_blocks += u32::from(self.judging);
+        stats.bleed_blocks += u32::from(self.bleeding && call_active);
+        if stats.seconds >= STATS_S {
+            info!(target: "ltn.audio", "{}", self.stats_line());
+            let total = self.stats.total_seconds;
+            self.stats = Stats {
+                total_seconds: total,
+                ..Stats::default()
+            };
+        }
+    }
+
+    /// One line per `STATS_S`: what each source sent, and what the boost did.
+    pub fn stats_line(&self) -> String {
+        let stats = &self.stats;
+        let blocks = f64::from(stats.blocks.max(1));
+        let share = |count: u32| f64::from(count) * 100.0 / blocks;
+        let speech = f64::from(stats.speech_blocks.max(1));
+        let total = stats.total_seconds.round() as u64;
+        let pickup = match self.pickup {
+            Some(pickup) => format!("{pickup:.3}"),
+            None => "unknown".into(),
+        };
+        format!(
+            "Mic boost [{}:{:02}]: mic {:.4} (floor {:.4}), call {:.4} (floor {:.4}, sounding {:.0}%), speech level {:.4}, gain {:.1}x avg, speech boosted {:.0}%, echo pickup {pickup}, judging {:.0}%, bleed {:.0}%",
+            total / 60,
+            total % 60,
+            stats.mic / blocks,
+            self.floor,
+            stats.call / blocks,
+            self.call_floor,
+            share(stats.call_blocks),
+            self.speech_level,
+            stats.gain / blocks,
+            f64::from(stats.boosted_blocks) * 100.0 / speech,
+            share(stats.judging_blocks),
+            share(stats.bleed_blocks),
+        )
     }
 }

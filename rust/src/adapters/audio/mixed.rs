@@ -26,7 +26,8 @@ pub use crate::ports::audio_source::{Health, SourceHealth};
 
 pub type TestTone = Box<dyn Fn() -> bool + Send + Sync>;
 
-/// The most the mic boost raises a quiet mic. Python's constructor default.
+/// The gain the mic boost always allows (Python's cap). It goes higher only
+/// where the room's noise floor allows it; see `mic_boost`.
 pub const MAX_MIC_GAIN: f64 = 10.0;
 
 /// The timing rules, as fields so the tests can run them in milliseconds.

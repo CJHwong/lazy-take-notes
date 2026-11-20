@@ -1,6 +1,8 @@
 //! The Rust port must produce what the Python version produces, byte for byte.
 //! Fixtures come from `scripts/gen_fixtures.py`, run against the Python code.
 
+mod common;
+use common::lcg_audio;
 use lazy_take_notes::domain::template::SessionTemplate;
 use lazy_take_notes::usecases::label::sanitize_label;
 use lazy_take_notes::usecases::prompt_builder::{
@@ -38,21 +40,6 @@ fn strings(value: &Value) -> Vec<String> {
 }
 
 /// The same LCG noise as the fixture script, so no audio arrays are committed.
-fn lcg_audio(seed: u64, seconds: f64, amplitude: f64, syllables: bool) -> Vec<f32> {
-    let count = (seconds * 16000.0) as usize;
-    let mut state = seed;
-    (0..count)
-        .map(|index| {
-            state = (1_664_525 * state + 1_013_904_223) % (1 << 32);
-            let mut value = state as f64 / (1u64 << 32) as f64 * 2.0 - 1.0;
-            if syllables && (index as f64 / 16000.0) % 0.5 >= 0.4 {
-                value = 0.0;
-            }
-            (value * amplitude) as f32
-        })
-        .collect()
-}
-
 #[test]
 fn digest_prompts_match_for_every_built_in_template() {
     let templates = fixture("templates");
@@ -205,69 +192,6 @@ fn speech_gate_matches() {
             assert!(
                 (speech_start(&flags, start, end) - out).abs() < 1e-9,
                 "{start}..{end}"
-            );
-        }
-    }
-}
-
-fn boost_track(parts: &serde_json::Value, seconds: f64) -> Vec<f32> {
-    let mut track = vec![0.0f32; (seconds * 16000.0) as usize];
-    for part in parts.as_array().unwrap() {
-        let clip = lcg_audio(
-            part[0].as_u64().unwrap(),
-            part[4].as_f64().unwrap(),
-            part[1].as_f64().unwrap(),
-            part[2].as_bool().unwrap(),
-        );
-        let begin = (part[3].as_f64().unwrap() * 16000.0) as usize;
-        for (slot, value) in track[begin..].iter_mut().zip(&clip) {
-            *slot += value;
-        }
-    }
-    track
-}
-
-#[test]
-fn mic_boost_follows_python_block_by_block() {
-    use lazy_take_notes::adapters::audio::mic_boost::MicBoost;
-    for case in fixture("mic_boost").as_array().unwrap() {
-        let name = case["name"].as_str().unwrap();
-        let seconds = case["seconds"].as_f64().unwrap();
-        let mut mic = boost_track(&case["mic"], seconds);
-        let system = boost_track(&case["system"], seconds);
-        if let Some(bleed) = case["bleed"].as_array() {
-            let (scale, shift) = (
-                bleed[0].as_f64().unwrap() as f32,
-                (bleed[1].as_f64().unwrap() * 16000.0) as usize,
-            );
-            for index in (shift..mic.len()).rev() {
-                mic[index] += system[index - shift] * scale;
-            }
-        }
-        let mut boost = MicBoost::new(0.05, 10.0, 16_000);
-        for (block, expected) in case["blocks"].as_array().unwrap().iter().enumerate() {
-            let range = block * 512..block * 512 + 512;
-            let out = boost.apply(&mic[range.clone()], &system[range]);
-            let (gain, bleeding, rms) = (
-                expected[0].as_f64().unwrap(),
-                expected[1].as_bool().unwrap(),
-                expected[2].as_f64().unwrap(),
-            );
-            let out_rms = (out
-                .iter()
-                .map(|&s| f64::from(s) * f64::from(s))
-                .sum::<f64>()
-                / out.len() as f64)
-                .sqrt();
-            assert_eq!(boost.bleeding(), bleeding, "{name} block {block}: bleeding");
-            assert!(
-                (boost.gain() - gain).abs() <= 1e-6 * gain,
-                "{name} block {block}: gain {} vs {gain}",
-                boost.gain()
-            );
-            assert!(
-                (out_rms - rms).abs() <= 1e-6 * rms.max(1e-6),
-                "{name} block {block}: rms {out_rms} vs {rms}"
             );
         }
     }
