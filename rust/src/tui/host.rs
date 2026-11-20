@@ -713,6 +713,7 @@ impl Host {
                 .and_then(|target| target.key.strip_prefix("key:"))
                 .and_then(crate::tui::keys::hint_key)
         {
+            tracing::info!(target: "ltn.app", "click at ({column}, {row}) on a key hint presses {key:?}");
             self.key(&key);
             return;
         }
