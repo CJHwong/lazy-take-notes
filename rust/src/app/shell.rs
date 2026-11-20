@@ -396,7 +396,9 @@ mod tests {
         // The welcome picker is back, on the mode that failed.
         assert_eq!(host.depth(), 2);
         press(&mut host, KeyCode::Enter);
-        assert_eq!(host.ctx().toast_texts().len(), 2);
+        // It fails again: the same toast is renewed, and the picker stays.
+        assert_eq!(host.ctx().toast_texts().len(), 1);
+        assert_eq!(host.depth(), 2);
         press(&mut host, KeyCode::Esc);
         assert!(host.finished());
     }
