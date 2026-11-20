@@ -500,7 +500,7 @@ pub fn record_workers(
     });
     let diarization_config = &config.diarization;
     let mut startup_warning = None;
-    let mut diarization: Option<Launcher> = None;
+    let mut diarization: Option<crate::tui::screens::record::DiarizationLauncher> = None;
     if diarization_config.enabled && !config.output.save_audio {
         startup_warning = Some("Diarization needs save_audio: true in config.yaml".to_string());
     } else if diarization_config.enabled {
@@ -515,9 +515,9 @@ pub fn record_workers(
             ..DiarizationTiming::default()
         };
         let folder = folder.clone();
-        diarization = Some(Box::new(move |poster, cancel| {
+        diarization = Some(Box::new(move |poster, cancel, finish| {
             let audio_path = || folder.path().join("recording.wav");
-            run_diarization_worker(&poster, &cancel, &audio_path, &diarizer, &timing);
+            run_diarization_worker(&poster, &cancel, &finish, &audio_path, &diarizer, &timing);
         }));
     }
     RecordWorkers {

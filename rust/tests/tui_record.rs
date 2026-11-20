@@ -15,7 +15,7 @@ use lazy_take_notes::config::build_app_config;
 use lazy_take_notes::domain::speaker_turn::SpeakerTurn;
 use lazy_take_notes::ports::audio_source::{AudioError, AudioSource};
 use lazy_take_notes::tui::host::{Action, Host};
-use lazy_take_notes::tui::screens::record::{RecordScreen, RecordWorkers};
+use lazy_take_notes::tui::screens::record::{DiarizationLauncher, RecordScreen, RecordWorkers};
 use lazy_take_notes::tui::screens::session::{Mode, Session};
 
 /// Remembers the last mute the screen set.
@@ -52,7 +52,7 @@ struct Run {
 }
 
 fn start(consent_seen: bool) -> Run {
-    start_with(consent_seen, false)
+    start_with(consent_seen, false, None)
 }
 
 /// The audio worker's body when a test makes it crash.
@@ -60,7 +60,11 @@ fn raising_worker_body() {
     panic!("worker bug");
 }
 
-fn start_with(consent_seen: bool, audio_panics: bool) -> Run {
+fn start_with(
+    consent_seen: bool,
+    audio_panics: bool,
+    diarization: Option<DiarizationLauncher>,
+) -> Run {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -95,7 +99,7 @@ fn start_with(consent_seen: bool, audio_panics: bool) -> Run {
                 raising_worker_body();
             }
         }),
-        diarization: None,
+        diarization,
         paused: paused.clone(),
         source: source.clone(),
         folder: Arc::new(SessionFolder::new(out_dir)),
@@ -279,6 +283,45 @@ fn a_worker_that_stops_on_its_own_runs_the_final_digest() {
     run.press("q");
     run.settle();
     assert!(run.host.finished(), "{:?}", run.toasts());
+}
+
+#[test]
+fn the_stop_waits_for_the_last_speaker_pass_before_the_final_notes() {
+    // The fake worker idles until the stop asks for the last pass, then labels S3.
+    let diarization: DiarizationLauncher = Box::new(|poster, cancel, finish| {
+        while !finish.is_cancelled() && !cancel.is_cancelled() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        poster.post(Event::SpeakerTurns(vec![SpeakerTurn {
+            start: 0.0,
+            end: 2.0,
+            speaker: 3,
+        }]));
+        poster.post(Event::DiarizationFinished);
+    });
+    let mut run = start_with(true, false, Some(diarization));
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment("hello", 0.0, 2.0)]));
+    run.press("s");
+    run.press("q");
+    // The audio is flushed, but the speakers are not labeled yet: q waits.
+    run.post(Event::status(WorkerState::Stopped));
+    assert!(
+        run.toasts()
+            .iter()
+            .any(|t| t.contains("Labeling the speakers")),
+        "{:?}",
+        run.toasts()
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !run.host.finished() && Instant::now() < deadline {
+        run.settle();
+    }
+    assert!(run.host.finished(), "{:?}", run.toasts());
+    let labeled =
+        std::fs::read_to_string(run.session_dir().join("transcript_speakers.txt")).unwrap();
+    assert!(labeled.contains("S3: hello"), "{labeled}");
 }
 
 // --- Named tests for the faults of test_record_app_faults.py ---
@@ -508,7 +551,7 @@ fn it_closes_once_even_when_called_again() {
 fn a_worker_crash_logs_the_stack_and_the_session_continues() {
     let logs = tempfile::tempdir().unwrap();
     lazy_take_notes::app::logging::setup_file_logging(logs.path(), true);
-    let mut run = start_with(true, true);
+    let mut run = start_with(true, true, None);
     run.recording();
     run.press("s");
     assert!(!run.host.finished());

@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 use tracing::warn;
 
 use crate::adapters::audio::session_folder::SessionFolder;
-use crate::app::events::{AudioHealthReport, Cancel, Event, WorkerState};
+use crate::app::events::{AudioHealthReport, Cancel, Event, Poster, WorkerState};
 use crate::app::headless::Launcher;
 use crate::app::logging::see_debug_log;
 use crate::ports::audio_source::AudioSource;
@@ -54,11 +54,15 @@ const HELP_ROWS: [&str; 12] = [
 const QUIT_HINT: &str =
     "Press s to stop and save, then q for the final notes. ctrl+q saves and quits without them.";
 
+/// The diarization worker: (poster, cancel: stop now, finish: the recording is
+/// complete, run the last pass).
+pub type DiarizationLauncher = Box<dyn FnOnce(Poster, Cancel, Cancel) + Send>;
+
 /// What the record screen starts. The launchers run on their own threads.
 pub struct RecordWorkers {
     pub audio: Launcher,
     /// The diarization worker, when `diarization.enabled` and `save_audio` allow it.
-    pub diarization: Option<Launcher>,
+    pub diarization: Option<DiarizationLauncher>,
     /// Shared with the audio worker: set while paused.
     pub paused: Arc<AtomicBool>,
     pub source: Arc<dyn AudioSource>,
@@ -73,6 +77,8 @@ pub struct RecordWorkers {
 struct RecordMode {
     audio_stopped: bool,
     worker_done: bool,
+    /// The diarization worker runs; after the stop, until its last pass is done.
+    diarizing: bool,
     folder: Arc<SessionFolder>,
 }
 
@@ -92,7 +98,7 @@ impl Mode for RecordMode {
     }
 
     fn worker_busy(&self) -> bool {
-        self.audio_stopped && !self.worker_done
+        self.audio_stopped && (!self.worker_done || self.diarizing)
     }
 
     /// The WAV writer holds the folder's lock, so it follows the new path.
@@ -125,8 +131,12 @@ pub struct RecordScreen {
     session: Session,
     mode: RecordMode,
     audio: Option<Launcher>,
-    diarization: Option<Launcher>,
+    diarization: Option<DiarizationLauncher>,
     cancel: Cancel,
+    /// Stops the diarization worker at once (a shutdown, or the screen closing).
+    diarization_cancel: Cancel,
+    /// Asks the diarization worker for its last pass (the recording is complete).
+    diarization_finish: Cancel,
     paused: Arc<AtomicBool>,
     source: Arc<dyn AudioSource>,
     mic_muted: bool,
@@ -147,11 +157,14 @@ impl RecordScreen {
             mode: RecordMode {
                 audio_stopped: false,
                 worker_done: false,
+                diarizing: false,
                 folder: workers.folder,
             },
             audio: Some(workers.audio),
             diarization: workers.diarization,
             cancel: Cancel::default(),
+            diarization_cancel: Cancel::default(),
+            diarization_finish: Cancel::default(),
             paused: workers.paused,
             source: workers.source,
             mic_muted: workers.mic_muted,
@@ -264,13 +277,19 @@ impl RecordScreen {
                     self.mode.audio_stopped = true;
                     session.context.read_only = true;
                 }
-                if session.flow.pending_quit {
-                    // The flush is complete.
-                    return session.continue_pending_quit(&self.mode, ctx);
+                if self.mode.diarizing {
+                    // The WAV is complete: label the speakers in all of it before the
+                    // final notes, which carry the labels.
+                    self.diarization_finish.cancel();
+                    ctx.notify_with(
+                        "Labeling the speakers in the whole recording...",
+                        Severity::Information,
+                        Duration::from_secs(5),
+                        "",
+                    );
+                    return Action::None;
                 }
-                if self.mode.audio_stopped && session.needs_final_digest() {
-                    session.run_final_digest(ctx);
-                }
+                return self.after_last_audio(ctx);
             }
             WorkerState::Warning => {
                 if !error.is_empty() {
@@ -404,14 +423,36 @@ impl RecordScreen {
         session.continue_pending_quit(&self.mode, ctx)
     }
 
+    /// The audio and the speaker labels are final: the notes can be finished.
+    fn after_last_audio(&mut self, ctx: &mut Ctx) -> Action {
+        let session = &mut self.session;
+        if session.flow.pending_quit {
+            return session.continue_pending_quit(&self.mode, ctx);
+        }
+        if self.mode.audio_stopped && session.needs_final_digest() {
+            session.run_final_digest(ctx);
+        }
+        Action::None
+    }
+
     fn start_workers(&mut self, ctx: &mut Ctx) {
         if let Some(audio) = self.audio.take() {
             let (poster, cancel) = (ctx.poster(), self.cancel.clone());
             ctx.spawn_thread("audio", move || audio(poster, cancel));
         }
         if let Some(diarization) = self.diarization.take() {
-            let (poster, cancel) = (ctx.poster(), self.cancel.clone());
-            ctx.spawn_thread("diarization", move || diarization(poster, cancel));
+            let poster = ctx.poster();
+            let fallback = poster.clone();
+            let cancel = self.diarization_cancel.clone();
+            let finish = self.diarization_finish.clone();
+            self.mode.diarizing = true;
+            ctx.spawn_thread("diarization", move || {
+                let run = std::panic::AssertUnwindSafe(|| diarization(poster, cancel, finish));
+                if std::panic::catch_unwind(run).is_err() {
+                    // The notes wait for this: a crashed worker must not hold them.
+                    fallback.post(Event::DiarizationFinished);
+                }
+            });
         }
     }
 }
@@ -541,6 +582,13 @@ impl Screen for RecordScreen {
                 self.session.status.push_level(f64::from(rms));
                 Action::None
             }
+            Msg::Worker(Event::DiarizationFinished) => {
+                self.mode.diarizing = false;
+                match self.mode.worker_done && !self.shutdown_requested {
+                    true => self.after_last_audio(ctx),
+                    false => Action::None,
+                }
+            }
             Msg::Worker(Event::SpeakerTurns(turns)) => {
                 self.session.on_speaker_turns(turns, ctx);
                 Action::None
@@ -576,6 +624,8 @@ impl Screen for RecordScreen {
         self.shutdown_requested = true;
         self.mode.audio_stopped = true;
         self.cancel.cancel();
+        // A shutdown does not wait for the last speaker pass.
+        self.diarization_cancel.cancel();
         self.session.controller.save_context_now();
         self.session.abort_tasks();
         !self.mode.worker_done
@@ -583,5 +633,12 @@ impl Screen for RecordScreen {
 
     fn quit_hint(&self) -> Option<String> {
         self.recording_or_paused().then(|| QUIT_HINT.to_string())
+    }
+}
+
+impl Drop for RecordScreen {
+    /// Leaving the screen (back to the menu) ends the diarization worker.
+    fn drop(&mut self) {
+        self.diarization_cancel.cancel();
     }
 }

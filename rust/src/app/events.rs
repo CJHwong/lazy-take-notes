@@ -46,6 +46,8 @@ pub struct AudioHealthReport {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     SpeakerTurns(Vec<SpeakerTurn>),
+    /// The last diarization pass, over the whole recording, is done (or failed).
+    DiarizationFinished,
     TranscriptChunk(Vec<TranscriptSegment>),
     WorkerStatus { state: WorkerState, error: String },
     AudioHealth(AudioHealthReport),
