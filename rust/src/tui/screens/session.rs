@@ -206,6 +206,8 @@ pub struct Session {
     awaiting_label: bool,
     /// The speaker whose name prompt is open.
     awaiting_speaker: Option<u32>,
+    /// The chip clicked once: its lines are highlighted, a second click renames.
+    selected_speaker: Option<u32>,
     download_open: bool,
 }
 
@@ -247,6 +249,7 @@ impl Session {
             last_persist_error: None,
             awaiting_label: false,
             awaiting_speaker: None,
+            selected_speaker: None,
             download_open: false,
         }
     }
@@ -320,7 +323,7 @@ impl Session {
         ctx.hit(transcript_area, "transcript", 0);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
-            render_speaker_bar(frame, bar, &chip_rows, ctx);
+            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, ctx);
         }
         let column = Rect::new(body.x + left, body.y, body.width - left, body.height);
         // `height: 6`, and 40% of the column while it has the focus.
@@ -358,6 +361,12 @@ impl Session {
     pub fn mouse(&mut self, input: &MouseInput) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
+            // The first click shows the speaker's lines; a second click on it renames.
+            if self.selected_speaker != Some(speaker) {
+                self.selected_speaker = Some(speaker);
+                self.sync_highlight();
+                return Action::None;
+            }
             let current = self
                 .controller
                 .speaker_names
@@ -388,6 +397,11 @@ impl Session {
         let step = match input.kind {
             MouseKind::Click => {
                 self.focus = focus;
+                if focus == Focus::Transcript {
+                    // A click in the transcript drops the highlight.
+                    self.selected_speaker = None;
+                    self.sync_highlight();
+                }
                 return;
             }
             MouseKind::WheelUp => -1,
@@ -568,10 +582,22 @@ impl Session {
         ]));
     }
 
+    /// Highlight the selected speaker's lines under the label they carry now.
+    fn sync_highlight(&mut self) {
+        self.transcript.highlight = self.selected_speaker.map(|speaker| {
+            self.controller
+                .speaker_names
+                .get(&speaker)
+                .filter(|name| !name.is_empty())
+                .cloned()
+                .unwrap_or_else(|| format!("S{speaker}"))
+        });
+    }
+
     /// Rewrite every line with its speaker label (a diarization pass relabels old lines).
     fn render_all_lines(&mut self) {
-        self.transcript.view.clear();
-        self.transcript.all_text.clear();
+        self.transcript.clear();
+        self.sync_highlight();
         let lines: Vec<(TranscriptSegment, Option<String>)> = self
             .controller
             .all_segments
@@ -1116,11 +1142,22 @@ pub fn wrap_chips(chips: &[(u32, String, f64)], width: u16) -> Vec<Vec<Chip>> {
 }
 
 /// The chips under the transcript, one line per row; each chip is a click target.
-pub fn render_speaker_bar(frame: &mut Frame, area: Rect, rows: &[Vec<Chip>], ctx: &Ctx) {
+/// `selected`: the chip clicked once, drawn in the primary color.
+pub fn render_speaker_bar(
+    frame: &mut Frame,
+    area: Rect,
+    rows: &[Vec<Chip>],
+    selected: Option<u32>,
+    ctx: &Ctx,
+) {
     let theme = &ctx.theme;
     let chip = Style::default()
         .bg(theme.color("surface"))
         .fg(theme.on("foreground", "surface"));
+    let chosen = Style::default()
+        .bg(theme.color("primary"))
+        .fg(theme.on("foreground", "primary"))
+        .add_modifier(Modifier::BOLD);
     let base = Style::default()
         .bg(theme.color("background"))
         .fg(theme.color("foreground"));
@@ -1132,7 +1169,11 @@ pub fn render_speaker_bar(frame: &mut Frame, area: Rect, rows: &[Vec<Chip>], ctx
             let visible = (*cells).min(area.right().saturating_sub(x));
             ctx.hit(Rect::new(x, y, visible, 1), "speaker", *speaker as usize);
             x = x.saturating_add(cells + 1);
-            spans.push(Span::styled(text.clone(), chip));
+            let style = match selected == Some(*speaker) {
+                true => chosen,
+                false => chip,
+            };
+            spans.push(Span::styled(text.clone(), style));
             spans.push(Span::raw(" "));
         }
         frame.render_widget(

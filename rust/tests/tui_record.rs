@@ -558,6 +558,9 @@ fn a_click_on_a_speaker_chip_names_that_speaker() {
         end: 2.0,
         speaker: 0,
     }]));
+    // The first click selects; the second opens the prompt.
+    run.click(" S0 2s ");
+    assert!(!run.screen_text().contains("Name for S0"));
     run.click(" S0 2s ");
     assert!(
         run.screen_text().contains("Name for S0"),
@@ -574,7 +577,7 @@ fn a_click_on_a_speaker_chip_names_that_speaker() {
     let labeled =
         std::fs::read_to_string(run.session_dir().join("transcript_speakers.txt")).unwrap();
     assert!(labeled.ends_with("Andy: hello\n"), "{labeled}");
-    // The named chip opens with the name to edit.
+    // The chip is still selected, so one click opens the name to edit.
     run.click(" Andy 2s ");
     assert!(
         run.screen_text().contains("Name for S0"),
@@ -605,6 +608,7 @@ fn eight_speakers_wrap_onto_more_rows_and_each_chip_still_opens_its_prompt() {
     }
     let rows = screen.lines().filter(|line| line.contains(" 9s ")).count();
     assert!(rows >= 2, "{screen}");
+    run.click(" S7 9s ");
     run.click(" S7 9s ");
     assert!(
         run.screen_text().contains("Name for S7"),
