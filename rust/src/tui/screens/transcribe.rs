@@ -184,8 +184,7 @@ impl Screen for TranscribeScreen {
     }
 
     fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
-        self.session.mouse(input);
-        Action::None
+        self.session.mouse(input)
     }
 
     fn key(&mut self, key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {

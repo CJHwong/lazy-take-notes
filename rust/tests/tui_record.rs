@@ -524,3 +524,52 @@ fn a_worker_crash_logs_the_stack_and_the_session_continues() {
     assert!(log.contains("worker bug"), "{log}");
     assert!(log.contains("raising_worker_body"), "{log}");
 }
+
+impl Run {
+    /// A left click on the first cell where `text` shows.
+    fn click(&mut self, text: &str) {
+        let screen = self.screen_text();
+        let (row, line) = screen
+            .lines()
+            .enumerate()
+            .find(|(_, line)| line.contains(text))
+            .unwrap_or_else(|| panic!("{text:?} is not on screen:\n{screen}"));
+        let column = line[..line.find(text).unwrap()].chars().count() as u16;
+        let at = |kind| crossterm::event::MouseEvent {
+            kind,
+            column,
+            row: row as u16,
+            modifiers: KeyModifiers::NONE,
+        };
+        let left = crossterm::event::MouseButton::Left;
+        self.host.mouse(&at(crossterm::event::MouseEventKind::Down(left)));
+        self.settle();
+    }
+}
+
+#[test]
+fn a_click_on_a_speaker_chip_names_that_speaker() {
+    let mut run = start(true);
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment("hello", 0.0, 2.0)]));
+    run.post(Event::SpeakerTurns(vec![SpeakerTurn {
+        start: 0.0,
+        end: 2.0,
+        speaker: 0,
+    }]));
+    run.click(" S0 2s ");
+    assert!(run.screen_text().contains("Name for S0"), "{}", run.screen_text());
+    run.type_text("Andy");
+    run.enter();
+    let screen = run.screen_text();
+    assert!(screen.contains("Andy: hello"), "{screen}");
+    assert!(screen.contains(" Andy 2s "), "{screen}");
+    let json = std::fs::read_to_string(run.session_dir().join("speakers.json")).unwrap();
+    assert!(json.contains("\"Andy\""), "{json}");
+    let labeled =
+        std::fs::read_to_string(run.session_dir().join("transcript_speakers.txt")).unwrap();
+    assert!(labeled.ends_with("Andy: hello\n"), "{labeled}");
+    // The named chip opens with the name to edit.
+    run.click(" Andy 2s ");
+    assert!(run.screen_text().contains("Name for S0"), "{}", run.screen_text());
+}
