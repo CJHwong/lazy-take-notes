@@ -659,3 +659,17 @@ fn eight_speakers_wrap_onto_more_rows_and_each_chip_still_opens_its_prompt() {
         run.screen_text()
     );
 }
+
+#[test]
+fn a_speaker_pass_shows_on_the_status_bar_while_it_runs() {
+    let mut run = start(true);
+    run.recording();
+    run.post(Event::DiarizationStatus { active: true });
+    assert!(
+        run.screen_text().contains("Labeling speakers"),
+        "{}",
+        run.screen_text()
+    );
+    run.post(Event::DiarizationStatus { active: false });
+    assert!(!run.screen_text().contains("Labeling speakers"));
+}

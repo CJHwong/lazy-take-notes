@@ -36,6 +36,8 @@ pub struct StatusBar {
     pub stopped: bool,
     pub audio_status: String,
     pub transcribing: bool,
+    /// A diarization pass runs.
+    pub labeling_speakers: bool,
     pub activity: String,
     pub download_percent: i32,
     pub download_model: String,
@@ -68,6 +70,7 @@ impl Default for StatusBar {
             stopped: false,
             audio_status: String::new(),
             transcribing: false,
+            labeling_speakers: false,
             activity: String::new(),
             download_percent: -1,
             download_model: String::new(),
@@ -222,6 +225,9 @@ impl StatusBar {
         }
         if self.transcribing {
             parts.push(("⟳ Transcribing…".into(), false));
+        }
+        if self.labeling_speakers {
+            parts.push(("⟳ Labeling speakers…".into(), false));
         }
         if !self.activity.is_empty() {
             parts.push((format!("⟳ {}", self.activity), false));

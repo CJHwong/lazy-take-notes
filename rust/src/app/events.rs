@@ -53,6 +53,8 @@ pub enum Event {
     AudioHealth(AudioHealthReport),
     ModelDownloadProgress { percent: u32, model_name: String },
     TranscriptionStatus { active: bool },
+    /// A diarization pass started (true) or ended (false).
+    DiarizationStatus { active: bool },
     AudioLevel { rms: f32 },
 }
 

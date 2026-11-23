@@ -78,7 +78,10 @@ pub fn run_diarization_worker(
 }
 
 fn run_pass(poster: &Poster, diarizer: &dyn Diarizer, path: &std::path::Path, timeout: Duration) {
-    match diarizer.diarize(path, timeout) {
+    poster.post(Event::DiarizationStatus { active: true });
+    let result = diarizer.diarize(path, timeout);
+    poster.post(Event::DiarizationStatus { active: false });
+    match result {
         Err(e) => warn!(target: "ltn.diarize", "diarization pass failed: {e}"),
         Ok(turns) if turns.is_empty() => {}
         Ok(turns) => {
@@ -112,6 +115,10 @@ mod tests {
             }
             reply
         }
+    }
+
+    fn drained(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) -> Vec<Event> {
+        std::iter::from_fn(|| events.try_recv().ok()).collect()
     }
 
     fn turn(speaker: u32) -> SpeakerTurn {
@@ -154,11 +161,21 @@ mod tests {
             &timing,
         );
         assert_eq!(*diarizer.calls.lock().unwrap(), 2);
-        assert_eq!(
-            events.try_recv().unwrap(),
-            Event::SpeakerTurns(vec![turn(0), turn(1)])
+        let (start, end) = (
+            Event::DiarizationStatus { active: true },
+            Event::DiarizationStatus { active: false },
         );
-        assert!(events.try_recv().is_err());
+        // Each pass says it runs, the failed one included.
+        assert_eq!(
+            drained(&mut events),
+            [
+                start.clone(),
+                end.clone(),
+                start,
+                end,
+                Event::SpeakerTurns(vec![turn(0), turn(1)])
+            ]
+        );
     }
 
     #[test]
@@ -244,15 +261,14 @@ mod tests {
             &timing,
         );
         assert_eq!(*diarizer.0.lock().unwrap(), 2, "the tail got its own pass");
-        assert_eq!(
-            events.try_recv().unwrap(),
-            Event::SpeakerTurns(vec![turn(0)])
-        );
-        assert_eq!(
-            events.try_recv().unwrap(),
-            Event::SpeakerTurns(vec![turn(0)])
-        );
-        assert_eq!(events.try_recv().unwrap(), Event::DiarizationFinished);
+        let pass = [
+            Event::DiarizationStatus { active: true },
+            Event::DiarizationStatus { active: false },
+            Event::SpeakerTurns(vec![turn(0)]),
+        ];
+        let mut expected = [pass.clone(), pass].concat();
+        expected.push(Event::DiarizationFinished);
+        assert_eq!(drained(&mut events), expected);
     }
 
     #[test]

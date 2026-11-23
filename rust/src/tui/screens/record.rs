@@ -584,6 +584,7 @@ impl Screen for RecordScreen {
             }
             Msg::Worker(Event::DiarizationFinished) => {
                 self.mode.diarizing = false;
+                self.session.status.labeling_speakers = false;
                 match self.mode.worker_done && !self.shutdown_requested {
                     true => self.after_last_audio(ctx),
                     false => Action::None,
@@ -599,6 +600,10 @@ impl Screen for RecordScreen {
             }) => self.session.on_download_progress(percent, &model_name),
             Msg::Worker(Event::TranscriptionStatus { active }) => {
                 self.session.status.transcribing = active;
+                Action::None
+            }
+            Msg::Worker(Event::DiarizationStatus { active }) => {
+                self.session.status.labeling_speakers = active;
                 Action::None
             }
             Msg::Task(payload) => match self.session.task_message(payload, &mut self.mode, ctx) {
