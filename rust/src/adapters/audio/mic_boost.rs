@@ -13,6 +13,10 @@
 //!   while the mic's loudness follows the call's. Headphones measure near zero,
 //!   so they keep the full gain; laptop speakers get what their echo allows.
 //!   Until a pickup is measured, a new call turn holds 1x for `JUDGE_S`.
+//!
+//! The gain aims the user's speech at the call's own speech level, so both
+//! voices end up equally loud in the mix. The aim never drops under
+//! `target_rms`, and with no call heard it is `target_rms`.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -50,6 +54,8 @@ const HARD_MAX_GAIN: f64 = 50.0;
 const TARGET_OVER_GATE: f64 = 5.0;
 /// A measured pickup fades this slowly while the mic stops following the call.
 const PICKUP_DOWN_TAU_S: f64 = 60.0;
+/// The call's speech level averages this long, so one loud laugh does not move the aim.
+const CALL_LEVEL_TAU_S: f64 = 5.0;
 const LOG_COOLDOWN_S: f64 = 10.0;
 const STATS_S: f64 = 30.0;
 
@@ -164,6 +170,8 @@ pub struct MicBoost {
     pub sample_rate: u32,
     floor: f64,
     call_floor: f64,
+    /// The call's speech level, from blocks where it sounds. Kept while it is quiet.
+    call_level: f64,
     speech_level: f64,
     speech_seconds: f64,
     gain: f64,
@@ -190,6 +198,7 @@ impl MicBoost {
             sample_rate,
             floor: 0.0,
             call_floor: 0.0,
+            call_level: 0.0,
             speech_level: 0.0,
             speech_seconds: 0.0,
             gain: 1.0,
@@ -213,6 +222,7 @@ impl MicBoost {
         // Low, so the first call sound counts at once: a first frame taken as the
         // floor would hide the call until its first pause.
         self.call_floor = f64::from(CALL_MIN_RMS / CALL_OVER_FLOOR);
+        self.call_level = 0.0;
         self.speech_level = 0.0;
         self.speech_seconds = 0.0;
         self.gain = 1.0;
@@ -336,6 +346,7 @@ impl MicBoost {
         push(&mut self.mic_env, &frame_rms(mic));
         let system_env = frame_rms(system);
         push(&mut self.sys_env, &system_env);
+        self.track_call_level(system, seconds);
         let turn_gap = TURN_GAP_S * self.frames_per_s();
         let frame_s = seconds / system_env.len().max(1) as f64;
         for level in system_env {
@@ -352,6 +363,29 @@ impl MicBoost {
                 self.turn_frames + 1
             };
         }
+    }
+
+    /// Follow the call's level over the blocks where it sounds, against the floor
+    /// from before this block.
+    fn track_call_level(&mut self, system: &[f32], seconds: f64) {
+        if system.is_empty() {
+            return;
+        }
+        let level = rms(system);
+        let sounding =
+            level >= f64::from(CALL_MIN_RMS).max(f64::from(CALL_OVER_FLOOR) * self.call_floor);
+        if !sounding {
+            return;
+        }
+        self.call_level = match self.call_level == 0.0 {
+            true => level,
+            false => follow(self.call_level, level, seconds, CALL_LEVEL_TAU_S),
+        };
+    }
+
+    /// The level the user's speech is raised to: the call's, at least `target_rms`.
+    fn aim(&self) -> f64 {
+        self.target_rms.max(self.call_level)
     }
 
     fn update_bleed(&mut self, seconds: f64) {
@@ -441,7 +475,7 @@ impl MicBoost {
         if !speaking || self.judging || self.speech_seconds < MIN_SPEECH_S {
             return 1.0;
         }
-        (self.target_rms / self.speech_level).max(1.0).min(cap)
+        (self.aim() / self.speech_level).max(1.0).min(cap)
     }
 
     fn next_gain(&self, wanted: f64, speaking: bool, seconds: f64, cap: f64) -> f64 {
@@ -509,7 +543,7 @@ impl MicBoost {
             None => "unknown".into(),
         };
         format!(
-            "Mic boost [{}:{:02}]: mic {:.4} (floor {:.4}), call {:.4} (floor {:.4}, sounding {:.0}%), speech level {:.4}, gain {:.1}x avg, speech boosted {:.0}%, echo pickup {pickup}, judging {:.0}%, bleed {:.0}%",
+            "Mic boost [{}:{:02}]: mic {:.4} (floor {:.4}), call {:.4} (floor {:.4}, sounding {:.0}%, speech {:.4}), speech level {:.4}, aim {:.4}, gain {:.1}x avg, speech boosted {:.0}%, echo pickup {pickup}, judging {:.0}%, bleed {:.0}%",
             total / 60,
             total % 60,
             stats.mic / blocks,
@@ -517,7 +551,9 @@ impl MicBoost {
             stats.call / blocks,
             self.call_floor,
             share(stats.call_blocks),
+            self.call_level,
             self.speech_level,
+            self.aim(),
             stats.gain / blocks,
             f64::from(stats.boosted_blocks) * 100.0 / speech,
             share(stats.judging_blocks),

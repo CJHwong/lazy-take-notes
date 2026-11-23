@@ -288,3 +288,61 @@ fn the_remote_answering_right_after_the_user_does_not_get_the_users_gain() {
         "gain {answer} while the remote answers"
     );
 }
+
+/// The user's speech RMS over the blocks where the gate would count it.
+fn speech_rms(audio: &[f32], from: f64, to: f64) -> f64 {
+    let part = &audio[(from * RATE) as usize..((to * RATE) as usize).min(audio.len())];
+    let loud: Vec<f64> = part
+        .chunks_exact(BLOCK)
+        .map(|block| {
+            (block
+                .iter()
+                .map(|&s| f64::from(s) * f64::from(s))
+                .sum::<f64>()
+                / BLOCK as f64)
+                .sqrt()
+        })
+        .filter(|&level| level > 0.005)
+        .collect();
+    loud.iter().sum::<f64>() / loud.len().max(1) as f64
+}
+
+fn boosted(mic: &[f32], call: &[f32]) -> Vec<f32> {
+    let mut boost = MicBoost::new(0.05, 10.0, 16_000);
+    mic.chunks_exact(BLOCK)
+        .zip(call.chunks_exact(BLOCK))
+        .flat_map(|(mic, call)| boost.apply(mic, call))
+        .collect()
+}
+
+#[test]
+fn after_a_loud_call_the_users_turn_is_as_loud_as_the_call() {
+    // Headphones; the call speaks near 0.15 RMS, the user near 0.012.
+    let call = track(&[(111, 0.26, true, 0.0, 4.0)], 10.0);
+    let mic = track(
+        &[(112, 0.02, true, 5.0, 5.0), (113, 0.0003, false, 0.0, 10.0)],
+        10.0,
+    );
+    let out = boosted(&mic, &call);
+    let (theirs, mine) = (speech_rms(&call, 0.0, 4.0), speech_rms(&out, 7.0, 10.0));
+    assert!(
+        mine > 0.6 * theirs && mine < 1.4 * theirs,
+        "user {mine}, call {theirs}"
+    );
+}
+
+#[test]
+fn a_quiet_call_does_not_lower_the_aim_under_the_minimum() {
+    // The call speaks near 0.012 RMS: the user is still raised to about 0.05.
+    let call = track(&[(121, 0.02, true, 0.0, 4.0)], 10.0);
+    let mic = track(
+        &[
+            (122, 0.004, true, 5.0, 5.0),
+            (123, 0.0003, false, 0.0, 10.0),
+        ],
+        10.0,
+    );
+    let out = boosted(&mic, &call);
+    let mine = speech_rms(&out, 7.0, 10.0);
+    assert!(mine > 0.035, "user {mine}");
+}
