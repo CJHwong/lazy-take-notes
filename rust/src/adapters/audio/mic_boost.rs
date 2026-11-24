@@ -179,6 +179,8 @@ pub struct MicBoost {
     judging: bool,
     /// The echo's share of the call, once measured. None: not known yet.
     pickup: Option<f64>,
+    /// Whether `pickup` came from real bleed, or only from an upper bound.
+    pickup_measured: bool,
     turn_frames: usize,
     quiet_frames: usize,
     mic_env: VecDeque<f32>,
@@ -205,6 +207,7 @@ impl MicBoost {
             bleeding: false,
             judging: false,
             pickup: None,
+            pickup_measured: false,
             turn_frames: 0,
             quiet_frames: 0,
             mic_env: VecDeque::new(),
@@ -229,6 +232,7 @@ impl MicBoost {
         self.bleeding = false;
         self.judging = false;
         self.pickup = None;
+        self.pickup_measured = false;
         self.turn_frames = 0;
         // No call heard yet: the call starts quiet.
         self.quiet_frames = usize::MAX / 2;
@@ -421,16 +425,21 @@ impl MicBoost {
     }
 
     /// While the mic follows the call, its pickup is measured; a higher one counts
-    /// at once. Otherwise any echo hides under the mic's floor, and the pickup
-    /// fades toward that bound.
+    /// at once. Otherwise any echo hides under the mic's floor, which bounds the
+    /// pickup. A lower bound replaces a pickup that was only ever bounded: a short
+    /// sound in a noisy room proves little, and must not hold down a later call.
+    /// A measured pickup fades toward the bound, because talking over the call
+    /// also stops the mic following it while the echo is still there.
     fn update_pickup(&mut self, bleeding: bool, measured: f64, sys: &[f32], seconds: f64) {
         let call = sys.iter().map(|&s| f64::from(s)).sum::<f64>() / sys.len().max(1) as f64;
         let bound = if call > 0.0 { self.floor / call } else { 0.0 };
+        self.pickup_measured |= bleeding;
         self.pickup = Some(match (self.pickup, bleeding) {
             (None, true) => measured,
             (None, false) => bound,
             (Some(known), true) if measured > known => measured,
             (Some(known), true) => follow(known, measured, seconds, PICKUP_DOWN_TAU_S),
+            (Some(known), false) if !self.pickup_measured => known.min(bound),
             (Some(known), false) => follow(known, known.min(bound), seconds, PICKUP_DOWN_TAU_S),
         });
     }

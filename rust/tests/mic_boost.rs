@@ -346,3 +346,28 @@ fn a_quiet_call_does_not_lower_the_aim_under_the_minimum() {
     let mine = speech_rms(&out, 7.0, 10.0);
     assert!(mine > 0.035, "user {mine}");
 }
+
+#[test]
+fn a_notification_in_a_noisy_room_does_not_hold_down_a_later_call() {
+    // A notification against loud room noise proves only a loose echo limit.
+    // The call that follows, with headphones and a mic the call turned far
+    // down, proves a tight one: the user talking over it must get the boost.
+    let mut mic = track(
+        &[(12, 0.02, false, 0.0, 6.0), (13, 0.0001, false, 6.0, 24.0)],
+        30.0,
+    );
+    let user = track(&[(14, 0.003, true, 16.0, 4.0)], 30.0);
+    mic.iter_mut()
+        .zip(&user)
+        .for_each(|(slot, voice)| *slot += voice);
+    let call = track(
+        &[(30, 0.03, false, 2.0, 1.5), (31, 0.05, true, 10.0, 20.0)],
+        30.0,
+    );
+    let gains = gains(&mic, &call);
+    let talk = lowest(during(&gains, 17.5, 19.0));
+    assert!(
+        talk >= 8.0,
+        "the user's speech over the call got {talk:.1}x"
+    );
+}
