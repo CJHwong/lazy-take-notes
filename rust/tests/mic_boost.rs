@@ -371,3 +371,20 @@ fn a_notification_in_a_noisy_room_does_not_hold_down_a_later_call() {
         "the user's speech over the call got {talk:.1}x"
     );
 }
+
+#[test]
+fn a_measured_echo_survives_talking_over_a_quiet_call() {
+    // The remote talks alone, which measures the echo. Then the user talks
+    // over the quiet call: the mic stops following it, but the echo is still
+    // there, so the gain must keep the boosted echo small.
+    let call = track(&[(91, 0.02, true, 0.0, 12.0)], 12.0);
+    let mut mic = track(
+        &[(92, 0.01, true, 4.0, 8.0), (93, 0.0001, false, 0.0, 12.0)],
+        12.0,
+    );
+    let pickup = 0.1f32;
+    add_echo(&mut mic, &call, pickup, 0.1);
+    let gains = gains(&mic, &call);
+    let most = highest(during(&gains, 4.0, 12.0));
+    assert!(most * f64::from(pickup) <= ECHO_LIMIT, "max gain {most}");
+}
