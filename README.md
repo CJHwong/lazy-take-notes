@@ -2,300 +2,76 @@
   <img src="docs/logo-banner.png" alt="lazy-take-notes" width="360">
 </p>
 
-Terminal app for live transcription and note-taking. Records your mic, transcribes speech to text, and periodically generates structured digests of what's happening.
+A terminal app that takes your meeting notes. It records your mic and your system audio, transcribes the speech on your machine, and keeps a summary up to date while you talk.
 
 ![screenshot](docs/screenshot.png)
 
-## Requirements
-
-- Python 3.11+
-- A microphone
-- A transcription engine ([whisper.cpp](https://github.com/ggerganov/whisper.cpp) by default)
-- An LLM backend ([Ollama](https://ollama.com) by default, or any [OpenAI-compatible API](https://platform.openai.com/))
-
 ## Install
 
-### Quick setup
-
-Run this in Terminal — it installs everything and sets up a `take-note` shortcut:
+On macOS or Linux, run this in a terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash
 ```
 
-The script first warns that a piped script runs as you and asks `[Y/n]`. An agent or CI job has no terminal, so it passes `-y`: `curl ... | bash -s -- -y`.
+The script installs [uv](https://docs.astral.sh/uv/), helps you pick an AI provider ([Ollama](https://ollama.com) or any OpenAI-compatible API), and adds a `take-note` command. It asks before it runs.
 
-Then run `take-note record`.
-
-On a Mac with Apple silicon, every install method runs the native (Rust) build of the app once a release is pinned in `src/lazy_take_notes/rust_release.py` (from v0.2.0). The first start downloads it once and checks it against the pinned SHA-256. Other systems run the Python version. If the download fails, the app runs the Python version and says why. `LTN_PYTHON=1 take-note` always runs the Python version.
-
-### Manual install
+To try the app without installing it:
 
 ```bash
-# try without installing (uv required)
 uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes
-
-# or clone and install locally
-uv sync
-
-# or pip
-pip install -e .
 ```
 
-**New to this?** See the [Getting Started guide](docs/GETTING_STARTED.md) for step-by-step setup instructions.
+On a Mac with Apple silicon, the app is a native build. Other systems run the Python version. See [Rust and Python versions](docs/explain_rust_and_python.md).
 
-## Run
+## First run
 
-```bash
-take-note                                     # interactive mode selector
-take-note record                              # start recording
-take-note record -l sprint-review             # record with session label
-take-note transcribe recording.m4a            # transcribe an audio file (mp3, wav, m4a, webm, aiff, flac, ogg, ...)
-take-note view                                # browse saved sessions
-take-note config                              # open the settings editor
-take-note create-template                     # build a custom template with AI
-take-note --config path/to/config.yaml        # custom config
-take-note --output-dir ./my_session           # custom output dir
-```
+1. Run `take-note record`.
+2. Pick a template, for example `default_en`.
+3. Talk. The transcript fills the left panel, and the notes update on the right. Press `s` to stop, then `q` for the final notes.
 
-> `lazy-take-notes` works as an alias for `take-note`.
+Your sessions are saved in `~/Documents/LazyTakeNotes`. The [getting started tutorial](docs/tutorial_getting_started.md) walks through the setup step by step.
 
-## Keys
+## Documentation
 
-| Key     | Action                          |
-| ------- | ------------------------------- |
-| `Space` | Pause / resume recording        |
-| `s`     | Stop recording                  |
-| `c`     | Copy focused panel to clipboard |
-| `Tab`   | Switch panel focus              |
-| `h`     | Help                            |
-| `q`     | Quit after the final notes      |
-| `ctrl+q` | Save the audio and quit now, without the final notes |
+**Learn**
 
-Templates can add more keys for quick actions (catch up, action items, etc). Press `h` in the app to see all available bindings.
+- [Getting started](docs/tutorial_getting_started.md)
 
-## Config
+**Do a task**
 
-Config lives in your OS config directory:
+- [Label speakers](docs/howto_speaker_labels.md)
+- [Create and edit templates](docs/howto_templates.md)
+- [Write a plugin](docs/howto_plugins.md)
+- [Build the desktop app](docs/howto_desktop_app.md)
+- [Develop and release](docs/howto_develop_and_release.md)
 
-| OS      | Path                                             |
-| ------- | ------------------------------------------------ |
-| macOS   | `~/Library/Application Support/lazy-take-notes/` |
-| Linux   | `~/.config/lazy-take-notes/`                     |
-| Windows | `C:\Users\<you>\AppData\Local\lazy-take-notes\`  |
+**Look something up**
 
-`take-note config` warns before it closes with unsaved changes.
+- [Commands](docs/ref_commands.md)
+- [Keys](docs/ref_keys.md)
+- [Configuration](docs/ref_configuration.md)
+- [Settings screen](docs/ref_settings.md)
+- [Session files](docs/ref_output_files.md)
+- [Template schema](docs/ref_template_schema.md)
+- [Plugin API](docs/ref_plugin_api.md)
 
-Example `config.yaml`:
+**Understand**
 
-```yaml
-# LLM provider: 'ollama' (default) or 'openai' (any OpenAI-compatible API)
-llm_provider: ollama
-
-ollama:
-  host: "http://localhost:11434"
-
-# OpenAI-compatible provider (OpenAI, Gemini, Groq, Together, vLLM, etc.)
-# openai:
-#   api_key: sk-...               # or set OPENAI_API_KEY env var
-#   base_url: "https://api.openai.com/v1"
-
-recognition_hints:                  # global hints for the speech recogniser
-  - "Kubernetes"                    # applied to every template (merged with per-template hints)
-  - "JIRA"
-
-transcription:
-  model: "large-v3-turbo-q8_0"    # default whisper model
-  models:                         # per-locale overrides
-    zh: "breeze25-q8"             # Breeze-ASR-25, Mandarin / Traditional Chinese
-    zh-min-nan: "breeze26"        # Breeze-ASR-26, Taiwanese Hokkien (台語)
-                                  # these two are built in; set one to null to use the default model
-  chunk_duration: 25.0
-  overlap: 1.0
-  silence_threshold: 0.01
-  pause_duration: 1.5
-digest:
-  model: "gpt-oss:20b"            # heavy model for periodic digests
-  min_lines: 15
-  min_interval: 60
-  compact_token_threshold: 100000
-interactive:
-  model: "gpt-oss:20b"            # fast model for quick actions
-output:
-  directory: "~/Documents/LazyTakeNotes"
-  save_audio: true                # save recording.wav alongside transcript; when false, it is still kept if transcription fails
-  save_notes_history: true        # keep numbered snapshots in history/
-  save_context: true              # save session context text
-  save_debug_log: false           # write debug.log (off by default)
-```
-
-## Templates
-
-Templates control the LLM prompts, labels, and quick-action keys for a session. The template picker launches at startup — built-ins are listed there.
-
-In the picker, `n` builds a new template with AI, `e` opens the highlighted one in your editor, and `a` edits it with AI: describe the change, confirm it, and the app lists the fields that changed. Saving keeps the original name; for a built-in, that saves your copy, which overrides it. To keep both, change the file name in the save dialog, and the display name the picker shows.
-
-To add your own or override a built-in, drop a `.yaml` file in the `templates/` subdirectory of your config path (see table above). See [docs/TEMPLATES.md](docs/TEMPLATES.md) for the full schema and variable reference.
-
-## Output
-
-After a session, `~/Documents/LazyTakeNotes` holds one folder per session:
-
-```
-2026-11-08_100000_standup/
-├── transcript.txt            # timestamped transcript
-├── notes.md                  # latest notes/digest (markdown)
-├── context.txt               # user-provided context (when save_context: true)
-├── recording.wav             # audio recording (when save_audio: true, or when transcription failed)
-├── debug.log                 # debug log (when save_debug_log: true)
-└── history/                  # numbered snapshots (when save_notes_history: true)
-    ├── notes_001.md
-    ├── notes_002.md
-    └── notes_003_final.md    # final digest on quit/stop
-```
-
-## Speaker labels (experimental)
-
-Speaker labels need the native NeMo-Speech.cpp runtime and the Nemotron-3-Diarization GGUF. Install both from Settings:
-
-```bash
-take-note config
-```
-
-Open the **Models** tab and press `Download` next to `NeMo Speech runtime` and `Nemotron 3 diarization`. The app downloads about 116 MB once, checks the pinned SHA-256 digest, and stores both in the shared cache. No paths to type.
-
-The app reads the recording while it runs, so `save_audio` must be on. `take-note diarize <session-dir>` labels a saved transcript with the same installed runtime and model.
-
-For a custom build, set an absolute path in `config.yaml`, or export the old overrides:
-
-```bash
-export LTN_NEMO_BINARY=/path/to/nemo-speech
-export LTN_NEMO_MODEL=/path/to/Nemotron-3-Diarization.q8_0.gguf
-take-note diarize ~/Documents/LazyTakeNotes/2026-11-08_100000_standup
-```
-
-The command writes `speakers.json` and `transcript_speakers.txt` in the session directory.
-
-Labels are local to one session. `S1` in one meeting is not the same person as `S1` in another. Diarization runs offline: 20 minutes of audio took 3.7 s on Metal, and 61 minutes took 44 s on CPU.
-
-### Live speaker labels
-
-Enable **Speaker Labels** on the **Audio** page. Install the runtime and model from the **Models** page. The app reuses the installed files and runs one pass over the audio recorded so far every 60 seconds. The same controls are in `config.yaml`:
-
-```yaml
-diarization:
-  enabled: true
-  device: auto        # auto, cpu, or metal
-  interval_s: 60      # one full pass over the audio so far
-output:
-  save_audio: true    # diarization reads the recording
-```
-
-`binary` and `model` are optional overrides. Leave them blank to use the managed cache.
-
-A bar under the transcript shows the speakers found so far, with their speech time. Click a chip to name that speaker. The name replaces `S1` in the transcript, is saved to `speakers.json`, and is used in the digest prompt, so the notes can attribute statements to a person.
-
-The session saves the labeled transcript as `transcript_speakers.txt` next to `transcript.txt`. `take-note transcript` prints the labeled one when it exists.
-
-Speaker numbers follow arrival order, so a label already on screen stays valid when a new voice joins. Each pass reads the whole recording, which is cheap: about 11 s per hour on Metal.
-
-## Settings
-
-`take-note config` opens the settings screen. The app also opens it from the mode picker.
-
-| Page | What it controls |
-| --- | --- |
-| Models | Text generation provider and models, speech models, language overrides, speaker runtime install |
-| Digest | Summary triggers and token compaction |
-| Audio | Live input test, microphone choice, audio processing, speaker labels |
-| Sessions | Output folder, save toggles, auto-label, vocabulary, built-in templates |
-| Appearance | Theme and the recording preview |
-
-Pages use the full window: a left navigation column, then two content columns. Models is first because it is the setup page. Below about 100 columns, the two content columns stack. Inside a page, Esc goes back to the page list. Esc on the page list leaves Settings. `ctrl+s` saves.
-
-Settings writes `config.yaml` readable by your user only, because it can hold an API key.
-
-The Models page lists each transcript model as a row with its size, state, and one action. Language overrides use `Add language` rows with a locale and a model picker. Speaker runtime and model show only a status and an install or remove action. No model paths are exposed. Advanced settings are always visible. No page uses collapsible sections.
-
-Model assets live in one cache. The path is `platformdirs.user_cache_path('lazy-take-notes')`, which is `~/Library/Caches/lazy-take-notes` on macOS. The Models tab shows each asset, its size, and its state. Downloads resume, show size, speed and time left, and can be cancelled. A cancelled download keeps its partial file. Two downloads of one model never run at once, even from two windows: the second waits and uses the first one's file. A model that another window is downloading shows as Downloading; press Download to follow it. The app verifies a pinned SHA-256 for every file and never executes an unverified runtime.
-
-On first use the app adopts models from the old `pywhispercpp` cache and the old `~/.cache/nemotron-diarization` store. It links or copies them and leaves the originals in place. A model you remove stays removed until you press `Download`, which reuses the original if it is still there. The remove dialog says how much space the original uses, and deletes it only if you tick the box under that line.
-
-
-## Desktop app (macOS)
-
-Build a `.app` that runs the TUI in its own window using [Trolley](https://github.com/weedonandscott/trolley) and [libghostty](https://github.com/ghostty-org/ghostty):
-
-```bash
-brew install weedonandscott/tap/trolley
-scripts/trolley/build.sh --run     # build, add the mic usage string, and launch
-scripts/trolley/build.sh           # build .app only
-```
-
-The build script inserts `NSMicrophoneUsageDescription` into the app's `Info.plist` after Trolley packages it. Trolley has no config key for that entry, and macOS denies microphone access to the app without it.
-
-The bundle ships a launcher script, not a frozen Python binary. On first launch it installs the app into a uv tool environment, then reuses that environment on every later launch. The target machine needs `uv`, plus the CLI prerequisites: `ffmpeg`, and either Ollama or an OpenAI-compatible endpoint. If `uv` is missing, the launcher prints the install command and exits.
-
-The bundle sets three environment variables in `trolley.toml`:
-
-| Variable | Value | Why |
-| --- | --- | --- |
-| `LTN_OUTPUT_DIR` | `~/Documents/LazyTakeNotes` | The same folder as the default, so a session from the app and one from a terminal land together. |
-| `LTN_KIOSK` | `1` | Returns to the mode picker after a session instead of exiting. |
-| `TEXTUAL_DRIVER` | `...drivers.ghostty_driver:GhosttyDriver` | Turns off the Kitty keyboard protocol under Trolley. Leaving it on breaks arrow keys. |
-
-Moving the window between displays with different scale factors can leave the terminal grid at the wrong size. Drag a window edge to re-sync it. The cause and the upstream patch are in [docs/TROLLEY_DISPLAY_SCALE.md](docs/TROLLEY_DISPLAY_SCALE.md).
-
-The launcher installs from `main` by default. A bundle built from an unmerged branch must point at that checkout, or the installed code will not match the driver the bundle expects:
-
-```bash
-LTN_DESKTOP_SOURCE=/path/to/lazy-take-notes scripts/trolley/build.sh --run
-```
-
-The produced `.app` is ad-hoc signed. Distributing it to another machine needs a Developer ID signature and notarization. `scripts/release.sh` does both when they are available, and the last line of its output says whether it did:
-
-```bash
-scripts/release.sh                          # build, sign if possible, zip
-scripts/release.sh --dmg                    # also produce a DMG
-LTN_NOTARY_PROFILE=ltn scripts/release.sh   # also notarize
-```
-
-Artifacts land in `trolley/release/`. Signing runs when the keychain holds a `Developer ID Application` identity, or when `LTN_SIGN_IDENTITY` names one. Notarization runs when `LTN_NOTARY_PROFILE` names a `notarytool` keychain profile. Without them the script still builds and packages, and reports `UNSIGNED`.
-
-## Development
-
-```bash
-uv sync                  # install deps
-uv run pytest tests/ -v  # run tests
-uv run lint-imports      # check layer contracts
-```
-
-The Rust app lives in `rust/`. Its toolchain is pinned in `rust/rust-toolchain.toml`, and its differences from the Python version are listed in [rust/PLAN.md](rust/PLAN.md):
-
-```bash
-cd rust
-cargo test               # run tests (transcribe tests need ffmpeg)
-cargo clippy --all-targets -- -D warnings
-scripts/package.sh       # build dist/lazy-take-notes-<arch>-macos.tar.gz
-```
-
-To release the Rust app:
-
-1. Run the Release workflow by hand (Actions, then Release, then Run workflow). It is a dry run: it builds and checks the package, and publishes nothing.
-2. Push a tag `v*`. The workflow publishes a GitHub Release. A tag with a `-`, such as `v0.2.0-rc.1`, is a prerelease.
-3. Run `uv run scripts/pin_rust_release.py <tag>` and commit `rust_release.py`. Users get the release when the pin reaches `main`.
-
-Architecture details are in [AGENTS.md](AGENTS.md). To build your own source plugin, see the [Plugin Development Guide](docs/PLUGINS.md).
+- [Rust and Python versions](docs/explain_rust_and_python.md)
+- [How speaker labels work](docs/explain_speaker_labels.md)
+- [The model cache](docs/explain_model_cache.md)
 
 ## Credits
 
-Speech recognition is powered by these open models. Thanks to their authors:
+Speech recognition uses these open models. Thanks to their authors:
 
-- **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** by Georgi Gerganov: the inference runtime, plus OpenAI's [Whisper](https://github.com/openai/whisper) `large-v3-turbo` (MIT) used by default.
-- **[Breeze-ASR-25](https://huggingface.co/MediaTek-Research/Breeze-ASR-25)** by MediaTek Research (Apache-2.0): fine-tuned from `whisper-large-v2` for Mandarin / Traditional Chinese. whisper.cpp build by [alan314159](https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp).
-- **[Breeze-ASR-26](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)** by MediaTek Research (Apache-2.0): Taiwanese Hokkien (台語), GGML build by [phate334](https://huggingface.co/phate334/Breeze-ASR-26-GGML).
+- **[whisper.cpp](https://github.com/ggerganov/whisper.cpp)** by Georgi Gerganov: the inference runtime, plus OpenAI's [Whisper](https://github.com/openai/whisper) `large-v3-turbo` (MIT), the default model.
+- **[Breeze-ASR-25](https://huggingface.co/MediaTek-Research/Breeze-ASR-25)** by MediaTek Research (Apache-2.0): fine-tuned from `whisper-large-v2` for Mandarin and Traditional Chinese. whisper.cpp build by [alan314159](https://huggingface.co/alan314159/Breeze-ASR-25-whispercpp).
+- **[Breeze-ASR-26](https://huggingface.co/MediaTek-Research/Breeze-ASR-26)** by MediaTek Research (Apache-2.0): Taiwanese Hokkien (台語). GGML build by [phate334](https://huggingface.co/phate334/Breeze-ASR-26-GGML).
+- **[NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp)** and Nemotron 3 Diarization by NVIDIA: speaker labels.
 
-Digests and quick actions run on a local LLM via [Ollama](https://ollama.com) (default `gpt-oss:20b`) or any OpenAI-compatible API.
+Notes and quick actions run on a local model through [Ollama](https://ollama.com) (default `gpt-oss:20b`), or on any OpenAI-compatible API.
 
 ## License
 

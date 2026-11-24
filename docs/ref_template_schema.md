@@ -1,21 +1,6 @@
-# Templates
+# Template schema
 
-Templates are YAML files that control the LLM prompts, display labels, and quick actions for a session. Built-in templates ship with the app; you can add your own or override built-ins.
-
-## User templates
-
-Drop a `.yaml` file in the `templates/` subdirectory of your config path. It's discovered automatically by filename (without the extension). A user template with the same filename as a built-in overrides it.
-
-| OS      | Templates path                                             |
-| ------- | ---------------------------------------------------------- |
-| macOS   | `~/Library/Application Support/lazy-take-notes/templates/` |
-| Linux   | `~/.config/lazy-take-notes/templates/`                     |
-| Windows | `C:\Users\<you>\AppData\Local\lazy-take-notes\templates\`  |
-
-```
-<config-dir>/templates/
-└── ux_interview.yaml      ← discovered as "ux_interview"
-```
+A template is a YAML file. It sets the AI prompts, the labels, and the quick actions of a session. [Create and edit templates](howto_templates.md) says where the files go.
 
 ## YAML schema
 
@@ -23,7 +8,7 @@ Drop a `.yaml` file in the `templates/` subdirectory of your config path. It's d
 metadata:
   name: "UX Interview"          # display name shown in picker and header
   description: "..."            # one-line description shown in picker
-  locale: "en-US"               # BCP 47 locale — drives whisper model selection
+  locale: "en-US"               # BCP 47 locale: picks the speech model
 
 system_prompt: |
   You are … (sets the LLM's role for the whole session)
