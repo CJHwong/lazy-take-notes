@@ -1,0 +1,238 @@
+[
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "Lines ({line_count}):\n{new_lines}\n{user_context}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [],
+  "text": "Template is valid."
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "Hello {bogus_var} {zeta}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template uses unknown variable {bogus_var}. Allowed: {line_count}, {new_lines}, {user_context}",
+   "digest_user_template uses unknown variable {zeta}. Allowed: {line_count}, {new_lines}, {user_context}",
+   "digest_user_template format error: 'bogus_var'"
+  ],
+  "text": "- digest_user_template uses unknown variable {bogus_var}. Allowed: {line_count}, {new_lines}, {user_context}\n- digest_user_template uses unknown variable {zeta}. Allowed: {line_count}, {new_lines}, {user_context}\n- digest_user_template format error: 'bogus_var'"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "{full_transcript}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template uses unknown variable {full_transcript}. Allowed: {line_count}, {new_lines}, {user_context}",
+   "digest_user_template format error: 'full_transcript'"
+  ],
+  "text": "- digest_user_template uses unknown variable {full_transcript}. Allowed: {line_count}, {new_lines}, {user_context}\n- digest_user_template format error: 'full_transcript'"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "{line_count} {unclosed",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template format error: expected '}' before end of string"
+  ],
+  "text": "- digest_user_template format error: expected '}' before end of string"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "{line_count} {",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template format error: Single '{' encountered in format string"
+  ],
+  "text": "- digest_user_template format error: Single '{' encountered in format string"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "a } b",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template format error: Single '}' encountered in format string"
+  ],
+  "text": "- digest_user_template format error: Single '}' encountered in format string"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "{{literal}} {line_count}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [],
+  "text": "Template is valid."
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "{}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "digest_user_template format error: Replacement index 0 out of range for positional args tuple"
+  ],
+  "text": "- digest_user_template format error: Replacement index 0 out of range for positional args tuple"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "Lines ({line_count}):\n{new_lines}\n{user_context}",
+   "final_user_template": "Hello {nonexistent}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "final_user_template uses unknown variable {nonexistent}. Allowed: {full_transcript}, {line_count}, {new_lines}, {user_context}",
+   "final_user_template format error: 'nonexistent'"
+  ],
+  "text": "- final_user_template uses unknown variable {nonexistent}. Allowed: {full_transcript}, {line_count}, {new_lines}, {user_context}\n- final_user_template format error: 'nonexistent'"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "You are a meeting assistant.",
+   "digest_user_template": "Lines ({line_count}):\n{new_lines}\n{user_context}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "OK",
+     "prompt_template": "{digest_markdown}"
+    },
+    {
+     "label": "B",
+     "prompt_template": "{nope}"
+    }
+   ]
+  },
+  "errors": [
+   "quick_actions[1].prompt_template uses unknown variable {nope}. Allowed: {digest_markdown}, {recent_transcript}",
+   "quick_actions[1].prompt_template format error: 'nope'"
+  ],
+  "text": "- quick_actions[1].prompt_template uses unknown variable {nope}. Allowed: {digest_markdown}, {recent_transcript}\n- quick_actions[1].prompt_template format error: 'nope'"
+ },
+ {
+  "template": {
+   "metadata": {
+    "name": "Test",
+    "locale": "en"
+   },
+   "system_prompt": "   \n  ",
+   "digest_user_template": "Lines ({line_count}):\n{new_lines}\n{user_context}",
+   "final_user_template": "Final:\n{full_transcript}",
+   "quick_actions": [
+    {
+     "label": "Summary",
+     "prompt_template": "{digest_markdown}"
+    }
+   ]
+  },
+  "errors": [
+   "system_prompt is empty."
+  ],
+  "text": "- system_prompt is empty."
+ }
+]

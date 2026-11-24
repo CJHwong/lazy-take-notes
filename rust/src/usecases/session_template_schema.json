@@ -1,0 +1,89 @@
+{
+  "$defs": {
+    "QuickAction": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "prompt_template": {
+          "title": "Prompt Template",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "prompt_template"
+      ],
+      "title": "QuickAction",
+      "type": "object"
+    },
+    "TemplateMetadata": {
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "locale": {
+          "default": "",
+          "title": "Locale",
+          "type": "string"
+        },
+        "key": {
+          "default": "",
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "title": "TemplateMetadata",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "metadata": {
+      "$ref": "#/$defs/TemplateMetadata"
+    },
+    "system_prompt": {
+      "default": "",
+      "title": "System Prompt",
+      "type": "string"
+    },
+    "digest_user_template": {
+      "default": "",
+      "title": "Digest User Template",
+      "type": "string"
+    },
+    "final_user_template": {
+      "default": "",
+      "title": "Final User Template",
+      "type": "string"
+    },
+    "recognition_hints": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Recognition Hints",
+      "type": "array"
+    },
+    "quick_actions": {
+      "items": {
+        "$ref": "#/$defs/QuickAction"
+      },
+      "title": "Quick Actions",
+      "type": "array"
+    }
+  },
+  "title": "SessionTemplate",
+  "type": "object"
+}

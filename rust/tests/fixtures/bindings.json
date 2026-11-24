@@ -1,0 +1,1236 @@
+{
+  "apps.base.BaseApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Switch Panel",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "q",
+      "action": "quit_app",
+      "description": "Quit",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "l",
+      "action": "rename_session",
+      "description": "Label",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "o",
+      "action": "open_session_dir",
+      "description": "Open",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "h",
+      "action": "show_help",
+      "description": "Help",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "apps.config.app.ConfigApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "quit_app",
+      "description": "Quit",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "ctrl+s",
+      "action": "save_config",
+      "description": "Save",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "apps.config.dialogs._DiscardChangesModal": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "keep_editing",
+      "description": "Keep editing",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "apps.preflight_screen.PreflightScreen": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "r",
+      "action": "retry",
+      "description": "Retry",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "back",
+      "description": "Back",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "apps.record.RecordApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Switch Panel",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "q",
+      "action": "quit_app",
+      "description": "Quit",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "l",
+      "action": "rename_session",
+      "description": "Label",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "o",
+      "action": "open_session_dir",
+      "description": "Open",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "h",
+      "action": "show_help",
+      "description": "Help",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "space",
+      "action": "toggle_pause",
+      "description": "Pause/Resume",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "s",
+      "action": "stop_recording",
+      "description": "Stop",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "d",
+      "action": "force_digest",
+      "description": "Digest now",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "m",
+      "action": "toggle_mic",
+      "description": "Mute mic",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "apps.template_builder.TemplateBuilderApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "quit_app",
+      "description": "Back",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "ctrl+s",
+      "action": "save_template",
+      "description": "Save",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "apps.template_builder._ConfirmQuitScreen": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "y",
+      "action": "confirm",
+      "description": "Yes",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "n",
+      "action": "dismiss_no",
+      "description": "No",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss_no",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "apps.template_builder._SaveTemplateScreen": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "apps.transcribe.TranscribeApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Switch Panel",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "q",
+      "action": "quit_app",
+      "description": "Quit",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "l",
+      "action": "rename_session",
+      "description": "Label",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "o",
+      "action": "open_session_dir",
+      "description": "Open",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "h",
+      "action": "show_help",
+      "description": "Help",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "s",
+      "action": "stop_transcription",
+      "description": "Stop",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "d",
+      "action": "force_digest",
+      "description": "Digest now",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "apps.view.ViewApp": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Switch Panel",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "q",
+      "action": "quit_app",
+      "description": "Quit",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "o",
+      "action": "open_session_dir",
+      "description": "Open",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "pickers.base.SearchablePicker": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "q",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "enter",
+      "action": "select_item",
+      "description": "Select",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "pickers.file_picker.FilePicker": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "q",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "enter",
+      "action": "select_item",
+      "description": "Select",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "backspace",
+      "action": "parent",
+      "description": "Parent",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "left",
+      "action": "parent",
+      "description": "Parent",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "right",
+      "action": "enter_dir",
+      "description": "Enter dir",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "pickers.template_picker._ConfirmDeleteScreen": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "y",
+      "action": "confirm",
+      "description": "Yes",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "n",
+      "action": "dismiss_no",
+      "description": "No",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss_no",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "left",
+      "action": "app.focus_previous",
+      "description": "Focus previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "right",
+      "action": "app.focus_next",
+      "description": "Focus next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "pickers.welcome_picker.WelcomePicker": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    },
+    {
+      "key": "q",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "enter",
+      "action": "select_mode",
+      "description": "Select",
+      "show": true,
+      "key_display": null,
+      "priority": true
+    }
+  ],
+  "widgets.builtin_templates_notice.BuiltinTemplatesNotice": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss",
+      "description": "Close",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.consent_notice.ConsentNotice": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss",
+      "description": "Close",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.digest_panel.DigestPanel": [
+    {
+      "key": "c",
+      "action": "copy_content",
+      "description": "Copy",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "up",
+      "action": "scroll_up",
+      "description": "Scroll up",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "down",
+      "action": "scroll_down",
+      "description": "Scroll down",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "pageup",
+      "action": "page_up",
+      "description": "Page up",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "pagedown",
+      "action": "page_down",
+      "description": "Page down",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "home",
+      "action": "scroll_home",
+      "description": "Home",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "end",
+      "action": "scroll_end",
+      "description": "End",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.help_modal.HelpModal": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss",
+      "description": "Close",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "h",
+      "action": "dismiss",
+      "description": "Close",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.label_modal.LabelModal": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "cancel",
+      "description": "Cancel",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.query_modal.QueryModal": [
+    {
+      "key": "tab",
+      "action": "app.focus_next",
+      "description": "Focus Next",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "shift+tab",
+      "action": "app.focus_previous",
+      "description": "Focus Previous",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "super+c",
+      "action": "screen.copy_text",
+      "description": "Copy selected text",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "escape",
+      "action": "dismiss",
+      "description": "Close",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "c",
+      "action": "copy_body",
+      "description": "Copy",
+      "show": true,
+      "key_display": null,
+      "priority": false
+    }
+  ],
+  "widgets.transcript_panel.TranscriptPanel": [
+    {
+      "key": "up",
+      "action": "scroll_up",
+      "description": "Scroll Up",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "down",
+      "action": "scroll_down",
+      "description": "Scroll Down",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "left",
+      "action": "scroll_left",
+      "description": "Scroll Left",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "right",
+      "action": "scroll_right",
+      "description": "Scroll Right",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "home",
+      "action": "scroll_home",
+      "description": "Scroll Home",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "end",
+      "action": "scroll_end",
+      "description": "Scroll End",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "pageup",
+      "action": "page_up",
+      "description": "Page Up",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "pagedown",
+      "action": "page_down",
+      "description": "Page Down",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+pageup",
+      "action": "page_left",
+      "description": "Page Left",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "ctrl+pagedown",
+      "action": "page_right",
+      "description": "Page Right",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    },
+    {
+      "key": "c",
+      "action": "copy_content",
+      "description": "Copy",
+      "show": false,
+      "key_display": null,
+      "priority": false
+    }
+  ]
+}

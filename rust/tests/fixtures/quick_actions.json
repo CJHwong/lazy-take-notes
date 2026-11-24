@@ -1,0 +1,464 @@
+[
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease list all blockers, including who raised them, their impact, and suggested resolution.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current standup summary:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease list all blockers, including who raised them, their impact, and suggested resolution.\n"
+ },
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease list all blockers, including who raised them, their impact, and suggested resolution.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current standup summary:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease list all blockers, including who raised them, their impact, and suggested resolution.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease list which members have reported and which have not yet reported.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current standup summary:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease list which members have reported and which have not yet reported.\n"
+ },
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease list which members have reported and which have not yet reported.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current standup summary:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease list which members have reported and which have not yet reported.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nThe standup has been running for a while. Based on the current progress, please provide brief time management advice: how many people have not yet reported, and whether the current pace is on track.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current standup summary:\n(no digest yet)\n\nThe standup has been running for a while. Based on the current progress, please provide brief time management advice: how many people have not yet reported, and whether the current pace is on track.\n"
+ },
+ {
+  "prompt_template": "Here is the current standup summary:\n{digest_markdown}\n\nThe standup has been running for a while. Based on the current progress, please provide brief time management advice: how many people have not yet reported, and whether the current pace is on track.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current standup summary:\n## Notes\n\nThe standup has been running for a while. Based on the current progress, please provide brief time management advice: how many people have not yet reported, and whether the current pace is on track.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出目前所有障礙（blockers），包含提出者、影響範圍和建議處理方式。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的站會摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請列出目前所有障礙（blockers），包含提出者、影響範圍和建議處理方式。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出目前所有障礙（blockers），包含提出者、影響範圍和建議處理方式。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的站會摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請列出目前所有障礙（blockers），包含提出者、影響範圍和建議處理方式。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出已報告和尚未報告的成員清單。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的站會摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請列出已報告和尚未報告的成員清單。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出已報告和尚未報告的成員清單。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的站會摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請列出已報告和尚未報告的成員清單。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n站會已進行了一段時間。請根據目前進度提供簡短的時間管理建議：還有多少人未報告、目前節奏是否合適。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的站會摘要：\n(no digest yet)\n\n站會已進行了一段時間。請根據目前進度提供簡短的時間管理建議：還有多少人未報告、目前節奏是否合適。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的站會摘要：\n{digest_markdown}\n\n站會已進行了一段時間。請根據目前進度提供簡短的時間管理建議：還有多少人未報告、目前節奏是否合適。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的站會摘要：\n## Notes\n\n站會已進行了一段時間。請根據目前進度提供簡短的時間管理建議：還有多少人未報告、目前節奏是否合適。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing the current situation.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current meeting summary:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease give me 3-5 key points summarizing the current situation.\n"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing the current situation.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current meeting summary:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease give me 3-5 key points summarizing the current situation.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nPlease list all current action items, including the assignee (if known) and rationale.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current meeting summary:\n(no digest yet)\n\nPlease list all current action items, including the assignee (if known) and rationale.\n"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nPlease list all current action items, including the assignee (if known) and rationale.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current meeting summary:\n## Notes\n\nPlease list all current action items, including the assignee (if known) and rationale.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nPlease provide a brief paragraph (50-100 words) summarizing the meeting progress so far.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current meeting summary:\n(no digest yet)\n\nPlease provide a brief paragraph (50-100 words) summarizing the meeting progress so far.\n"
+ },
+ {
+  "prompt_template": "Here is the current meeting summary:\n{digest_markdown}\n\nPlease provide a brief paragraph (50-100 words) summarizing the meeting progress so far.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current meeting summary:\n## Notes\n\nPlease provide a brief paragraph (50-100 words) summarizing the meeting progress so far.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請用 3-5 個重點簡潔告訴我目前狀況，使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n請列出目前所有的行動項目（action items），包含負責人（若已知）和原因。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的會議摘要：\n(no digest yet)\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的會議摘要：\n{digest_markdown}\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的會議摘要：\n## Notes\n\n請用一段話（50-100字）總結這場會議到目前為止的進展。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing what has been covered so far.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current lecture notes:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease give me 3-5 key points summarizing what has been covered so far.\n"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing what has been covered so far.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current lecture notes:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease give me 3-5 key points summarizing what has been covered so far.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nPlease list every definition introduced in this lecture, formatted as a clean glossary.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current lecture notes:\n(no digest yet)\n\nPlease list every definition introduced in this lecture, formatted as a clean glossary.\n"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nPlease list every definition introduced in this lecture, formatted as a clean glossary.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current lecture notes:\n## Notes\n\nPlease list every definition introduced in this lecture, formatted as a clean glossary.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nBased on what the lecturer emphasized, what should I focus on for the exam? Include specific concepts, definitions, and examples.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current lecture notes:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nBased on what the lecturer emphasized, what should I focus on for the exam? Include specific concepts, definitions, and examples.\n"
+ },
+ {
+  "prompt_template": "Here are the current lecture notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nBased on what the lecturer emphasized, what should I focus on for the exam? Include specific concepts, definitions, and examples.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current lecture notes:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nBased on what the lecturer emphasized, what should I focus on for the exam? Include specific concepts, definitions, and examples.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前已涵蓋的內容。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的課堂筆記：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請用 3-5 個重點簡潔告訴我目前已涵蓋的內容。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前已涵蓋的內容。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的課堂筆記：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請用 3-5 個重點簡潔告訴我目前已涵蓋的內容。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n請列出這堂課中所有出現的定義，整理成術語表格式。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的課堂筆記：\n(no digest yet)\n\n請列出這堂課中所有出現的定義，整理成術語表格式。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n請列出這堂課中所有出現的定義，整理成術語表格式。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的課堂筆記：\n## Notes\n\n請列出這堂課中所有出現的定義，整理成術語表格式。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n根據講者強調的重點，我應該為考試準備哪些內容？請列出具體的概念、定義和範例。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的課堂筆記：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n根據講者強調的重點，我應該為考試準備哪些內容？請列出具體的概念、定義和範例。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的課堂筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n根據講者強調的重點，我應該為考試準備哪些內容？請列出具體的概念、定義和範例。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的課堂筆記：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n根據講者強調的重點，我應該為考試準備哪些內容？請列出具體的概念、定義和範例。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing what has been discussed so far.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current show notes:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease give me 3-5 key points summarizing what has been discussed so far.\n"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease give me 3-5 key points summarizing what has been discussed so far.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current show notes:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease give me 3-5 key points summarizing what has been discussed so far.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nList the most quotable moments so far, attributed to the speaker.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current show notes:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nList the most quotable moments so far, attributed to the speaker.\n"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nList the most quotable moments so far, attributed to the speaker.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current show notes:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nList the most quotable moments so far, attributed to the speaker.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nPlease list every book, article, tool, website, person, or resource mentioned in this episode, with context for why it came up.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here are the current show notes:\n(no digest yet)\n\nPlease list every book, article, tool, website, person, or resource mentioned in this episode, with context for why it came up.\n"
+ },
+ {
+  "prompt_template": "Here are the current show notes:\n{digest_markdown}\n\nPlease list every book, article, tool, website, person, or resource mentioned in this episode, with context for why it came up.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here are the current show notes:\n## Notes\n\nPlease list every book, article, tool, website, person, or resource mentioned in this episode, with context for why it came up.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前討論了哪些內容。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的節目筆記：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請用 3-5 個重點簡潔告訴我目前討論了哪些內容。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用 3-5 個重點簡潔告訴我目前討論了哪些內容。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的節目筆記：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請用 3-5 個重點簡潔告訴我目前討論了哪些內容。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出目前最值得引用的精彩發言，並註明講者。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的節目筆記：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請列出目前最值得引用的精彩發言，並註明講者。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請列出目前最值得引用的精彩發言，並註明講者。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的節目筆記：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請列出目前最值得引用的精彩發言，並註明講者。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n請列出這集節目中提及的所有書籍、文章、工具、網站、人物或資源，並附上提及的脈絡。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的節目筆記：\n(no digest yet)\n\n請列出這集節目中提及的所有書籍、文章、工具、網站、人物或資源，並附上提及的脈絡。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的節目筆記：\n{digest_markdown}\n\n請列出這集節目中提及的所有書籍、文章、工具、網站、人物或資源，並附上提及的脈絡。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的節目筆記：\n## Notes\n\n請列出這集節目中提及的所有書籍、文章、工具、網站、人物或資源，並附上提及的脈絡。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease summarize the three retro categories: what went well, what needs improvement, and action items.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current retro summary:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nPlease summarize the three retro categories: what went well, what needs improvement, and action items.\n"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nPlease summarize the three retro categories: what went well, what needs improvement, and action items.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current retro summary:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nPlease summarize the three retro categories: what went well, what needs improvement, and action items.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nPlease list all action items, including assignee (if known), specific commitment, and expected completion timeline.\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current retro summary:\n(no digest yet)\n\nPlease list all action items, including assignee (if known), specific commitment, and expected completion timeline.\n"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nPlease list all action items, including assignee (if known), specific commitment, and expected completion timeline.\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current retro summary:\n## Notes\n\nPlease list all action items, including assignee (if known), specific commitment, and expected completion timeline.\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nIdentify recurring themes across the retrospective. What topics came up multiple times? Are there systemic issues behind individual complaints?\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "Here is the current retro summary:\n(no digest yet)\n\nAnd the recent transcript:\n(no transcript yet)\n\nIdentify recurring themes across the retrospective. What topics came up multiple times? Are there systemic issues behind individual complaints?\n"
+ },
+ {
+  "prompt_template": "Here is the current retro summary:\n{digest_markdown}\n\nAnd the recent transcript:\n{recent_transcript}\n\nIdentify recurring themes across the retrospective. What topics came up multiple times? Are there systemic issues behind individual complaints?\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "Here is the current retro summary:\n## Notes\n\nAnd the recent transcript:\na\nb\n\nIdentify recurring themes across the retrospective. What topics came up multiple times? Are there systemic issues behind individual complaints?\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用重點摘要目前回顧的三大類別：做得好、待改善、改善行動。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的回顧摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請用重點摘要目前回顧的三大類別：做得好、待改善、改善行動。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請用重點摘要目前回顧的三大類別：做得好、待改善、改善行動。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的回顧摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請用重點摘要目前回顧的三大類別：做得好、待改善、改善行動。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n請列出目前所有的改善行動（action items），包含負責人（若已知）、具體承諾和預期完成時間。使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的回顧摘要：\n(no digest yet)\n\n請列出目前所有的改善行動（action items），包含負責人（若已知）、具體承諾和預期完成時間。使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n請列出目前所有的改善行動（action items），包含負責人（若已知）、具體承諾和預期完成時間。使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的回顧摘要：\n## Notes\n\n請列出目前所有的改善行動（action items），包含負責人（若已知）、具體承諾和預期完成時間。使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請辨識回顧中重複出現的主題。哪些議題被多次提起？個別問題背後是否有系統性的根本原因？使用繁體中文。\n",
+  "digest": "",
+  "recent": "",
+  "user_context": "",
+  "out": "以下是目前的回顧摘要：\n(no digest yet)\n\n以及最近的逐字稿：\n(no transcript yet)\n\n請辨識回顧中重複出現的主題。哪些議題被多次提起？個別問題背後是否有系統性的根本原因？使用繁體中文。\n"
+ },
+ {
+  "prompt_template": "以下是目前的回顧摘要：\n{digest_markdown}\n\n以及最近的逐字稿：\n{recent_transcript}\n\n請辨識回顧中重複出現的主題。哪些議題被多次提起？個別問題背後是否有系統性的根本原因？使用繁體中文。\n",
+  "digest": "## Notes",
+  "recent": "a\nb",
+  "user_context": "Huss = Hoss",
+  "out": "以下是目前的回顧摘要：\n## Notes\n\n以及最近的逐字稿：\na\nb\n\n請辨識回顧中重複出現的主題。哪些議題被多次提起？個別問題背後是否有系統性的根本原因？使用繁體中文。\n\n\nUser corrections and context:\nHuss = Hoss"
+ }
+]

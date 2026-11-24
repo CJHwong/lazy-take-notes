@@ -1,0 +1,1454 @@
+[
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete standup summary.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "Standup has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final standup summary. This is the last update, and the summary must fully reflect the entire standup:\n1. Move \"Currently Reporting\" content to \"Reported Members\".\n2. Confirm that all members' updates are recorded under \"Reported Members\".\n3. Review all \"Blockers & Open Items\" — check whether any were resolved during the standup.\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整站會摘要。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "daily_standup_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "站會已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終站會摘要。這是最後一次更新，摘要必須完整反映整場站會全貌：\n1. 將「目前報告」的內容畢業至「已報告成員」。\n2. 確認所有成員的報告都已記錄在「已報告成員」中。\n3. 檢視所有「障礙與待釐清」，確認是否有在站會中被解決的。\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete meeting summary.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "Meeting has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final meeting summary. This is the last update, and the summary must fully reflect the entire meeting:\n1. Graduate \"Current Topic\" content to \"Completed Topics\" (if no conclusion, mark resolution as \"unresolved\").\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question can be answered from the transcript, integrate the answer into the corresponding \"Completed Topics\", and remove from open questions. If a question stems from speech recognition errors or misunderstanding, remove it. Only keep questions that genuinely cannot be answered from the transcript.\n3. Similarly review \"Suggested Actions\": remove suggestions that are no longer relevant or based on misunderstanding, keep those that still have value.\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_min_nan",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整會議摘要。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "default_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終會議摘要。這是最後一次更新，摘要必須完整反映整場會議全貌：\n1. 將「目前議題」的內容畢業至「已結案議題」（若無結論則標註「未決」）。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題可從逐字稿中找到答案，將答案整合進對應的「已結案議題」，並移除。若問題源於語音辨識錯誤或誤解，直接移除。僅保留逐字稿中確實無法回答的問題。\n3. 同樣檢視「建議行動」：移除已無意義或基於誤解的建議，保留仍有價值的。\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the lecture notes.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "Lecture has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final lecture notes. This is the last update, and the notes must fully reflect the entire lecture:\n1. Move \"Current Topic\" content into the appropriate \"Key Concepts\" subsection.\n2. Review all \"Open Questions\": cross-validate with the full transcript. If a question was answered later in the lecture, integrate the answer into the relevant section and remove the question. Only keep questions that genuinely remain unanswered.\n3. Ensure all definitions, examples, and exam hints are captured completely.\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新課堂筆記。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "lecture_notes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "課堂已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終課堂筆記。這是最後一次更新，筆記必須完整反映整堂課的內容：\n1. 將「目前主題」的內容移至適當的「核心概念」子區塊。\n2. 重新檢視所有「待釐清問題」：利用完整逐字稿交叉驗證，若問題在後續課堂中已被回答，將答案整合進相關章節並移除該問題。僅保留確實未被回答的問題。\n3. 確認所有定義、範例和考試重點都已完整擷取。\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the show notes.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "Recording has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final show notes. This is the last update, and the notes must fully reflect the entire episode:\n1. Write a polished Episode Summary that covers the full arc of the conversation.\n2. Review all Topics Discussed — ensure nothing was lost from earlier segments and that each topic has sufficient depth.\n3. Cross-validate Resources Mentioned against the full transcript to catch any that were missed.\n4. Select the best Notable Quotes — keep the most impactful ones, remove any that are redundant or low-value.\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新節目筆記。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "podcast_shownotes_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "錄音已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終節目筆記。這是最後一次更新，筆記必須完整反映整集節目：\n1. 撰寫涵蓋整集對話主軸的精修節目摘要。\n2. 檢視所有討論主題 — 確認沒有遺漏先前片段的內容，且每個主題都有足夠深度。\n3. 利用完整逐字稿交叉驗證提及資源，補上任何遺漏的資源。\n4. 精選最佳精彩語錄 — 保留最有影響力的，移除重複或價值較低的。\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "New transcript (2 lines):\nLine 1\n第二行 中文\n\nPlease update the complete retro summary.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\n(no full transcript)\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_en",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "Retrospective has ended. Final transcript (2 lines):\nLine 1\n第二行 中文\n\n---\n\nFull transcript (for cross-validation):\nFull session text\n\n---\n\nPlease produce the final retro summary. This is the last update, and the summary must fully reflect the entire retrospective:\n1. Move \"Current Discussion\" content to \"What Went Well\" or \"Action Items\" as appropriate (if no concrete commitment, move to \"Open Items\").\n2. Confirm that all action items have concrete commitments and assignees where possible.\n3. Review \"Open Items\" — remove any that were resolved during discussion.\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": false,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "新逐字稿（2 行）：\nLine 1\n第二行 中文\n\n請更新完整回顧摘要。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "",
+  "full_transcript": "Full session text",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "John = speaker A\n  ",
+  "full_transcript": "Full session text",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\nUser corrections and additions:\nJohn = speaker A\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\n(no full transcript)\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ },
+ {
+  "template": "sprint_retro_zh_tw",
+  "buffer": [
+   "Line 1",
+   "第二行 中文"
+  ],
+  "is_final": true,
+  "user_context": "   \n  ",
+  "full_transcript": "Full session text",
+  "out": "回顧會議已結束。最終逐字稿（2 行）：\nLine 1\n第二行 中文\n\n---\n\n完整逐字稿（供交叉驗證）：\nFull session text\n\n---\n\n請產出最終回顧摘要。這是最後一次更新，摘要必須完整反映整場回顧全貌：\n1. 將「目前討論」的內容移至「做得好」或「改善行動」（若無具體承諾則移至「待釐清」）。\n2. 確認所有改善行動都有具體承諾，且盡可能附上負責人。\n3. 檢視「待釐清」，移除已在討論中解決的問題。\n"
+ }
+]

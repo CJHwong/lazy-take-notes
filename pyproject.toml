@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lazy-take-notes"
-version = "0.1.0"
+version = "0.2.0"
 description = "live transcription & AI summaries in your terminal."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -45,8 +45,9 @@ dependencies = [
 ]
 
 [project.scripts]
-take-note = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
-lazy-take-notes = "lazy_take_notes.l4_frameworks_and_drivers.cli:cli"
+take-note = "lazy_take_notes.launcher:main"
+lazy-take-notes = "lazy_take_notes.launcher:main"
+lazy-take-notes-plugin-host = "lazy_take_notes.plugin_host:main"
 
 [project.urls]
 Homepage = "https://github.com/CJHwong/lazy-take-notes"

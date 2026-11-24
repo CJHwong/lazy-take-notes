@@ -1,0 +1,442 @@
+//! Re-run diarization over the recording as it grows.
+
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use tracing::{info, warn};
+
+use crate::adapters::audio::wav::snapshot;
+use crate::app::events::{Cancel, Event, Nudge, Poster};
+use crate::domain::speaker_turn::SpeakerTurn;
+use crate::ports::diarizer::Diarizer;
+
+/// New audio below this size does not start a pass.
+const MIN_GROWTH_BYTES: u64 = 1024;
+
+pub struct DiarizationTiming {
+    pub interval: Duration,
+    pub timeout: Duration,
+}
+
+impl Default for DiarizationTiming {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_secs(60),
+            timeout: Duration::from_secs(300),
+        }
+    }
+}
+
+/// One full pass per interval, over the audio recorded so far.
+///
+/// Speaker numbers follow arrival order, so labels already on screen stay valid
+/// when a new voice joins. `audio_path` is asked each pass, so a renamed session
+/// folder is followed. A failed pass is skipped: one bad pass must not end the session.
+///
+/// `finish` says the recording is complete: one last pass covers whatever the
+/// earlier passes did not, then `DiarizationFinished` is posted. `cancel` stops
+/// at once, with no last pass (a shutdown). `now` asks for a pass at once over
+/// any new audio (a pause), and the interval starts again after it.
+pub fn run_diarization_worker(
+    poster: &Poster,
+    cancel: &Cancel,
+    finish: &Cancel,
+    now: &Nudge,
+    audio_path: &dyn Fn() -> PathBuf,
+    diarizer: &dyn Diarizer,
+    timing: &DiarizationTiming,
+) {
+    let mut processed: Option<u64> = None;
+    let size_of = |path: &PathBuf| {
+        std::fs::metadata(path)
+            .ok()
+            .filter(std::fs::Metadata::is_file)
+            .map(|meta| meta.len())
+    };
+    while !cancel.is_cancelled() {
+        let last = finish.is_cancelled();
+        let path = audio_path();
+        // A pass asked for (a pause, the stop) takes any new audio; a timed one
+        // waits for a real gain.
+        let asked = now.take() || last;
+        let growth = if asked { 0 } else { MIN_GROWTH_BYTES };
+        if let Some(size) =
+            size_of(&path).filter(|&size| processed.is_none_or(|done| size > done + growth))
+        {
+            if last {
+                info!(target: "ltn.diarize", "last diarization pass over the whole recording");
+            }
+            run_pass(poster, diarizer, &path, timing.timeout);
+            processed = Some(size);
+        }
+        if last {
+            if !cancel.is_cancelled() {
+                poster.post(Event::DiarizationFinished);
+            }
+            return;
+        }
+        let deadline = Instant::now() + timing.interval;
+        while !cancel.is_cancelled()
+            && !finish.is_cancelled()
+            && !now.is_set()
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+}
+
+fn run_pass(poster: &Poster, diarizer: &dyn Diarizer, path: &std::path::Path, timeout: Duration) {
+    poster.post(Event::DiarizationStatus { active: true });
+    let result = diarize_snapshot(diarizer, path, timeout);
+    poster.post(Event::DiarizationStatus { active: false });
+    match result {
+        Err(e) => warn!(target: "ltn.diarize", "diarization pass failed: {e}"),
+        Ok(turns) if turns.is_empty() => {}
+        Ok(turns) => {
+            let speakers: BTreeSet<u32> = turns.iter().map(|t| t.speaker).collect();
+            info!(target: "ltn.diarize", "diarization pass: {} turns, {} speakers", turns.len(), speakers.len());
+            poster.post(Event::SpeakerTurns(turns));
+        }
+    }
+}
+
+/// The recorder may be between a data write and its header write, so the
+/// diarizer reads a copy with matching sizes, never the live file.
+pub(crate) fn diarize_snapshot(
+    diarizer: &dyn Diarizer,
+    path: &std::path::Path,
+    timeout: Duration,
+) -> Result<Vec<SpeakerTurn>, String> {
+    let workdir = tempfile::tempdir().map_err(|e| format!("no folder for the audio copy: {e}"))?;
+    let copy = workdir.path().join("recording.wav");
+    snapshot(path, &copy).map_err(|e| format!("could not copy {}: {e}", path.display()))?;
+    diarizer.diarize(&copy, timeout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    struct Scripted {
+        replies: Mutex<Vec<Result<Vec<SpeakerTurn>, String>>>,
+        calls: Mutex<u32>,
+        cancel: Cancel,
+    }
+
+    impl Diarizer for Scripted {
+        fn diarize(&self, _path: &Path, _timeout: Duration) -> Result<Vec<SpeakerTurn>, String> {
+            *self.calls.lock().unwrap() += 1;
+            let mut replies = self.replies.lock().unwrap();
+            let reply = replies.remove(0);
+            if replies.is_empty() {
+                self.cancel.cancel();
+            }
+            reply
+        }
+    }
+
+    fn drained(events: &mut tokio::sync::mpsc::UnboundedReceiver<Event>) -> Vec<Event> {
+        std::iter::from_fn(|| events.try_recv().ok()).collect()
+    }
+
+    /// A recording WAV header with `size - 44` bytes of silence after it.
+    fn recording(path: &Path, size: usize) {
+        let data = (size - 44) as u32;
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend((36 + data).to_le_bytes());
+        bytes.extend(b"WAVEfmt ");
+        bytes.extend([
+            16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 2, 0, 16, 0,
+        ]);
+        bytes.extend(b"data");
+        bytes.extend(data.to_le_bytes());
+        bytes.resize(size, 0);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn turn(speaker: u32) -> SpeakerTurn {
+        SpeakerTurn {
+            start: 0.0,
+            end: 1.0,
+            speaker,
+        }
+    }
+
+    #[test]
+    fn a_failed_pass_is_skipped_and_the_next_one_posts() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        let cancel = Cancel::default();
+        let diarizer = Scripted {
+            replies: Mutex::new(vec![Err("bad json".into()), Ok(vec![turn(0), turn(1)])]),
+            calls: Mutex::new(0),
+            cancel: cancel.clone(),
+        };
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let grows = Mutex::new(0usize);
+        let path = || {
+            let mut size = grows.lock().unwrap();
+            *size += 2048;
+            recording(&wav, *size);
+            wav.clone()
+        };
+        let timing = DiarizationTiming {
+            interval: Duration::ZERO,
+            timeout: Duration::from_secs(1),
+        };
+        let finish = Cancel::default();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(*diarizer.calls.lock().unwrap(), 2);
+        let (start, end) = (
+            Event::DiarizationStatus { active: true },
+            Event::DiarizationStatus { active: false },
+        );
+        // Each pass says it runs, the failed one included.
+        assert_eq!(
+            drained(&mut events),
+            [
+                start.clone(),
+                end.clone(),
+                start,
+                end,
+                Event::SpeakerTurns(vec![turn(0), turn(1)])
+            ]
+        );
+    }
+
+    #[test]
+    fn no_pass_runs_until_the_recording_grows() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        recording(&wav, 4096);
+        let cancel = Cancel::default();
+        let diarizer = Scripted {
+            replies: Mutex::new(vec![Ok(vec![turn(0)]), Ok(vec![turn(0)])]),
+            calls: Mutex::new(0),
+            cancel: cancel.clone(),
+        };
+        let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+        let passes = Mutex::new(0);
+        let path = || {
+            let mut count = passes.lock().unwrap();
+            *count += 1;
+            if *count == 4 {
+                cancel.cancel();
+            }
+            wav.clone()
+        };
+        let timing = DiarizationTiming {
+            interval: Duration::ZERO,
+            timeout: Duration::from_secs(1),
+        };
+        let finish = Cancel::default();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(
+            *diarizer.calls.lock().unwrap(),
+            1,
+            "the same size runs once"
+        );
+    }
+
+    /// A diarizer that answers every call and counts them.
+    struct Steady(Mutex<u32>);
+
+    impl Diarizer for Steady {
+        fn diarize(&self, _path: &Path, _timeout: Duration) -> Result<Vec<SpeakerTurn>, String> {
+            *self.0.lock().unwrap() += 1;
+            Ok(vec![turn(0)])
+        }
+    }
+
+    #[test]
+    fn finish_runs_one_last_pass_over_new_audio_then_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        recording(&wav, 4096);
+        let (cancel, finish) = (Cancel::default(), Cancel::default());
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let calls = Mutex::new(0);
+        let path = || {
+            let mut count = calls.lock().unwrap();
+            *count += 1;
+            if *count == 2 {
+                // A tail smaller than a running pass waits for, then the stop.
+                recording(&wav, 4096 + 100);
+                finish.cancel();
+            }
+            wav.clone()
+        };
+        let timing = DiarizationTiming {
+            interval: Duration::ZERO,
+            timeout: Duration::from_secs(1),
+        };
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(*diarizer.0.lock().unwrap(), 2, "the tail got its own pass");
+        let pass = [
+            Event::DiarizationStatus { active: true },
+            Event::DiarizationStatus { active: false },
+            Event::SpeakerTurns(vec![turn(0)]),
+        ];
+        let mut expected = [pass.clone(), pass].concat();
+        expected.push(Event::DiarizationFinished);
+        assert_eq!(drained(&mut events), expected);
+    }
+
+    #[test]
+    fn finish_with_nothing_new_still_says_it_is_done_and_cancel_says_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        let (cancel, finish) = (Cancel::default(), Cancel::default());
+        finish.cancel();
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, mut events) = tokio::sync::mpsc::unbounded_channel();
+        let path = || wav.clone();
+        let timing = DiarizationTiming::default();
+        run_diarization_worker(
+            &Poster::new(sender.clone()),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert_eq!(*diarizer.0.lock().unwrap(), 0, "no recording, no pass");
+        assert_eq!(events.try_recv().unwrap(), Event::DiarizationFinished);
+        cancel.cancel();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &path,
+            &diarizer,
+            &timing,
+        );
+        assert!(events.try_recv().is_err());
+    }
+
+    /// Records the data size and the file length of the WAV it is given.
+    struct Measures(Mutex<Vec<(u64, u64)>>);
+
+    impl Diarizer for Measures {
+        fn diarize(&self, path: &Path, _timeout: Duration) -> Result<Vec<SpeakerTurn>, String> {
+            let raw = std::fs::read(path).unwrap();
+            let declared = u64::from(u32::from_le_bytes(raw[40..44].try_into().unwrap()));
+            self.0
+                .lock()
+                .unwrap()
+                .push((declared, raw.len() as u64 - 44));
+            Ok(vec![])
+        }
+    }
+
+    #[test]
+    fn a_pass_reads_a_copy_whose_header_matches_audio_the_recorder_has_not_announced() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        recording(&wav, 4096);
+        // A chunk on disk before its header update: the declared size is 3200 short.
+        let mut raw = std::fs::read(&wav).unwrap();
+        raw[40..44].copy_from_slice(&(4096u32 - 44 - 3200).to_le_bytes());
+        std::fs::write(&wav, &raw).unwrap();
+        let (cancel, finish) = (Cancel::default(), Cancel::default());
+        finish.cancel();
+        let diarizer = Measures(Mutex::new(vec![]));
+        let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+        run_diarization_worker(
+            &Poster::new(sender),
+            &cancel,
+            &finish,
+            &Nudge::default(),
+            &|| wav.clone(),
+            &diarizer,
+            &DiarizationTiming::default(),
+        );
+        assert_eq!(*diarizer.0.lock().unwrap(), [(4096 - 44, 4096 - 44)]);
+        assert_eq!(
+            std::fs::read(&wav).unwrap(),
+            raw,
+            "the live file is left alone"
+        );
+    }
+
+    #[test]
+    fn a_nudge_runs_a_pass_at_once_over_any_new_audio_and_only_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        recording(&wav, 4096);
+        let (cancel, finish, now) = (Cancel::default(), Cancel::default(), Nudge::default());
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+        let calls = || *diarizer.0.lock().unwrap();
+        let wait_for = |count: u32| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while calls() < count && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            calls()
+        };
+        let (first, after_pause, after_second, still_set) = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                run_diarization_worker(
+                    &Poster::new(sender),
+                    &cancel,
+                    &finish,
+                    &now,
+                    &|| wav.clone(),
+                    &diarizer,
+                    &DiarizationTiming::default(),
+                );
+            });
+            let first = wait_for(1);
+            // Less new audio than a timed pass waits for, then a pause.
+            recording(&wav, 4096 + 100);
+            now.nudge();
+            let after_pause = wait_for(2);
+            // A second pause with nothing new runs no pass, and takes the request.
+            now.nudge();
+            std::thread::sleep(Duration::from_millis(500));
+            let still_set = now.is_set();
+            // Stop before any assert: a failed one must not leave the scope waiting.
+            cancel.cancel();
+            (first, after_pause, calls(), still_set)
+        });
+        assert_eq!(first, 1, "the first pass runs at the start");
+        assert_eq!(
+            after_pause, 2,
+            "the pause runs a pass long before the 60 s interval"
+        );
+        assert_eq!(after_second, 2, "nothing new, no pass");
+        assert!(!still_set, "the worker took the request");
+    }
+}

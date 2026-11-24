@@ -1,0 +1,789 @@
+[
+  {
+    "name": "no_file",
+    "config": null,
+    "edits": [],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": false,
+    "saved_file": "llm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmpjllcbayr/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "empty_file",
+    "config": "{}\n",
+    "edits": [],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": false,
+    "saved_file": "llm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp59gk7gs3/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "remove_zh_override",
+    "config": null,
+    "edits": [
+      [
+        "remove_language",
+        "zh"
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": "llm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n    zh: null\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp32mk1qjq/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "blank_max_lines",
+    "config": "digest:\n  max_lines: 40\n",
+    "edits": [
+      [
+        "input",
+        "cfg-digest-max-lines",
+        ""
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000,
+        "max_lines": 40
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": "digest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\nllm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmpzipf2eqk/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "api_key_kept",
+    "config": "openai:\n  api_key: stub-key\n",
+    "edits": [],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "stub-key"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": false,
+    "saved_file": "openai:\n  api_key: stub-key\n  base_url: https://api.openai.com/v1\nllm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp2l_c8c3o/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "api_key_emptied",
+    "config": "openai:\n  api_key: stub-key\n",
+    "edits": [
+      [
+        "input",
+        "cfg-openai-api-key",
+        ""
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "stub-key"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": "openai:\n  api_key: stub-key\n  base_url: https://api.openai.com/v1\nllm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp9g145axs/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "api_key_cleared",
+    "config": "openai:\n  api_key: stub-key\n",
+    "edits": [
+      [
+        "press",
+        "cfg-openai-clear-key"
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "api_key": "stub-key"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": "openai:\n  api_key: null\n  base_url: https://api.openai.com/v1\nllm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "The stored key is removed on save.",
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmpyi9k8gu1/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "custom_model_path",
+    "config": null,
+    "edits": [
+      [
+        "input",
+        "cfg-trans-custom-path",
+        "/tmp/ltn-settings-fixture/model.bin"
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": "llm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: /tmp/ltn-settings-fixture/model.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp_e8l4xla/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "theme_nord",
+    "config": "theme: nord\nllm_provider: openai\n",
+    "edits": [],
+    "opened": {
+      "llm_provider": "openai",
+      "transcription_provider": "whisper-cpp",
+      "theme": "nord",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": false,
+    "saved_file": "theme: nord\nllm_provider: openai\ntranscription_provider: whisper-cpp\nshow_builtin_templates: true\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 25.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 15\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: auto\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: false\n  auto_label: true\nrecognition_hints: []\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmp5e0lkgp2/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "many_fields",
+    "config": "recognition_hints:\n- Kubernetes\n- GoFreight\nplugin_key:\n  kept: true\n",
+    "edits": [
+      [
+        "input",
+        "cfg-digest-min-lines",
+        "20"
+      ],
+      [
+        "input",
+        "cfg-trans-chunk",
+        "30"
+      ],
+      [
+        "switch",
+        "cfg-output-save-debug-log",
+        true
+      ],
+      [
+        "switch",
+        "cfg-show-builtin-templates",
+        false
+      ],
+      [
+        "select",
+        "cfg-diarization-device",
+        "cpu"
+      ],
+      [
+        "textarea",
+        "cfg-recognition-hints",
+        "Kubernetes\n\n  Rust  \n"
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": [
+        "Kubernetes",
+        "GoFreight"
+      ]
+    },
+    "unsaved_before_save": true,
+    "saved_file": "recognition_hints:\n- Kubernetes\n- Rust\nplugin_key:\n  kept: true\nllm_provider: ollama\ntranscription_provider: whisper-cpp\ntheme: textual-dark\nshow_builtin_templates: false\nollama:\n  host: http://localhost:11434\nopenai:\n  base_url: https://api.openai.com/v1\ntranscription:\n  model: hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin\n  models:\n    zh: hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin\n    zh-min-nan: hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin\n  input_device: null\n  chunk_duration: 30.0\n  overlap: 1.0\n  silence_threshold: 0.01\n  pause_duration: 1.5\ndigest:\n  model: gpt-oss:20b\n  min_lines: 20\n  min_interval: 60.0\n  compact_token_threshold: 100000\ndiarization:\n  enabled: false\n  binary: ''\n  model: ''\n  device: cpu\n  interval_s: 60.0\ninteractive:\n  model: gpt-oss:20b\noutput:\n  directory: ~/Documents/LazyTakeNotes\n  save_audio: true\n  save_notes_history: true\n  save_context: true\n  save_debug_log: true\n  auto_label: true\n",
+    "toasts": [
+      "Saved to /var/folders/gc/p9h0jlnj70d50mbpvdwbz3wc0000gn/T/tmpdk_y3znu/Library/Application Support/lazy-take-notes/config.yaml"
+    ]
+  },
+  {
+    "name": "bad_number",
+    "config": null,
+    "edits": [
+      [
+        "input",
+        "cfg-trans-silence",
+        "2"
+      ],
+      [
+        "input",
+        "cfg-digest-min-lines",
+        "x"
+      ]
+    ],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": true,
+    "saved_file": null,
+    "toasts": [
+      "Silence threshold must be at most 1.0.\nAfter lines must be a number."
+    ]
+  },
+  {
+    "name": "unreadable_yaml",
+    "config": "a: [\n",
+    "edits": [],
+    "opened": {
+      "llm_provider": "ollama",
+      "transcription_provider": "whisper-cpp",
+      "theme": "textual-dark",
+      "show_builtin_templates": true,
+      "ollama": {
+        "host": "http://localhost:11434"
+      },
+      "openai": {
+        "base_url": "https://api.openai.com/v1"
+      },
+      "transcription": {
+        "model": "hf://ggerganov/whisper.cpp/ggml-large-v3-turbo-q8_0.bin",
+        "models": {
+          "zh": "hf://alan314159/Breeze-ASR-25-whispercpp/ggml-model-q8_0.bin",
+          "zh-min-nan": "hf://phate334/Breeze-ASR-26-GGML/ggml-model-q8_0.bin"
+        },
+        "input_device": null,
+        "chunk_duration": 25.0,
+        "overlap": 1.0,
+        "silence_threshold": 0.01,
+        "pause_duration": 1.5
+      },
+      "digest": {
+        "model": "gpt-oss:20b",
+        "min_lines": 15,
+        "min_interval": 60.0,
+        "compact_token_threshold": 100000
+      },
+      "diarization": {
+        "enabled": false,
+        "binary": "",
+        "model": "",
+        "device": "auto",
+        "interval_s": 60.0
+      },
+      "interactive": {
+        "model": "gpt-oss:20b"
+      },
+      "output": {
+        "directory": "~/Documents/LazyTakeNotes",
+        "save_audio": true,
+        "save_notes_history": true,
+        "save_context": true,
+        "save_debug_log": false,
+        "auto_label": true
+      },
+      "recognition_hints": []
+    },
+    "unsaved_before_save": false,
+    "saved_file": "a: [\n",
+    "toasts": [
+      "config.yaml cannot be read (while parsing a flow node\nexpected the node content, but found '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^). Showing defaults. Press [e] to fix the file.",
+      "Cannot save config: while parsing a flow node\nexpected the node content, but found '<stream end>'\n  in \"<unicode string>\", line 2, column 1:\n    \n    ^"
+    ]
+  }
+]
