@@ -92,6 +92,20 @@ Existing installs keep their command: setup.sh's `take-note` wrapper runs `uvx -
 - No data migration: both versions use the same config folder, cache, sessions and plugins.txt. The wrapper is not rewritten: it keeps fetching `main`, which is how users get updates.
 - The plugin host stays a Python script outside the launcher, and `plugin_api` imports no launcher code.
 
+### Two tracks (decided 2026-11-24)
+
+`v0.2.0` is pinned: Apple silicon Macs run the Rust app, and every other platform runs the Python app. Both stay until the Rust app is tested on more platforms. The Python app is not removed before then, because it is the only app those platforms have.
+
+What another platform needs, found when the switch landed:
+
+| Platform | Build | System audio | Speaker labels runtime | setup.sh |
+|---|---|---|---|---|
+| Intel Mac | `coreaudio-tap` is already universal; a `x86_64-apple-darwin` build is untried | `coreaudio-tap` | pinned | yes |
+| Linux x86_64, arm64 | `whisper-rs` always enables `metal`, which is macOS only | no backend (Python uses PulseAudio loopback through `soundcard`) | pinned | yes |
+| Windows | Unix-only code: signals, `flock`, `statvfs`, process groups | no backend (Python uses WASAPI loopback) | no NeMo build | no installer |
+
+A pinned platform also needs a `release.yml` job, a target in `package.sh`, and a key in `pin_rust_release.py`.
+
 ## Plugins
 
 Python plugins keep working: the Rust app runs them in a separate Python process, the plugin host, and talks to it in JSON. Nothing in a plugin changes.
