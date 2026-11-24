@@ -104,7 +104,7 @@ fn run_pass(poster: &Poster, diarizer: &dyn Diarizer, path: &std::path::Path, ti
 
 /// The recorder may be between a data write and its header write, so the
 /// diarizer reads a copy with matching sizes, never the live file.
-fn diarize_snapshot(
+pub(crate) fn diarize_snapshot(
     diarizer: &dyn Diarizer,
     path: &std::path::Path,
     timeout: Duration,

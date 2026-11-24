@@ -411,3 +411,93 @@ fn a_folder_that_cannot_be_removed_is_kept() {
     assert!(!dropped);
     assert!(dir.join(".status.json").exists());
 }
+
+/// Answers every pass with `turns`, or fails with `error`.
+struct FixedDiarizer(Result<Vec<lazy_take_notes::domain::speaker_turn::SpeakerTurn>, String>);
+
+impl lazy_take_notes::ports::diarizer::Diarizer for FixedDiarizer {
+    fn diarize(
+        &self,
+        _path: &Path,
+        _timeout: std::time::Duration,
+    ) -> Result<Vec<lazy_take_notes::domain::speaker_turn::SpeakerTurn>, String> {
+        self.0.clone()
+    }
+}
+
+/// A recording WAV with one second of silence.
+fn write_recording(dir: &Path) {
+    let data = 32_000u32;
+    let mut bytes = b"RIFF".to_vec();
+    bytes.extend((36 + data).to_le_bytes());
+    bytes.extend(b"WAVEfmt ");
+    bytes.extend([
+        16, 0, 0, 0, 1, 0, 1, 0, 0x80, 0x3e, 0, 0, 0, 0x7d, 0, 0, 2, 0, 16, 0,
+    ]);
+    bytes.extend(b"data");
+    bytes.extend(data.to_le_bytes());
+    bytes.resize(44 + data as usize, 0);
+    std::fs::write(dir.join("recording.wav"), bytes).unwrap();
+}
+
+fn stop_after_hello() -> Launcher {
+    script(vec![
+        status(Recording, ""),
+        chunk("hello"),
+        status(Stopped, ""),
+    ])
+}
+
+#[tokio::test]
+async fn the_speakers_are_labeled_before_the_final_digest() {
+    let s = setup("{}", true);
+    write_recording(s.dir.path());
+    let turn = lazy_take_notes::domain::speaker_turn::SpeakerTurn {
+        start: 0.0,
+        end: 1.0,
+        speaker: 1,
+    };
+    let mut session = s.session.with_diarizer(
+        Arc::new(FixedDiarizer(Ok(vec![turn]))),
+        std::time::Duration::from_secs(5),
+    );
+    session.run(stop_after_hello()).await;
+    let labeled = std::fs::read_to_string(s.dir.path().join("transcript_speakers.txt")).unwrap();
+    assert_eq!(labeled, "[00:00:00] S1: hello\n");
+    let json = std::fs::read_to_string(s.dir.path().join("speakers.json")).unwrap();
+    assert!(json.contains("\"turns\""), "{json}");
+    let prompts = s.llm.chat_calls.lock().unwrap();
+    let last = &prompts.last().expect("a final digest").1;
+    assert!(
+        last.iter()
+            .any(|message| message.content.contains("S1: hello")),
+        "the final notes carry the labels"
+    );
+    assert!(
+        s.out
+            .text()
+            .contains("… labeling speakers\n✓ transcript_speakers.txt written (1 speakers)\n"),
+        "{}",
+        s.out.text()
+    );
+}
+
+#[tokio::test]
+async fn a_failed_speaker_pass_still_writes_the_plain_notes() {
+    let s = setup("{}", true);
+    write_recording(s.dir.path());
+    let mut session = s.session.with_diarizer(
+        Arc::new(FixedDiarizer(Err("nemo-speech failed".into()))),
+        std::time::Duration::from_secs(5),
+    );
+    session.run(stop_after_hello()).await;
+    assert!(!s.dir.path().join("transcript_speakers.txt").exists());
+    assert_eq!(state_of(s.dir.path()).digest_count, 1);
+    assert!(
+        s.out
+            .text()
+            .contains("⚠ speaker labels failed: nemo-speech failed"),
+        "{}",
+        s.out.text()
+    );
+}

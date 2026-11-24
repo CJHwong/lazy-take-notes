@@ -16,7 +16,7 @@ use crate::domain::config::AppConfig;
 use crate::domain::digest_state::DigestState;
 use crate::domain::speaker_turn::SpeakerTurn;
 use crate::domain::template::SessionTemplate;
-use crate::domain::transcript::TranscriptSegment;
+use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::ports::llm::{ChatResponse, LlmClient, LlmError};
 use crate::ports::persistence::Persistence;
 use crate::usecases::compact::compact_messages;
@@ -130,6 +130,29 @@ impl SessionController {
                 .cloned()
                 .unwrap_or_else(|| format!("S{speaker}")),
         )
+    }
+
+    /// `speakers.json` (names and turns), as the view screen reads it back.
+    pub fn speakers_json(&self) -> String {
+        let names: std::collections::BTreeMap<String, &String> = self
+            .speaker_names
+            .iter()
+            .map(|(speaker, name)| (speaker.to_string(), name))
+            .collect();
+        let payload = serde_json::json!({
+            "names": names,
+            "turns": self.speaker_turns,
+        });
+        serde_json::to_string_pretty(&payload).unwrap_or_default()
+    }
+
+    /// The transcript with its speaker labels, in the format `diarize` writes.
+    pub fn speaker_transcript(&self) -> String {
+        self.all_segments
+            .iter()
+            .zip(self.labeled_lines(&self.all_segments))
+            .map(|(segment, line)| format!("[{}] {line}\n", format_wall_time(segment.wall_start)))
+            .collect()
     }
 
     fn labeled_lines(&self, segments: &[TranscriptSegment]) -> Vec<String> {

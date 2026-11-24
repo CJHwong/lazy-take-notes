@@ -20,9 +20,11 @@ use crate::adapters::audio::mixed::MixedAudioSource;
 use crate::adapters::session_controller::SessionController;
 use crate::adapters::session_status::{STATUS_FILE, write_status};
 use crate::app::events::{Cancel, Event, Poster, WorkerState};
-use crate::domain::session_files::{DEBUG_LOG, NOTES, TRANSCRIPT};
+use crate::app::workers::diarization::diarize_snapshot;
+use crate::domain::session_files::{DEBUG_LOG, NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
 use crate::domain::session_status::{self as st, SessionStatus};
 use crate::ports::audio_source::AudioSource as _; // set_mic_muted on the mixer
+use crate::ports::diarizer::Diarizer;
 
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(60);
 /// After a stop request, a stuck worker gets this long, so Ctrl-C always returns control.
@@ -179,6 +181,8 @@ pub struct HeadlessSession {
     last_warning: Option<String>,
     /// The worker reached model_ready or recording.
     started: bool,
+    /// Labels the speakers once the recording ends, with its timeout.
+    diarizer: Option<(Arc<dyn Diarizer>, Duration)>,
 }
 
 impl HeadlessSession {
@@ -213,6 +217,7 @@ impl HeadlessSession {
             last_download_bucket: None,
             last_warning: None,
             started: false,
+            diarizer: None,
         }
     }
 
@@ -470,15 +475,67 @@ impl HeadlessSession {
         }
     }
 
+    /// Label the speakers after the recording, before the final notes.
+    pub fn with_diarizer(mut self, diarizer: Arc<dyn Diarizer>, timeout: Duration) -> Self {
+        self.diarizer = Some((diarizer, timeout));
+        self
+    }
+
     async fn finalize(&mut self) {
         if self.status.state == st::ERROR {
             return;
         }
+        self.label_speakers().await;
         let state = &self.controller.digest_state;
         if self.ai_notes && (!state.buffer.is_empty() || state.digest_count > 0) {
             self.digest(true).await;
         }
         self.save(Some(st::STOPPED), None);
+    }
+}
+
+impl HeadlessSession {
+    /// One speaker pass over the whole recording, so the final notes carry the
+    /// labels, as the TUI's last pass at stop. A failed pass keeps the plain notes.
+    async fn label_speakers(&mut self) {
+        let Some((diarizer, timeout)) = self.diarizer.take() else {
+            return;
+        };
+        if self.controller.all_segments.is_empty() {
+            return;
+        }
+        self.report("… labeling speakers");
+        let audio = self.output_dir.join("recording.wav");
+        let pass = tokio::task::spawn_blocking(move || {
+            diarize_snapshot(diarizer.as_ref(), &audio, timeout)
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("the speaker pass stopped: {e}")));
+        let turns = match pass {
+            Ok(turns) => turns,
+            Err(e) => {
+                warn!(target: "ltn.diarize", "diarization pass failed: {e}");
+                self.report(&format!("⚠ speaker labels failed: {e}"));
+                return;
+            }
+        };
+        let speakers: std::collections::BTreeSet<u32> = turns.iter().map(|t| t.speaker).collect();
+        info!(target: "ltn.diarize", "diarization pass: {} turns, {} speakers", turns.len(), speakers.len());
+        self.controller.set_speaker_turns(turns);
+        let files = [
+            ("speakers.json", self.controller.speakers_json()),
+            (SPEAKER_TRANSCRIPT, self.controller.speaker_transcript()),
+        ];
+        for (name, text) in files {
+            if let Err(e) = std::fs::write(self.output_dir.join(name), text) {
+                self.report(&format!("⚠ could not save {name}: {e}"));
+                return;
+            }
+        }
+        self.report(&format!(
+            "✓ {SPEAKER_TRANSCRIPT} written ({} speakers)",
+            speakers.len()
+        ));
     }
 }
 

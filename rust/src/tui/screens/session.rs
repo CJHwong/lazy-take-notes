@@ -637,17 +637,7 @@ impl Session {
     }
 
     fn persist_speakers(&mut self, ctx: &mut Ctx) {
-        let names: std::collections::BTreeMap<String, &String> = self
-            .controller
-            .speaker_names
-            .iter()
-            .map(|(speaker, name)| (speaker.to_string(), name))
-            .collect();
-        let payload = serde_json::json!({
-            "names": names,
-            "turns": self.controller.speaker_turns,
-        });
-        let text = serde_json::to_string_pretty(&payload).unwrap_or_default();
+        let text = self.controller.speakers_json();
         if let Err(e) = std::fs::write(self.output_dir.join("speakers.json"), text) {
             self.speakers_not_saved("speakers.json", &e, ctx);
             return;
@@ -657,18 +647,7 @@ impl Session {
 
     /// The transcript with the labels shown on screen, in the format `diarize` writes.
     fn save_speaker_transcript(&mut self, ctx: &mut Ctx) {
-        let text: String = self
-            .controller
-            .all_segments
-            .iter()
-            .map(|segment| {
-                let line = match self.controller.speaker_label(segment) {
-                    Some(label) => format!("{label}: {}", segment.text),
-                    None => segment.text.clone(),
-                };
-                format!("[{}] {line}\n", format_wall_time(segment.wall_start))
-            })
-            .collect();
+        let text = self.controller.speaker_transcript();
         let path = self.output_dir.join(SPEAKER_TRANSCRIPT);
         if let Err(e) = std::fs::write(path, text) {
             self.speakers_not_saved(SPEAKER_TRANSCRIPT, &e, ctx);

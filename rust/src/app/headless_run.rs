@@ -12,6 +12,7 @@ use serde_json::Value as JsonValue;
 use crate::adapters::assets::resolver::CachedModelResolver;
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::file_persistence::FilePersistence;
+use crate::adapters::nemo_diarizer::NemoSpeechDiarizer;
 use crate::adapters::pyrepr::py_repr_json;
 use crate::adapters::session_controller::SessionController;
 use crate::adapters::templates::YamlTemplates;
@@ -28,6 +29,7 @@ use crate::app::keep_awake::keep_awake;
 use crate::app::logging::{close_file_logging, setup_file_logging};
 use crate::app::preflight::{PreflightPlan, format_report_line, run_preflight};
 use crate::app::workers::audio::{AudioWorkerConfig, LoopTiming, run_audio_worker};
+use crate::app::workers::diarization::DiarizationTiming;
 use crate::app::workers::file_transcription::{FileJob, download_percent, run_file_transcription};
 use crate::domain::config::AppConfig;
 use crate::domain::session_status as st;
@@ -250,6 +252,7 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
         timing: LoopTiming::default(),
     };
     let worker_source = source.clone();
+    let diarizer_store = store.clone();
     let launcher: Launcher = Box::new(move |poster, cancel| {
         let resolved = resolver_posting(store, &poster, &model_name).resolve(&model_name);
         let model_path = match resolved {
@@ -273,7 +276,7 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
             worker_source,
         );
     });
-    let session = HeadlessSession::new(
+    let mut session = HeadlessSession::new(
         controller,
         out_dir.clone(),
         "recording",
@@ -281,6 +284,18 @@ pub fn record(args: &HeadlessArgs<'_>, mute_mic: bool) -> Result<i32, String> {
         Some(source),
         StatusWriter::stderr(),
     );
+    let diarization = &config.diarization;
+    if diarization.enabled && !config.output.save_audio {
+        eprintln!("⚠ Diarization needs save_audio: true in config.yaml");
+    } else if diarization.enabled {
+        let diarizer = NemoSpeechDiarizer::new(
+            &diarization.binary,
+            &diarization.model,
+            &diarization.device,
+            Some(diarizer_store),
+        );
+        session = session.with_diarizer(Arc::new(diarizer), DiarizationTiming::default().timeout);
+    }
     eprint_lines(&banner_lines(
         "recording",
         &out_dir,
