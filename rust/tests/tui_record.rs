@@ -599,8 +599,15 @@ fn a_worker_crash_logs_the_stack_and_the_session_continues() {
         "{:?}",
         run.toasts()
     );
+    // The worker panics on its own thread, maybe after the stop: wait for its line.
+    let path = logs.path().join("debug.log");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let read = || std::fs::read_to_string(&path).unwrap_or_default();
+    while !read().contains("CRITICAL panic in thread audio") && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     lazy_take_notes::app::logging::close_file_logging();
-    let log = std::fs::read_to_string(logs.path().join("debug.log")).unwrap();
+    let log = read();
     assert!(log.contains("CRITICAL panic in thread audio"), "{log}");
     assert!(log.contains("worker bug"), "{log}");
     assert!(log.contains("raising_worker_body"), "{log}");
