@@ -72,6 +72,30 @@ impl Viewer {
         panic!("{text:?} is not on screen");
     }
 
+    fn press(&mut self, code: KeyCode) {
+        self.host.key(&KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    /// True when the first cell of `text` is underlined.
+    fn underlined(&mut self, text: &str) -> bool {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 30)).unwrap();
+        terminal.draw(|frame| self.host.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        for y in 0..buffer.area.height {
+            let row: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
+            if let Some(at) = row.find(text) {
+                let x = row[..at].chars().count() as u16;
+                return buffer[(x, y)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::UNDERLINED);
+            }
+        }
+        panic!("{text:?} is not on screen");
+    }
+
     fn type_text(&mut self, text: &str) {
         for ch in text.chars() {
             self.host
@@ -149,4 +173,52 @@ fn a_session_without_speakers_shows_the_plain_transcript_and_no_chips() {
     let screen = viewer.screen();
     assert!(screen.contains("[00:00:00] hello"), "{screen}");
     assert!(!screen.contains(" S1 "), "{screen}");
+}
+
+#[test]
+fn the_keyboard_chooses_and_renames_a_speaker() {
+    let dir = saved_session();
+    let mut viewer = Viewer::open(dir.path());
+    let plain = viewer.background_of("[00:00:05] S2: hi");
+    // Tab reaches the bar and selects the first chip.
+    viewer.press(KeyCode::Tab);
+    assert_ne!(viewer.background_of("[00:00:00] S1: hello"), plain);
+    assert_eq!(viewer.background_of("[00:00:05] S2: hi"), plain);
+    // Right moves to S2 and stops there; Left goes back.
+    viewer.press(KeyCode::Right);
+    viewer.press(KeyCode::Right);
+    assert_ne!(viewer.background_of("[00:00:05] S2: hi"), plain);
+    assert_eq!(viewer.background_of("[00:00:00] S1: hello"), plain);
+    viewer.press(KeyCode::Left);
+    viewer.press(KeyCode::Enter);
+    assert!(
+        viewer.screen().contains("Name for S1"),
+        "{}",
+        viewer.screen()
+    );
+    viewer.type_text("Bea");
+    assert!(
+        viewer.screen().contains("[00:00:00] Bea: hello"),
+        "{}",
+        viewer.screen()
+    );
+    // Escape drops the selection; Enter then opens nothing.
+    viewer.press(KeyCode::Esc);
+    assert_eq!(viewer.background_of("[00:00:00] Bea: hello"), plain);
+    viewer.press(KeyCode::Enter);
+    assert!(!viewer.screen().contains("Name for"), "{}", viewer.screen());
+}
+
+#[test]
+fn the_selected_chip_is_underlined_only_while_the_bar_has_the_focus() {
+    let dir = saved_session();
+    let mut viewer = Viewer::open(dir.path());
+    viewer.press(KeyCode::Tab);
+    assert!(viewer.underlined(" S1 4s "));
+    // The digest takes the focus; the chip stays selected but loses the underline.
+    viewer.press(KeyCode::Tab);
+    assert!(!viewer.underlined(" S1 4s "));
+    // Shift+Tab comes back to the bar.
+    viewer.press(KeyCode::BackTab);
+    assert!(viewer.underlined(" S1 4s "));
 }

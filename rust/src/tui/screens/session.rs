@@ -152,24 +152,31 @@ pub struct LabelReply(Option<String>);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Focus {
     Transcript,
+    /// The speaker chips under the transcript, once a speaker is heard.
+    Speakers,
     Digest,
     Context,
 }
 
 impl Focus {
-    fn next(self) -> Self {
-        match self {
-            Self::Transcript => Self::Digest,
-            Self::Digest => Self::Context,
-            Self::Context => Self::Transcript,
-        }
-    }
+    const ORDER: [Self; 4] = [
+        Self::Transcript,
+        Self::Speakers,
+        Self::Digest,
+        Self::Context,
+    ];
 
-    fn previous(self) -> Self {
-        match self {
-            Self::Transcript => Self::Context,
-            Self::Digest => Self::Transcript,
-            Self::Context => Self::Digest,
+    /// The next stop in the Tab order (`step` 1) or the one before (`step` -1).
+    /// The speaker bar is a stop only while it shows chips.
+    fn moved(self, step: isize, has_speakers: bool) -> Self {
+        let count = Self::ORDER.len() as isize;
+        let mut at = Self::ORDER.iter().position(|f| *f == self).unwrap_or(0) as isize;
+        loop {
+            at = (at + step).rem_euclid(count);
+            let focus = Self::ORDER[at as usize];
+            if focus != Self::Speakers || has_speakers {
+                return focus;
+            }
         }
     }
 }
@@ -323,7 +330,8 @@ impl Session {
         ctx.hit(transcript_area, "transcript", 0);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
-            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, ctx);
+            let focused = self.focus == Focus::Speakers;
+            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, focused, ctx);
         }
         let column = Rect::new(body.x + left, body.y, body.width - left, body.height);
         // `height: 6`, and 40% of the column while it has the focus.
@@ -361,27 +369,46 @@ impl Session {
     pub fn mouse(&mut self, input: &MouseInput) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
+            // A click puts the focus on the bar, so Enter renames the chip too.
+            self.focus = Focus::Speakers;
             // The first click shows the speaker's lines; a second click on it renames.
             if self.selected_speaker != Some(speaker) {
                 self.selected_speaker = Some(speaker);
                 self.sync_highlight();
                 return Action::None;
             }
-            let current = self
-                .controller
-                .speaker_names
-                .get(&speaker)
-                .cloned()
-                .unwrap_or_default();
-            self.awaiting_speaker = Some(speaker);
-            return Action::Push(Box::new(LabelModal::new(
-                &current,
-                &format!("Name for S{speaker}"),
-                "Speaker name...",
-            )));
+            return self.ask_speaker_name(speaker);
         }
         self.scroll_or_focus(input);
         Action::None
+    }
+
+    fn ask_speaker_name(&mut self, speaker: u32) -> Action {
+        let current = self
+            .controller
+            .speaker_names
+            .get(&speaker)
+            .cloned()
+            .unwrap_or_default();
+        self.awaiting_speaker = Some(speaker);
+        Action::Push(Box::new(LabelModal::new(
+            &current,
+            &format!("Name for S{speaker}"),
+            "Speaker name...",
+        )))
+    }
+
+    fn speaker_order(&self) -> Vec<u32> {
+        self.speaker_chips().iter().map(|chip| chip.0).collect()
+    }
+
+    fn move_focus(&mut self, step: isize) {
+        let speakers = self.speaker_order();
+        self.focus = self.focus.moved(step, !speakers.is_empty());
+        if self.focus == Focus::Speakers {
+            select_on_entry(&speakers, &mut self.selected_speaker);
+            self.sync_highlight();
+        }
     }
 
     fn scroll_or_focus(&mut self, input: &MouseInput) {
@@ -410,7 +437,7 @@ impl Session {
         match focus {
             Focus::Transcript => self.transcript.view.scroll_by(step),
             Focus::Digest => self.digest.view.scroll_by(step),
-            Focus::Context => {}
+            Focus::Speakers | Focus::Context => {}
         }
     }
 
@@ -437,6 +464,13 @@ impl Session {
                     _ => {
                         self.transcript.view.key(name);
                     }
+                }
+            }
+            Focus::Speakers => {
+                let speakers = self.speaker_order();
+                match speaker_bar_key(name, &speakers, &mut self.selected_speaker)? {
+                    BarKey::Rename(speaker) => return Some(self.ask_speaker_name(speaker)),
+                    BarKey::Selected => self.sync_highlight(),
                 }
             }
             Focus::Digest => match crate::tui::keys::action_for(&DIGEST_PANEL_BINDINGS, name)? {
@@ -470,8 +504,8 @@ impl Session {
     pub fn screen_key(&mut self, mode: &mut dyn Mode, name: &str, ctx: &mut Ctx) -> Option<Action> {
         let action = crate::tui::keys::action_for(&SESSION_BINDINGS, name);
         match action {
-            Some("app.focus_next") => self.focus = self.focus.next(),
-            Some("app.focus_previous") => self.focus = self.focus.previous(),
+            Some("app.focus_next") => self.move_focus(1),
+            Some("app.focus_previous") => self.move_focus(-1),
             Some("rename_session") => {
                 self.awaiting_label = true;
                 return Some(Action::Push(Box::new(LabelModal::session(&self.label))));
@@ -1127,6 +1161,7 @@ pub fn render_speaker_bar(
     area: Rect,
     rows: &[Vec<Chip>],
     selected: Option<u32>,
+    focused: bool,
     ctx: &Ctx,
 ) {
     let theme = &ctx.theme;
@@ -1137,6 +1172,11 @@ pub fn render_speaker_bar(
         .bg(theme.color("primary"))
         .fg(theme.on("foreground", "primary"))
         .add_modifier(Modifier::BOLD);
+    // The bar has no border; the underline shows that it has the focus.
+    let chosen = match focused {
+        true => chosen.add_modifier(Modifier::UNDERLINED),
+        false => chosen,
+    };
     let base = Style::default()
         .bg(theme.color("background"))
         .fg(theme.color("foreground"));
@@ -1159,6 +1199,39 @@ pub fn render_speaker_bar(
             ratatui::widgets::Paragraph::new(Line::from(spans)).style(base),
             Rect::new(area.x, y, area.width, 1),
         );
+    }
+}
+
+/// What a key on the focused speaker bar asks for.
+pub enum BarKey {
+    /// The selection moved or was dropped: redraw the highlight.
+    Selected,
+    /// Open the name prompt for this speaker.
+    Rename(u32),
+}
+
+/// A key on the focused speaker bar, with `speakers` in chip order.
+/// None when the bar does not take the key.
+pub fn speaker_bar_key(name: &str, speakers: &[u32], selected: &mut Option<u32>) -> Option<BarKey> {
+    // A selected speaker that a newer pass dropped counts as no selection.
+    let at = selected.and_then(|speaker| speakers.iter().position(|s| *s == speaker));
+    let last = speakers.len().saturating_sub(1);
+    match (name, at) {
+        ("enter", Some(at)) => return Some(BarKey::Rename(speakers[at])),
+        ("enter", None) => {}
+        ("left" | "right", None) => *selected = speakers.first().copied(),
+        ("left", Some(at)) => *selected = Some(speakers[at.saturating_sub(1)]),
+        ("right", Some(at)) => *selected = Some(speakers[(at + 1).min(last)]),
+        ("escape", _) => *selected = None,
+        _ => return None,
+    }
+    Some(BarKey::Selected)
+}
+
+/// The focus reached the bar: keep a selection it still shows, else select the first chip.
+pub fn select_on_entry(speakers: &[u32], selected: &mut Option<u32>) {
+    if !selected.is_some_and(|speaker| speakers.contains(&speaker)) {
+        *selected = speakers.first().copied();
     }
 }
 

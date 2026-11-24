@@ -130,6 +130,10 @@ impl Run {
     fn press(&mut self, name: &str) {
         let code = match name {
             "space" => KeyCode::Char(' '),
+            "tab" => KeyCode::Tab,
+            "left" => KeyCode::Left,
+            "right" => KeyCode::Right,
+            "escape" => KeyCode::Esc,
             name => KeyCode::Char(name.chars().next().unwrap()),
         };
         self.host.key(&KeyEvent::new(code, KeyModifiers::NONE));
@@ -706,4 +710,101 @@ fn a_speaker_pass_shows_on_the_status_bar_while_it_runs() {
     );
     run.post(Event::DiarizationStatus { active: false });
     assert!(!run.screen_text().contains("Labeling speakers"));
+}
+
+fn two_speakers(run: &mut Run) {
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![
+        segment("hello", 0.0, 2.0),
+        segment("hi", 3.0, 4.0),
+    ]));
+    run.post(Event::SpeakerTurns(vec![
+        SpeakerTurn {
+            start: 0.0,
+            end: 2.0,
+            speaker: 0,
+        },
+        SpeakerTurn {
+            start: 3.0,
+            end: 4.0,
+            speaker: 1,
+        },
+    ]));
+}
+
+#[test]
+fn the_speaker_bar_is_a_tab_stop_only_once_a_speaker_is_heard() {
+    // No speakers: two tabs reach the context box.
+    let mut run = start(true);
+    run.recording();
+    run.press("tab");
+    run.press("tab");
+    run.type_text("zz");
+    assert!(run.screen_text().contains("zz"), "{}", run.screen_text());
+    // With speakers, the bar comes between the transcript and the digest.
+    let mut run = start(true);
+    two_speakers(&mut run);
+    run.press("tab");
+    run.press("tab");
+    run.type_text("zz");
+    assert!(!run.screen_text().contains("zz"), "{}", run.screen_text());
+    run.press("tab");
+    run.type_text("zz");
+    assert!(run.screen_text().contains("zz"), "{}", run.screen_text());
+}
+
+#[test]
+fn the_arrows_choose_a_speaker_and_enter_names_it() {
+    let mut run = start(true);
+    two_speakers(&mut run);
+    // Tab selects the first chip; Right moves on and stops at the last one.
+    run.press("tab");
+    run.press("right");
+    run.press("right");
+    run.enter();
+    assert!(
+        run.screen_text().contains("Name for S1"),
+        "{}",
+        run.screen_text()
+    );
+    run.type_text("Bea");
+    run.enter();
+    let screen = run.screen_text();
+    assert!(screen.contains("Bea: hi"), "{screen}");
+    assert!(screen.contains(" Bea 1s "), "{screen}");
+    // Left goes back to S0.
+    run.press("left");
+    run.enter();
+    assert!(
+        run.screen_text().contains("Name for S0"),
+        "{}",
+        run.screen_text()
+    );
+}
+
+#[test]
+fn escape_on_the_speaker_bar_drops_the_selection() {
+    let mut run = start(true);
+    two_speakers(&mut run);
+    run.press("tab");
+    run.press("escape");
+    run.enter();
+    assert!(
+        !run.screen_text().contains("Name for"),
+        "{}",
+        run.screen_text()
+    );
+}
+
+#[test]
+fn enter_after_a_click_on_a_chip_names_that_speaker() {
+    let mut run = start(true);
+    two_speakers(&mut run);
+    run.click(" S1 1s ");
+    run.enter();
+    assert!(
+        run.screen_text().contains("Name for S1"),
+        "{}",
+        run.screen_text()
+    );
 }

@@ -16,7 +16,9 @@ use crate::domain::session_files::{NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
 use crate::tui::screens::modals::LabelModal;
-use crate::tui::screens::session::{render_speaker_bar, wrap_chips};
+use crate::tui::screens::session::{
+    BarKey, render_speaker_bar, select_on_entry, speaker_bar_key, wrap_chips,
+};
 use crate::tui::screens::session_picker::{SessionPicker, picked_dir, utf8_error};
 use crate::tui::system::{copy_to_clipboard, open_folder};
 use crate::tui::theme::Theme;
@@ -249,6 +251,15 @@ pub fn header(frame: &mut Frame, area: Rect, text: &str, theme: &Theme) {
     bar(frame, area, text, "primary", "text", true, theme);
 }
 
+/// Which pane of the view screen has the focus, in Tab order.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pane {
+    Transcript,
+    /// The speaker chips, when the session has speakers.
+    Speakers,
+    Digest,
+}
+
 pub struct ViewScreen {
     session_dir: PathBuf,
     /// None: the session has no speakers.json.
@@ -260,7 +271,7 @@ pub struct ViewScreen {
     transcript: TranscriptPanel,
     digest: DigestPanel,
     status: StatusBar,
-    digest_focused: bool,
+    focus: Pane,
 }
 
 impl ViewScreen {
@@ -277,7 +288,7 @@ impl ViewScreen {
             transcript: TranscriptPanel::default(),
             digest: DigestPanel::default(),
             status,
-            digest_focused: false,
+            focus: Pane::Transcript,
         }
     }
 
@@ -349,6 +360,46 @@ impl ViewScreen {
     }
 
     /// Highlight the selected speaker's lines under the label they carry now.
+    fn ask_speaker_name(&mut self, speaker: u32) -> Action {
+        let current = self
+            .speakers
+            .as_ref()
+            .and_then(|saved| saved.names.get(&speaker).cloned())
+            .unwrap_or_default();
+        self.awaiting_speaker = Some(speaker);
+        Action::Push(Box::new(LabelModal::new(
+            &current,
+            &format!("Name for S{speaker}"),
+            "Speaker name...",
+        )))
+    }
+
+    fn speaker_order(&self) -> Vec<u32> {
+        self.speakers
+            .as_ref()
+            .map(|saved| saved.chips().iter().map(|chip| chip.0).collect())
+            .unwrap_or_default()
+    }
+
+    /// Tab order: transcript, speakers (when the session has any), digest.
+    fn move_focus(&mut self, step: isize) {
+        let speakers = self.speaker_order();
+        let mut order = vec![Pane::Transcript];
+        if !speakers.is_empty() {
+            order.push(Pane::Speakers);
+        }
+        order.push(Pane::Digest);
+        let at = order
+            .iter()
+            .position(|pane| *pane == self.focus)
+            .unwrap_or(0) as isize;
+        self.focus = order[(at + step).rem_euclid(order.len() as isize) as usize];
+        if self.focus == Pane::Speakers {
+            select_on_entry(&speakers, &mut self.selected_speaker);
+            self.sync_highlight();
+        }
+    }
+
     fn sync_highlight(&mut self) {
         self.transcript.highlight = self
             .selected_speaker
@@ -407,14 +458,19 @@ impl Screen for ViewScreen {
         let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         if bar_rows > 0 {
             let bar = Rect::new(body.x, body.bottom() - bar_rows, left, bar_rows);
-            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, ctx);
+            let focused = self.focus == Pane::Speakers;
+            render_speaker_bar(frame, bar, &chip_rows, self.selected_speaker, focused, ctx);
         }
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
         let digest_area = Rect::new(body.x + left, body.y, body.width - left, body.height);
-        self.transcript
-            .render(frame, transcript_area, !self.digest_focused, theme);
+        self.transcript.render(
+            frame,
+            transcript_area,
+            self.focus == Pane::Transcript,
+            theme,
+        );
         self.digest
-            .render(frame, digest_area, self.digest_focused, theme);
+            .render(frame, digest_area, self.focus == Pane::Digest, theme);
         ctx.hit(transcript_area, "transcript", 0);
         ctx.hit(digest_area, "digest", 0);
         self.status.render(frame, bottom, theme);
@@ -436,23 +492,15 @@ impl Screen for ViewScreen {
     fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
+            // A click puts the focus on the bar, so Enter renames the chip too.
+            self.focus = Pane::Speakers;
             // The first click shows the speaker's lines; a second click on it renames.
             if self.selected_speaker != Some(speaker) {
                 self.selected_speaker = Some(speaker);
                 self.sync_highlight();
                 return Action::None;
             }
-            let current = self
-                .speakers
-                .as_ref()
-                .and_then(|saved| saved.names.get(&speaker).cloned())
-                .unwrap_or_default();
-            self.awaiting_speaker = Some(speaker);
-            return Action::Push(Box::new(LabelModal::new(
-                &current,
-                &format!("Name for S{speaker}"),
-                "Speaker name...",
-            )));
+            return self.ask_speaker_name(speaker);
         }
         let digest = input.on("digest").is_some();
         if !digest && input.on("transcript").is_none() {
@@ -464,7 +512,10 @@ impl Screen for ViewScreen {
         };
         match input.kind {
             MouseKind::Click => {
-                self.digest_focused = digest;
+                self.focus = match digest {
+                    true => Pane::Digest,
+                    false => Pane::Transcript,
+                };
                 if !digest {
                     // A click in the transcript drops the highlight.
                     self.selected_speaker = None;
@@ -478,19 +529,31 @@ impl Screen for ViewScreen {
     }
 
     fn key(&mut self, _key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Action {
-        let panel_table: &[Binding] = if self.digest_focused {
-            &DIGEST_PANEL_BINDINGS
-        } else {
-            &TRANSCRIPT_PANEL_BINDINGS
-        };
         // `q` is a priority binding: it wins over the focused panel.
         if action_for(&VIEW_BINDINGS, name) == Some("quit_app") {
             return Action::Pop(None);
         }
+        if self.focus == Pane::Speakers {
+            let speakers = self.speaker_order();
+            match speaker_bar_key(name, &speakers, &mut self.selected_speaker) {
+                Some(BarKey::Rename(speaker)) => return self.ask_speaker_name(speaker),
+                Some(BarKey::Selected) => {
+                    self.sync_highlight();
+                    return Action::None;
+                }
+                None => {}
+            }
+        }
+        let digest_focused = self.focus == Pane::Digest;
+        let panel_table: &[Binding] = match digest_focused {
+            true => &DIGEST_PANEL_BINDINGS,
+            false => &TRANSCRIPT_PANEL_BINDINGS,
+        };
         match action_for(panel_table, name) {
-            Some("copy_content") if self.digest_focused => self.digest.copy("", ctx),
+            Some(_) if self.focus == Pane::Speakers => {}
+            Some("copy_content") if digest_focused => self.digest.copy("", ctx),
             Some("copy_content") => self.transcript.copy("", ctx),
-            Some(_) if self.digest_focused => {
+            Some(_) if digest_focused => {
                 self.digest.view.key(name);
             }
             Some(_) => {
@@ -498,9 +561,8 @@ impl Screen for ViewScreen {
             }
             None => match action_for(&VIEW_BINDINGS, name) {
                 Some("open_session_dir") => open_session_dir(&self.session_dir, ctx),
-                Some("app.focus_next" | "app.focus_previous") => {
-                    self.digest_focused = !self.digest_focused
-                }
+                Some("app.focus_next") => self.move_focus(1),
+                Some("app.focus_previous") => self.move_focus(-1),
                 _ => {}
             },
         }

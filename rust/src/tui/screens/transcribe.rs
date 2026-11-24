@@ -28,13 +28,14 @@ pub const TRANSCRIBE_BINDINGS: [Binding; 10] = [
     bind("d", "force_digest", "Digest now").hidden(),
 ];
 
-const HELP_ROWS: [&str; 10] = [
+const HELP_ROWS: [&str; 11] = [
     "| Key | Action |",
     "|-----|--------|",
     "| `s` | Stop transcription |",
     "| `d` | Force digest now |",
     "| `c` | Copy focused panel |",
     "| `Tab` | Switch panel focus |",
+    "| `←` `→` `Enter` | On the speaker bar: choose a speaker, name it |",
     "| `l` | Rename session |",
     "| `o` | Open session directory |",
     "| `h` | Toggle this help |",

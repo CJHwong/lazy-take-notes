@@ -36,7 +36,7 @@ pub const RECORD_BINDINGS: [Binding; 12] = [
     bind("m", "toggle_mic", "Mute mic").hidden(),
 ];
 
-const HELP_ROWS: [&str; 12] = [
+const HELP_ROWS: [&str; 13] = [
     "| Key | Action |",
     "|-----|--------|",
     "| `Space` | Pause / Resume |",
@@ -45,6 +45,7 @@ const HELP_ROWS: [&str; 12] = [
     "| `m` | Mute / Unmute mic |",
     "| `c` | Copy focused panel |",
     "| `Tab` | Switch panel focus |",
+    "| `←` `→` `Enter` | On the speaker bar: choose a speaker, name it |",
     "| `l` | Rename session |",
     "| `o` | Open session directory |",
     "| `h` | Toggle this help |",
