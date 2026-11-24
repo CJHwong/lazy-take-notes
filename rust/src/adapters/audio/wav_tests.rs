@@ -222,3 +222,32 @@ fn the_recorder_thread_drains_and_closes() {
     let expected: Vec<i16> = [pcm(0.1, 160), pcm(1.0, 160), pcm(-1.0, 160)].concat();
     assert_eq!(written, expected, "samples are clipped to [-1, 1]");
 }
+
+#[test]
+fn a_snapshot_of_a_file_caught_between_its_data_and_header_writes_is_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("recording.wav");
+    let mut wav = StreamingWav::create(source.clone(), 16_000).unwrap();
+    let first: Vec<u8> = pcm(0.5, 100).iter().flat_map(|s| s.to_le_bytes()).collect();
+    wav.write(&first).unwrap();
+    // The next chunk is on disk, its header update is not, plus half a frame.
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&source)
+        .unwrap();
+    file.write_all(&[7u8; 61]).unwrap();
+    let copy = dir.path().join("copy.wav");
+    snapshot(&source, &copy).unwrap();
+    let mut expected = pcm(0.5, 100);
+    expected.extend(std::iter::repeat_n(i16::from_le_bytes([7, 7]), 30));
+    assert_eq!(frames(&copy), expected);
+}
+
+#[test]
+fn a_snapshot_refuses_a_file_that_is_not_a_recording_wav() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("notes.md");
+    std::fs::write(&source, vec![b'#'; 100]).unwrap();
+    let error = snapshot(&source, &dir.path().join("copy.wav")).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+}

@@ -21,11 +21,16 @@ pub const WAV_BACKLOG_S: f64 = 600.0;
 
 const ENOENT: i32 = 2;
 
+/// The size of the header `StreamingWav` writes: RIFF, one `fmt ` chunk, then `data`.
+const HEADER_BYTES: u64 = 44;
+
 /// A WAV writer that keeps the RIFF sizes current after every chunk.
 ///
 /// The diarizer reads the file while the session records, and a reader that
 /// trusts the header fails on sizes left at zero. Rewriting 8 header bytes per
-/// chunk makes the file valid at any instant.
+/// chunk keeps the sizes close. Between the data write and the header write the
+/// file holds more data than its header says, and nemo-speech reads that tail as
+/// a broken chunk: a live reader takes a `snapshot` instead.
 struct StreamingWav {
     path: PathBuf,
     file: File,
@@ -99,6 +104,37 @@ impl StreamingWav {
 
 pub type Notice = Box<dyn Fn(String) + Send>;
 pub type KeepFiles = Box<dyn Fn() -> bool + Send>;
+/// Copy a WAV that `StreamingWav` may still write, with sizes that match the copy.
+///
+/// The copy takes the whole frames on disk at the start. Audio written later
+/// is not in it. A file without the `StreamingWav` header layout is an error.
+pub fn snapshot(source: &Path, target: &Path) -> io::Result<()> {
+    let mut input = File::open(source)?;
+    let mut header = [0u8; HEADER_BYTES as usize];
+    io::Read::read_exact(&mut input, &mut header)?;
+    if &header[0..4] != b"RIFF" || &header[8..16] != b"WAVEfmt " || &header[36..40] != b"data" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} is not a recording WAV", source.display()),
+        ));
+    }
+    let on_disk = input.metadata()?.len().saturating_sub(HEADER_BYTES);
+    // Whole 16-bit frames only, and a RIFF size that still fits in 32 bits.
+    let data = (on_disk.min(u64::from(u32::MAX - 36)) & !1) as u32;
+    header[4..8].copy_from_slice(&(36 + data).to_le_bytes());
+    header[40..44].copy_from_slice(&data.to_le_bytes());
+    let mut output = File::create(target)?;
+    output.write_all(&header)?;
+    let copied = io::copy(&mut io::Read::take(input, u64::from(data)), &mut output)?;
+    if copied != u64::from(data) {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            format!("{} got shorter during the copy", source.display()),
+        ));
+    }
+    Ok(())
+}
+
 /// Send `Some(chunk)` to record it, `None` to flush and close.
 pub type RecorderQueue = Sender<Option<Vec<f32>>>;
 
