@@ -37,7 +37,10 @@ def main(tag: str) -> None:
             assets[key] = (archive.name, hashlib.sha256(archive.read_bytes()).hexdigest())
     if not assets:
         sys.exit(f'{tag} has no asset this script knows')
-    lines = [f'    {key!r}: {value!r},' for key, value in sorted(assets.items())]
+    # One field per line, as ruff format writes it: a SHA-256 is too long for one line.
+    lines = [
+        f'    {key!r}: (\n        {name!r},\n        {sha!r},\n    ),' for key, (name, sha) in sorted(assets.items())
+    ]
     text = TARGET.read_text(encoding='utf-8')
     head = text.split('TAG:', 1)[0]
     TARGET.write_text(
