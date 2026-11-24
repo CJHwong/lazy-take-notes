@@ -161,7 +161,9 @@ pub struct PreparedChunk {
     pub hints: Vec<String>,
     /// Session time of the chunk's first sample.
     pub wall_start: f64,
-    pub is_first_chunk: bool,
+    /// True when the chunk's front repeats nothing of the last chunk, so every
+    /// segment is kept: the first chunk, and one that starts with a held segment.
+    pub starts_fresh: bool,
 }
 
 pub struct TranscribeAudio {
@@ -175,7 +177,7 @@ pub struct TranscribeAudio {
     silence_threshold: f64,
     gate: SpeechGate,
     buffer: Vec<f32>,
-    is_first_chunk: bool,
+    starts_fresh: bool,
     session_offset: f64,
     /// The chunk handed out by `prepare_buffer`.
     sent: Vec<f32>,
@@ -204,7 +206,7 @@ impl TranscribeAudio {
             silence_threshold: settings.silence_threshold,
             gate: settings.gate,
             buffer: Vec::with_capacity(SAMPLE_RATE * 10),
-            is_first_chunk: true,
+            starts_fresh: true,
             session_offset: 0.0,
             sent: Vec::new(),
             last_text: None,
@@ -284,10 +286,10 @@ impl TranscribeAudio {
             audio: self.sent.clone(),
             hints: self.current_hints.clone(),
             wall_start: self.session_offset - self.buffer.len() as f64 / SAMPLE_RATE as f64,
-            is_first_chunk: self.is_first_chunk,
+            starts_fresh: self.starts_fresh,
         };
         self.keep_tail();
-        self.is_first_chunk = false;
+        self.starts_fresh = false;
         Some(chunk)
     }
 
@@ -302,10 +304,10 @@ impl TranscribeAudio {
         &mut self,
         segments: Vec<TranscriptSegment>,
         wall_start: f64,
-        is_first_chunk: bool,
+        starts_fresh: bool,
         is_final: bool,
     ) -> Vec<TranscriptSegment> {
-        let min_start = if is_first_chunk { 0.0 } else { self.overlap() };
+        let min_start = if starts_fresh { 0.0 } else { self.overlap() };
         let mut segments: Vec<TranscriptSegment> = segments
             .into_iter()
             .filter(|s| s.wall_end > min_start)
@@ -376,7 +378,7 @@ impl TranscribeAudio {
         resent.extend_from_slice(&self.buffer[tail..]);
         self.buffer = resent;
         // The next chunk starts where the held segment starts, so nothing in it is a repeat.
-        self.is_first_chunk = true;
+        self.starts_fresh = true;
     }
 
     /// Transcribe the buffer now. See `apply_result`.
@@ -389,7 +391,7 @@ impl TranscribeAudio {
             return Ok(Vec::new());
         };
         let segments = transcriber.transcribe(&chunk.audio, &self.language, &chunk.hints)?;
-        Ok(self.apply_result(segments, chunk.wall_start, chunk.is_first_chunk, is_final))
+        Ok(self.apply_result(segments, chunk.wall_start, chunk.starts_fresh, is_final))
     }
 
     /// Send what is left on shutdown, if it is long enough to hold speech.
