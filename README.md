@@ -16,7 +16,7 @@ curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.
 
 The script installs [uv](https://docs.astral.sh/uv/), helps you pick an AI provider ([Ollama](https://ollama.com) or any OpenAI-compatible API), and adds a `take-note` command. It asks before it runs.
 
-To try the app without installing it:
+If you already have uv, you can skip the script. This runs the app straight from GitHub. uv still downloads it to its cache, but you get no `take-note` command and no config file:
 
 ```bash
 uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes
