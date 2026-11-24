@@ -306,7 +306,7 @@ struct AudioLoop<'a> {
     timing: LoopTiming,
     language: String,
     all_segments: Vec<TranscriptSegment>,
-    /// (wall start, first chunk) of the chunk in flight.
+    /// (wall start, starts fresh) of the chunk in flight.
     pending: Option<(f64, bool)>,
     samples_fed: usize,
     errors_seen: BTreeSet<String>,
@@ -465,7 +465,7 @@ impl<'a> AudioLoop<'a> {
             Ok(raw) => {
                 let segments =
                     self.use_case
-                        .apply_result(raw, chunk.wall_start, chunk.is_first_chunk, true);
+                        .apply_result(raw, chunk.wall_start, chunk.starts_fresh, true);
                 self.publish(segments);
             }
             Err(e) => {
@@ -685,12 +685,12 @@ impl<'a> AudioLoop<'a> {
         };
         debug!(
             target: "ltn.audio",
-            "transcription triggered: buffer={} samples, first_chunk={}",
+            "transcription triggered: buffer={} samples, starts_fresh={}",
             chunk.audio.len(),
-            chunk.is_first_chunk
+            chunk.starts_fresh
         );
         self.stats.transcriptions += 1;
-        self.pending = Some((chunk.wall_start, chunk.is_first_chunk));
+        self.pending = Some((chunk.wall_start, chunk.starts_fresh));
         self.poster
             .post(Event::TranscriptionStatus { active: true });
         self.transcription

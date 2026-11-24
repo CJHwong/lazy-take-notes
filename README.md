@@ -27,7 +27,7 @@ The script first warns that a piped script runs as you and asks `[Y/n]`. An agen
 
 Then run `take-note record`.
 
-On a Mac with Apple silicon, every install method runs the native (Rust) build of the app: the first start downloads it once and checks it against a pinned SHA-256. Other systems run the Python version. If the download fails, the app runs the Python version and says why. `LTN_PYTHON=1 take-note` always runs the Python version.
+On a Mac with Apple silicon, every install method runs the native (Rust) build of the app once a release is pinned in `src/lazy_take_notes/rust_release.py` (from v0.2.0). The first start downloads it once and checks it against the pinned SHA-256. Other systems run the Python version. If the download fails, the app runs the Python version and says why. `LTN_PYTHON=1 take-note` always runs the Python version.
 
 ### Manual install
 
@@ -269,6 +269,21 @@ uv sync                  # install deps
 uv run pytest tests/ -v  # run tests
 uv run lint-imports      # check layer contracts
 ```
+
+The Rust app lives in `rust/`. Its toolchain is pinned in `rust/rust-toolchain.toml`, and its differences from the Python version are listed in [rust/PLAN.md](rust/PLAN.md):
+
+```bash
+cd rust
+cargo test               # run tests (transcribe tests need ffmpeg)
+cargo clippy --all-targets -- -D warnings
+scripts/package.sh       # build dist/lazy-take-notes-<arch>-macos.tar.gz
+```
+
+To release the Rust app:
+
+1. Run the Release workflow by hand (Actions, then Release, then Run workflow). It is a dry run: it builds and checks the package, and publishes nothing.
+2. Push a tag `v*`. The workflow publishes a GitHub Release. A tag with a `-`, such as `v0.2.0-rc.1`, is a prerelease.
+3. Run `uv run scripts/pin_rust_release.py <tag>` and commit `rust_release.py`. Users get the release when the pin reaches `main`.
 
 Architecture details are in [AGENTS.md](AGENTS.md). To build your own source plugin, see the [Plugin Development Guide](docs/PLUGINS.md).
 

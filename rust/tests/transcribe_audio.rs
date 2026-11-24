@@ -133,10 +133,10 @@ mod plumbing {
         uc.feed_audio(&speech(1.0));
         let chunk = uc.prepare_buffer().unwrap();
         assert_eq!(chunk.audio.len(), SR);
-        assert!(chunk.is_first_chunk);
+        assert!(chunk.starts_fresh);
         assert!(approx(chunk.wall_start, 0.0, 1e-9));
         assert_eq!(uc.buffered().len(), SR);
-        assert!(!uc.prepare_buffer().unwrap().is_first_chunk);
+        assert!(!uc.prepare_buffer().unwrap().starts_fresh);
     }
 
     #[test]
@@ -417,7 +417,7 @@ mod cut_sentence {
             segment("First sentence.", 0.0, 1.0),
             segment("I want to review the", 7.0, 8.0),
         ];
-        let kept = uc.apply_result(segments, chunk.wall_start, chunk.is_first_chunk, false);
+        let kept = uc.apply_result(segments, chunk.wall_start, chunk.starts_fresh, false);
         assert_eq!(texts(&kept), ["First sentence."]);
         assert_eq!(&uc.buffered()[..SR * 3], &chunk.audio[SR * 7..]);
         assert!(uc.buffered()[SR * 3..].iter().all(|s| *s == 0.25));
@@ -431,7 +431,7 @@ mod cut_sentence {
         let chunk = uc.prepare_buffer().unwrap();
         let segments = vec![segment("First.", 0.0, 1.0), segment("Second.", 7.0, 8.0)];
         assert_eq!(
-            texts(&uc.apply_result(segments, chunk.wall_start, chunk.is_first_chunk, true)),
+            texts(&uc.apply_result(segments, chunk.wall_start, chunk.starts_fresh, true)),
             ["First.", "Second."]
         );
     }
