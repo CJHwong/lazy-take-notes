@@ -2,9 +2,12 @@ name: Release
 
 # A tag v* builds the Rust app and publishes it as a GitHub Release. The Python
 # launcher runs a release only after scripts/pin_rust_release.py pins it.
+# A manual run (workflow_dispatch) is a dry run: it builds and checks the
+# package and uploads it as an artifact, but publishes nothing.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -26,7 +29,14 @@ jobs:
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --version
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --help
           test -x "$RUNNER_TEMP/lazy-take-notes-arm64-macos/coreaudio-tap"
+      - name: Keep the dry-run package
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazy-take-notes-arm64-macos
+          path: rust/dist/lazy-take-notes-arm64-macos.tar.gz
       - name: Publish the release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
