@@ -72,4 +72,7 @@ jobs:
         run: rustup toolchain install
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
+      # transcribe decodes files with ffmpeg, and the file worker tests run it.
+      - name: Install ffmpeg
+        run: brew install ffmpeg
       - run: cargo test --locked
