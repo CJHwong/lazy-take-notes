@@ -58,3 +58,19 @@ jobs:
       - run: uv run pytest tests/ -v --cov=lazy_take_notes --cov-report=xml --cov-fail-under=90
       - name: Check virtual audio capture
         run: uv run python scripts/linux-smoke/smoke_test.py
+
+  rust:
+    name: Rust (macOS arm64)
+    # The Rust app is released for macOS on Apple silicon only (release.yml).
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
