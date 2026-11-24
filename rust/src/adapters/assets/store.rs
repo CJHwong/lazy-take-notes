@@ -884,7 +884,7 @@ fn free_bytes(path: &Path) -> io::Result<u64> {
     if unsafe { libc::statvfs(c_path.as_ptr(), &mut stats) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    Ok(stats.f_bavail as u64 * stats.f_frsize as u64)
+    Ok(stats.f_bavail as u64 * stats.f_frsize)
 }
 
 fn megabytes(size: u64) -> String {

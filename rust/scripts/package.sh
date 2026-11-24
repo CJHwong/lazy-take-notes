@@ -24,7 +24,9 @@ if [ ! -x "$TAP" ]; then
     bash "$REPO_ROOT/scripts/build_native.sh"
 fi
 
-cargo build --release --manifest-path "$RUST_DIR/Cargo.toml"
+# rustup picks the toolchain from the working folder, so build from rust/:
+# rust-toolchain.toml pins it.
+(cd "$RUST_DIR" && cargo build --release)
 
 mkdir -p "$STAGE"
 cp "$RUST_DIR/target/release/lazy-take-notes" "$STAGE/"

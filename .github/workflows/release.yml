@@ -15,7 +15,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        working-directory: rust
+        run: rustup toolchain install
       - name: Build the package
         run: bash rust/scripts/package.sh
       - name: Check that the package starts
