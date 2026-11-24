@@ -62,7 +62,7 @@ jobs:
   rust:
     name: Rust (macOS arm64)
     # The Rust app is released for macOS on Apple silicon only (release.yml).
-    runs-on: macos-14
+    runs-on: macos-15
     defaults:
       run:
         working-directory: rust
