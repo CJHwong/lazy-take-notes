@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 use crate::adapters::audio::wav::snapshot;
-use crate::app::events::{Cancel, Event, Poster};
+use crate::app::events::{Cancel, Event, Nudge, Poster};
 use crate::domain::speaker_turn::SpeakerTurn;
 use crate::ports::diarizer::Diarizer;
 
@@ -36,11 +36,13 @@ impl Default for DiarizationTiming {
 ///
 /// `finish` says the recording is complete: one last pass covers whatever the
 /// earlier passes did not, then `DiarizationFinished` is posted. `cancel` stops
-/// at once, with no last pass (a shutdown).
+/// at once, with no last pass (a shutdown). `now` asks for a pass at once over
+/// any new audio (a pause), and the interval starts again after it.
 pub fn run_diarization_worker(
     poster: &Poster,
     cancel: &Cancel,
     finish: &Cancel,
+    now: &Nudge,
     audio_path: &dyn Fn() -> PathBuf,
     diarizer: &dyn Diarizer,
     timing: &DiarizationTiming,
@@ -55,8 +57,10 @@ pub fn run_diarization_worker(
     while !cancel.is_cancelled() {
         let last = finish.is_cancelled();
         let path = audio_path();
-        // The last pass takes any new audio; a running one waits for a real gain.
-        let growth = if last { 0 } else { MIN_GROWTH_BYTES };
+        // A pass asked for (a pause, the stop) takes any new audio; a timed one
+        // waits for a real gain.
+        let asked = now.take() || last;
+        let growth = if asked { 0 } else { MIN_GROWTH_BYTES };
         if let Some(size) =
             size_of(&path).filter(|&size| processed.is_none_or(|done| size > done + growth))
         {
@@ -73,7 +77,11 @@ pub fn run_diarization_worker(
             return;
         }
         let deadline = Instant::now() + timing.interval;
-        while !cancel.is_cancelled() && !finish.is_cancelled() && Instant::now() < deadline {
+        while !cancel.is_cancelled()
+            && !finish.is_cancelled()
+            && !now.is_set()
+            && Instant::now() < deadline
+        {
             std::thread::sleep(Duration::from_millis(200));
         }
     }
@@ -185,6 +193,7 @@ mod tests {
             &Poster::new(sender),
             &cancel,
             &finish,
+            &Nudge::default(),
             &path,
             &diarizer,
             &timing,
@@ -237,6 +246,7 @@ mod tests {
             &Poster::new(sender),
             &cancel,
             &finish,
+            &Nudge::default(),
             &path,
             &diarizer,
             &timing,
@@ -285,6 +295,7 @@ mod tests {
             &Poster::new(sender),
             &cancel,
             &finish,
+            &Nudge::default(),
             &path,
             &diarizer,
             &timing,
@@ -314,6 +325,7 @@ mod tests {
             &Poster::new(sender.clone()),
             &cancel,
             &finish,
+            &Nudge::default(),
             &path,
             &diarizer,
             &timing,
@@ -325,6 +337,7 @@ mod tests {
             &Poster::new(sender),
             &cancel,
             &finish,
+            &Nudge::default(),
             &path,
             &diarizer,
             &timing,
@@ -364,6 +377,7 @@ mod tests {
             &Poster::new(sender),
             &cancel,
             &finish,
+            &Nudge::default(),
             &|| wav.clone(),
             &diarizer,
             &DiarizationTiming::default(),
@@ -374,5 +388,55 @@ mod tests {
             raw,
             "the live file is left alone"
         );
+    }
+
+    #[test]
+    fn a_nudge_runs_a_pass_at_once_over_any_new_audio_and_only_then() {
+        let dir = tempfile::tempdir().unwrap();
+        let wav = dir.path().join("recording.wav");
+        recording(&wav, 4096);
+        let (cancel, finish, now) = (Cancel::default(), Cancel::default(), Nudge::default());
+        let diarizer = Steady(Mutex::new(0));
+        let (sender, _events) = tokio::sync::mpsc::unbounded_channel();
+        let calls = || *diarizer.0.lock().unwrap();
+        let wait_for = |count: u32| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while calls() < count && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            calls()
+        };
+        let (first, after_pause, after_second, still_set) = std::thread::scope(|scope| {
+            scope.spawn(|| {
+                run_diarization_worker(
+                    &Poster::new(sender),
+                    &cancel,
+                    &finish,
+                    &now,
+                    &|| wav.clone(),
+                    &diarizer,
+                    &DiarizationTiming::default(),
+                );
+            });
+            let first = wait_for(1);
+            // Less new audio than a timed pass waits for, then a pause.
+            recording(&wav, 4096 + 100);
+            now.nudge();
+            let after_pause = wait_for(2);
+            // A second pause with nothing new runs no pass, and takes the request.
+            now.nudge();
+            std::thread::sleep(Duration::from_millis(500));
+            let still_set = now.is_set();
+            // Stop before any assert: a failed one must not leave the scope waiting.
+            cancel.cancel();
+            (first, after_pause, calls(), still_set)
+        });
+        assert_eq!(first, 1, "the first pass runs at the start");
+        assert_eq!(
+            after_pause, 2,
+            "the pause runs a pass long before the 60 s interval"
+        );
+        assert_eq!(after_second, 2, "nothing new, no pass");
+        assert!(!still_set, "the worker took the request");
     }
 }

@@ -515,9 +515,17 @@ pub fn record_workers(
             ..DiarizationTiming::default()
         };
         let folder = folder.clone();
-        diarization = Some(Box::new(move |poster, cancel, finish| {
+        diarization = Some(Box::new(move |poster, cancel, finish, now| {
             let audio_path = || folder.path().join("recording.wav");
-            run_diarization_worker(&poster, &cancel, &finish, &audio_path, &diarizer, &timing);
+            run_diarization_worker(
+                &poster,
+                &cancel,
+                &finish,
+                &now,
+                &audio_path,
+                &diarizer,
+                &timing,
+            );
         }));
     }
     RecordWorkers {

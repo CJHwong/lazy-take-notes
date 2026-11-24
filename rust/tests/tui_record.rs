@@ -288,7 +288,7 @@ fn a_worker_that_stops_on_its_own_runs_the_final_digest() {
 #[test]
 fn the_stop_waits_for_the_last_speaker_pass_before_the_final_notes() {
     // The fake worker idles until the stop asks for the last pass, then labels S3.
-    let diarization: DiarizationLauncher = Box::new(|poster, cancel, finish| {
+    let diarization: DiarizationLauncher = Box::new(|poster, cancel, finish, _now| {
         while !finish.is_cancelled() && !cancel.is_cancelled() {
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -322,6 +322,40 @@ fn the_stop_waits_for_the_last_speaker_pass_before_the_final_notes() {
     let labeled =
         std::fs::read_to_string(run.session_dir().join("transcript_speakers.txt")).unwrap();
     assert!(labeled.contains("S3: hello"), "{labeled}");
+}
+
+#[test]
+fn a_pause_asks_for_a_speaker_pass_at_once() {
+    // The fake worker labels S3 only when the screen asks for a pass now.
+    let diarization: DiarizationLauncher = Box::new(|poster, cancel, _finish, now| {
+        while !now.take() && !cancel.is_cancelled() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        poster.post(Event::SpeakerTurns(vec![SpeakerTurn {
+            start: 0.0,
+            end: 2.0,
+            speaker: 3,
+        }]));
+    });
+    let mut run = start_with(true, false, Some(diarization));
+    run.recording();
+    run.post(Event::TranscriptChunk(vec![segment("hello", 0.0, 2.0)]));
+    std::thread::sleep(Duration::from_millis(100));
+    run.settle();
+    assert!(
+        !run.screen_text().contains("S3: hello"),
+        "no pass before the pause"
+    );
+    run.press("space");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !run.screen_text().contains("S3: hello") && Instant::now() < deadline {
+        run.settle();
+    }
+    assert!(
+        run.screen_text().contains("S3: hello"),
+        "{}",
+        run.screen_text()
+    );
 }
 
 // --- Named tests for the faults of test_record_app_faults.py ---

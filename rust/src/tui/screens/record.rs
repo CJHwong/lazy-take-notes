@@ -12,7 +12,7 @@ use ratatui::layout::Rect;
 use tracing::warn;
 
 use crate::adapters::audio::session_folder::SessionFolder;
-use crate::app::events::{AudioHealthReport, Cancel, Event, Poster, WorkerState};
+use crate::app::events::{AudioHealthReport, Cancel, Event, Nudge, Poster, WorkerState};
 use crate::app::headless::Launcher;
 use crate::app::logging::see_debug_log;
 use crate::ports::audio_source::AudioSource;
@@ -56,7 +56,7 @@ const QUIT_HINT: &str =
 
 /// The diarization worker: (poster, cancel: stop now, finish: the recording is
 /// complete, run the last pass).
-pub type DiarizationLauncher = Box<dyn FnOnce(Poster, Cancel, Cancel) + Send>;
+pub type DiarizationLauncher = Box<dyn FnOnce(Poster, Cancel, Cancel, Nudge) + Send>;
 
 /// What the record screen starts. The launchers run on their own threads.
 pub struct RecordWorkers {
@@ -137,6 +137,8 @@ pub struct RecordScreen {
     diarization_cancel: Cancel,
     /// Asks the diarization worker for its last pass (the recording is complete).
     diarization_finish: Cancel,
+    /// Asks the diarization worker for a pass now (a pause).
+    diarization_now: Nudge,
     paused: Arc<AtomicBool>,
     source: Arc<dyn AudioSource>,
     mic_muted: bool,
@@ -165,6 +167,7 @@ impl RecordScreen {
             cancel: Cancel::default(),
             diarization_cancel: Cancel::default(),
             diarization_finish: Cancel::default(),
+            diarization_now: Nudge::default(),
             paused: workers.paused,
             source: workers.source,
             mic_muted: workers.mic_muted,
@@ -332,6 +335,8 @@ impl RecordScreen {
             "recording"
         } else {
             self.paused.store(true, Ordering::SeqCst);
+            // The labels catch up with the audio so far while the session waits.
+            self.diarization_now.nudge();
             status.set_paused(true);
             status.set_recording(false);
             ctx.notify_with(
@@ -445,9 +450,10 @@ impl RecordScreen {
             let fallback = poster.clone();
             let cancel = self.diarization_cancel.clone();
             let finish = self.diarization_finish.clone();
+            let now = self.diarization_now.clone();
             self.mode.diarizing = true;
             ctx.spawn_thread("diarization", move || {
-                let run = std::panic::AssertUnwindSafe(|| diarization(poster, cancel, finish));
+                let run = std::panic::AssertUnwindSafe(|| diarization(poster, cancel, finish, now));
                 if std::panic::catch_unwind(run).is_err() {
                     // The notes wait for this: a crashed worker must not hold them.
                     fallback.post(Event::DiarizationFinished);

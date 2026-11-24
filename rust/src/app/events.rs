@@ -88,6 +88,25 @@ impl Poster {
     }
 }
 
+/// Ask a worker to act now. The worker takes the request, so a second one can follow.
+#[derive(Clone, Default)]
+pub struct Nudge(Arc<AtomicBool>);
+
+impl Nudge {
+    pub fn nudge(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_set(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    /// Whether a request was waiting. Clears it.
+    pub fn take(&self) -> bool {
+        self.0.swap(false, Ordering::SeqCst)
+    }
+}
+
 /// Set once to stop a worker. Workers poll it between steps.
 #[derive(Clone, Default)]
 pub struct Cancel(Arc<AtomicBool>);
