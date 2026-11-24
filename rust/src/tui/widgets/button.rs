@@ -80,8 +80,19 @@ fn draw(
         background
     };
     let accent = theme.color(variant.color());
-    let line = button_line(label.trim(), variant, focused, disabled, accent, background, theme);
-    let pad = row.width.saturating_sub(str_width(&line_text(&line)) as u16) / 2;
+    let line = button_line(
+        label.trim(),
+        variant,
+        focused,
+        disabled,
+        accent,
+        background,
+        theme,
+    );
+    let pad = row
+        .width
+        .saturating_sub(str_width(&line_text(&line)) as u16)
+        / 2;
     let rect = Rect::new(row.x + pad, row.y, row.width - pad, 1);
     frame.render_widget(Paragraph::new(line), rect);
 }
@@ -120,5 +131,8 @@ fn button_line(
 }
 
 fn line_text(line: &Line<'_>) -> String {
-    line.spans.iter().map(|span| span.content.as_ref()).collect()
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
 }

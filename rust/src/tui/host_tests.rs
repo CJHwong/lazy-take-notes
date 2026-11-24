@@ -549,8 +549,14 @@ impl Screen for Clicky {
     }
 
     fn mouse(&mut self, input: &MouseInput, _ctx: &mut Ctx) -> Action {
-        let target = input.target.as_ref().map(|t| format!("{}#{}", t.key, t.index));
-        self.0.lock().unwrap().push(format!("{:?} {target:?}", input.kind));
+        let target = input
+            .target
+            .as_ref()
+            .map(|t| format!("{}#{}", t.key, t.index));
+        self.0
+            .lock()
+            .unwrap()
+            .push(format!("{:?} {target:?}", input.kind));
         Action::None
     }
 }
@@ -715,7 +721,10 @@ fn a_repeated_toast_renews_the_one_on_screen_instead_of_stacking() {
     let mut host = Host::new("textual-dark", runtime.handle().clone());
     let ctx = host.ctx();
     for _ in 0..4 {
-        ctx.warn("Quick action already running, please wait", Duration::from_secs(3));
+        ctx.warn(
+            "Quick action already running, please wait",
+            Duration::from_secs(3),
+        );
     }
     ctx.warn("Digest in progress, please wait", Duration::from_secs(3));
     ctx.notify("Quick action already running, please wait");

@@ -208,10 +208,18 @@ pub fn hint_targets(frame: &mut Frame, area: Rect, ctx: &crate::tui::host::Ctx) 
     let buffer = frame.buffer_mut();
     for y in area.top()..area.bottom() {
         let cells: Vec<(u16, String)> = (area.left()..area.right())
-            .filter_map(|x| buffer.cell((x, y)).map(|cell| (x, cell.symbol().to_string())))
+            .filter_map(|x| {
+                buffer
+                    .cell((x, y))
+                    .map(|cell| (x, cell.symbol().to_string()))
+            })
             .collect();
         for (start, end, key) in hints_in_row(&cells) {
-            ctx.hit(Rect::new(start, y, end - start, 1), &format!("key:{key}"), 0);
+            ctx.hit(
+                Rect::new(start, y, end - start, 1),
+                &format!("key:{key}"),
+                0,
+            );
         }
     }
 }
@@ -229,10 +237,14 @@ fn hints_in_row(cells: &[(u16, String)]) -> Vec<(u16, u16, String)> {
         let Some(close) = (index + 1..cells.len()).find(|&at| cells[at].1 == "]") else {
             break;
         };
-        let key: String = cells[index + 1..close].iter().map(|(_, symbol)| symbol.as_str()).collect();
+        let key: String = cells[index + 1..close]
+            .iter()
+            .map(|(_, symbol)| symbol.as_str())
+            .collect();
         let mut end = close + 1;
         while end < cells.len() && cells[end].1 != "[" {
-            let double_space = cells[end].1 == " " && cells.get(end + 1).is_some_and(|cell| cell.1 == " ");
+            let double_space =
+                cells[end].1 == " " && cells.get(end + 1).is_some_and(|cell| cell.1 == " ");
             if double_space && end > close + 1 {
                 break;
             }
@@ -256,7 +268,10 @@ mod hint_tests {
     use super::*;
 
     fn cells(text: &str) -> Vec<(u16, String)> {
-        text.chars().enumerate().map(|(x, c)| (x as u16, c.to_string())).collect()
+        text.chars()
+            .enumerate()
+            .map(|(x, c)| (x as u16, c.to_string()))
+            .collect()
     }
 
     #[test]

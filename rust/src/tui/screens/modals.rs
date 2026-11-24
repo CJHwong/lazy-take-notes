@@ -226,7 +226,14 @@ impl Screen for MarkdownModal {
         let wanted = 2 + content_rows;
         let height = wanted.min(percent_of(area.height, self.max_height_percent, u16::MAX));
         let outer = centered(area, width, height);
-        let inner = dialog_box(frame, outer, &self.title, self.border_var(), "surface", theme);
+        let inner = dialog_box(
+            frame,
+            outer,
+            &self.title,
+            self.border_var(),
+            "surface",
+            theme,
+        );
         ctx.hit(inner, "body", 0);
         let padded = inner;
         if padded.height < 2 {

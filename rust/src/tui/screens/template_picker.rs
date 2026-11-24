@@ -527,7 +527,14 @@ impl Screen for Confirm {
         let x = inner.x + inner.width.saturating_sub(no_width + 2 + yes_width) / 2;
         let no = Rect::new(x, inner.y + 2, no_width, 1);
         let yes = Rect::new(x + no_width + 2, inner.y + 2, yes_width, 1);
-        draw_button(frame, no, "No (n)", Variant::Default, !self.yes_focused, theme);
+        draw_button(
+            frame,
+            no,
+            "No (n)",
+            Variant::Default,
+            !self.yes_focused,
+            theme,
+        );
         draw_button(frame, yes, "Yes (y)", self.yes, self.yes_focused, theme);
         ctx.hit(no, "button", 0);
         ctx.hit(yes, "button", 1);
@@ -651,7 +658,9 @@ mod tests {
         };
         let row_at = |terminal: &ratatui::Terminal<ratatui::backend::TestBackend>| -> String {
             let buffer = terminal.backend().buffer();
-            (0..30).map(|x| buffer[(x, 7)].symbol().to_string()).collect()
+            (0..30)
+                .map(|x| buffer[(x, 7)].symbol().to_string())
+                .collect()
         };
         terminal.draw(|frame| host.draw(frame)).unwrap();
         assert!(!row_at(&terminal).contains('▶'), "{}", row_at(&terminal));

@@ -904,8 +904,13 @@ impl Screen for SaveTemplate {
             .render_titled(frame, file_area, "File name", !self.on_display, theme);
         ctx.hit(file_area, "file_name", 0);
         let display_area = Rect::new(padded.x, padded.y + 3, padded.width, 3);
-        self.display_name
-            .render_titled(frame, display_area, "Display name", self.on_display, theme);
+        self.display_name.render_titled(
+            frame,
+            display_area,
+            "Display name",
+            self.on_display,
+            theme,
+        );
         ctx.hit(display_area, "display_name", 0);
         frame.render_widget(
             Paragraph::new(center(

@@ -49,13 +49,25 @@ pub enum Event {
     /// The last diarization pass, over the whole recording, is done (or failed).
     DiarizationFinished,
     TranscriptChunk(Vec<TranscriptSegment>),
-    WorkerStatus { state: WorkerState, error: String },
+    WorkerStatus {
+        state: WorkerState,
+        error: String,
+    },
     AudioHealth(AudioHealthReport),
-    ModelDownloadProgress { percent: u32, model_name: String },
-    TranscriptionStatus { active: bool },
+    ModelDownloadProgress {
+        percent: u32,
+        model_name: String,
+    },
+    TranscriptionStatus {
+        active: bool,
+    },
     /// A diarization pass started (true) or ended (false).
-    DiarizationStatus { active: bool },
-    AudioLevel { rms: f32 },
+    DiarizationStatus {
+        active: bool,
+    },
+    AudioLevel {
+        rms: f32,
+    },
 }
 
 impl Event {

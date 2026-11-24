@@ -321,6 +321,8 @@ impl Driven {
         let (x, y) = self.find("Label speakers");
         let buffer = self.terminal.backend().buffer();
         let start = x + super::form::LABEL_WIDTH;
-        (start..start + 5).map(|x| buffer[(x, y)].symbol()).collect()
+        (start..start + 5)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect()
     }
 }

@@ -138,7 +138,10 @@ impl ListCursor {
             return None;
         }
         let row = self.offset + usize::from(y - self.area.y);
-        let item = self.starts.windows(2).position(|pair| row >= pair[0] && row < pair[1])?;
+        let item = self
+            .starts
+            .windows(2)
+            .position(|pair| row >= pair[0] && row < pair[1])?;
         (!self.disabled.get(item).copied().unwrap_or(false)).then_some(item)
     }
 

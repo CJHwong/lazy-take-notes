@@ -6,8 +6,8 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::Line;
 
-use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::host::{Ctx, MouseInput, MouseKind};
+use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::list::ListCursor;
 use crate::tui::widgets::scroll::ScrollView;
@@ -184,7 +184,8 @@ impl Picker {
             body.height,
         );
         let search_area = Rect::new(pane.x, pane.y, pane.width, 3.min(pane.height));
-        self.search.render(frame, search_area, !self.list_focused, theme);
+        self.search
+            .render(frame, search_area, !self.list_focused, theme);
         ctx.hit(search_area, "search", 0);
         let list_top = (pane.y + 3).min(pane.bottom());
         let list_area = Rect::new(pane.x, list_top, pane.width, pane.bottom() - list_top);

@@ -1129,7 +1129,10 @@ fn dim(buffer: &mut Buffer, area: Rect, background: Color) {
 fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
     let theme = &ctx.theme;
     // Newest at the bottom right, older ones stacked above it. A click closes one.
-    let width = 50.min(area.width.saturating_sub(2) / 2).max(24).min(area.width);
+    let width = 50
+        .min(area.width.saturating_sub(2) / 2)
+        .max(24)
+        .min(area.width);
     let mut bottom = area.bottom().saturating_sub(1);
     for (index, toast) in ctx.toasts.iter().enumerate().rev() {
         let edge = match toast.severity {
@@ -1168,7 +1171,9 @@ fn render_toasts(frame: &mut Frame, area: Rect, ctx: &Ctx) {
             .bg(background)
             .fg(theme.on_color("foreground", background));
         frame.render_widget(
-            Paragraph::new(lines).style(style).wrap(Wrap { trim: false }),
+            Paragraph::new(lines)
+                .style(style)
+                .wrap(Wrap { trim: false }),
             Rect::new(inner.x + 1, inner.y, inner_width, inner.height),
         );
         ctx.hit(rect, "toast", index);

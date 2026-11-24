@@ -282,15 +282,14 @@ impl TextArea {
             "primary" => crate::tui::widgets::border_color(focused, theme),
             other => theme.color(other),
         };
-        let inner = crate::tui::widgets::rounded(
-            frame,
-            area,
-            title,
-            border,
-            theme.color("surface"),
-            theme,
+        let inner =
+            crate::tui::widgets::rounded(frame, area, title, border, theme.color("surface"), theme);
+        let inner = Rect::new(
+            inner.x + 1,
+            inner.y,
+            inner.width.saturating_sub(2),
+            inner.height,
         );
-        let inner = Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), inner.height);
         self.render_text(frame, inner, focused, theme);
     }
 
