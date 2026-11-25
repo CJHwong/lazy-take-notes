@@ -129,6 +129,164 @@ pub fn load(paths: &Paths, config_path: Option<&Path>) -> Loaded {
     }
 }
 
+/// What every field shows when Settings opens, by Python's widget id. The
+/// inverse of `collect`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OpeningValues {
+    /// Text fields, selects and the hints text area.
+    pub text: IndexMap<&'static str, String>,
+    pub switches: IndexMap<&'static str, bool>,
+    /// The saved speech model; the chooser marks the row with this URI.
+    pub model: String,
+    /// The language overrides as saved: locale, then model.
+    pub language_rows: Vec<(String, String)>,
+    /// The microphone choices: label, then value.
+    pub device_options: Vec<(String, String)>,
+    /// A key is stored, so the clear-key row shows.
+    pub api_key_stored: bool,
+}
+
+impl OpeningValues {
+    /// The value of a text field, select or text area.
+    pub fn text(&self, id: &str) -> &str {
+        self.text.get(id).map_or("", String::as_str)
+    }
+
+    pub fn switch(&self, id: &str) -> bool {
+        self.switches.get(id).copied().unwrap_or(false)
+    }
+}
+
+fn get<'v>(raw: &'v Value, section: &str, key: &str) -> Option<&'v Value> {
+    raw.get(section)?.get(key)
+}
+
+/// The microphone choices: the system default, the devices, and a saved device
+/// that is not connected now.
+pub fn device_options(devices: &[String], current: Option<&str>) -> Vec<(String, String)> {
+    let mut options = vec![("System default".to_string(), DEFAULT_DEVICE.to_string())];
+    options.extend(devices.iter().map(|name| (name.clone(), name.clone())));
+    if let Some(current) = current.filter(|name| !devices.iter().any(|d| d == name)) {
+        options.push((current.into(), current.into()));
+    }
+    options
+}
+
+/// The saved microphone, if one is named.
+pub fn input_device(raw: &Value) -> Option<String> {
+    get(raw, "transcription", "input_device")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+}
+
+/// What each field shows for `loaded`, with `devices` the connected microphones.
+pub fn opening_values(loaded: &Loaded, devices: &[String]) -> OpeningValues {
+    let (raw, infra) = (&loaded.raw, &loaded.infra);
+    let shown = |section: &str, key: &str| python_str(get(raw, section, key));
+    let number = |section: &str, key: &str| format_number(get(raw, section, key));
+    let model = shown("transcription", "model");
+    // A custom file is shown in its own field; the chooser then marks no row.
+    let custom = match Path::new(&model).is_absolute() {
+        true => model.clone(),
+        false => String::new(),
+    };
+    let max_lines = match get(raw, "digest", "max_lines") {
+        None | Some(Value::Null) => String::new(),
+        value => python_str(value),
+    };
+    let device = input_device(raw);
+    let diarization_device = match shown("diarization", "device") {
+        device if device.is_empty() => "auto".to_string(),
+        device => device,
+    };
+    let interval = get(raw, "diarization", "interval_s")
+        .cloned()
+        .unwrap_or(Value::from(60));
+    let hints: Vec<String> = raw
+        .get("recognition_hints")
+        .and_then(Value::as_sequence)
+        .map(|list| list.iter().map(|hint| python_str(Some(hint))).collect())
+        .unwrap_or_default();
+    let text = IndexMap::from([
+        ("cfg-llm-provider", infra.llm_provider.clone()),
+        ("cfg-ollama-host", infra.ollama.host.clone()),
+        ("cfg-openai-base-url", infra.openai.base_url.clone()),
+        (
+            "cfg-openai-api-key",
+            infra.openai.api_key.clone().unwrap_or_default(),
+        ),
+        ("cfg-digest-model", shown("digest", "model")),
+        ("cfg-interactive-model", shown("interactive", "model")),
+        ("cfg-trans-provider", infra.transcription_provider.clone()),
+        ("cfg-trans-custom-path", custom),
+        ("cfg-digest-min-lines", shown("digest", "min_lines")),
+        ("cfg-digest-min-interval", number("digest", "min_interval")),
+        ("cfg-digest-max-lines", max_lines),
+        (
+            "cfg-digest-compact",
+            shown("digest", "compact_token_threshold"),
+        ),
+        (
+            "cfg-audio-device",
+            device.clone().unwrap_or_else(|| DEFAULT_DEVICE.into()),
+        ),
+        ("cfg-trans-chunk", number("transcription", "chunk_duration")),
+        ("cfg-trans-overlap", number("transcription", "overlap")),
+        (
+            "cfg-trans-silence",
+            shown("transcription", "silence_threshold"),
+        ),
+        ("cfg-trans-pause", number("transcription", "pause_duration")),
+        ("cfg-diarization-device", diarization_device),
+        ("cfg-diarization-interval", format_number(Some(&interval))),
+        ("cfg-output-dir", shown("output", "directory")),
+        ("cfg-recognition-hints", hints.join("\n")),
+        ("cfg-theme", infra.theme.clone()),
+    ]);
+    let output = |key: &str, default: bool| {
+        get(raw, "output", key)
+            .and_then(Value::as_bool)
+            .unwrap_or(default)
+    };
+    let switches = IndexMap::from([
+        (
+            "cfg-diarization-enabled",
+            get(raw, "diarization", "enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        ),
+        ("cfg-output-save-audio", output("save_audio", true)),
+        (
+            "cfg-output-save-notes-history",
+            output("save_notes_history", true),
+        ),
+        ("cfg-output-save-context", output("save_context", true)),
+        ("cfg-output-save-debug-log", output("save_debug_log", false)),
+        ("cfg-output-auto-label", output("auto_label", true)),
+        ("cfg-show-builtin-templates", infra.show_builtin_templates),
+    ]);
+    let language_rows = raw
+        .get("transcription")
+        .and_then(|t| t.get("models"))
+        .and_then(Value::as_mapping)
+        .map(|models| {
+            models
+                .iter()
+                .filter_map(|(k, v)| Some((k.as_str()?.to_string(), v.as_str()?.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
+    OpeningValues {
+        text,
+        switches,
+        model,
+        language_rows,
+        device_options: device_options(devices, device.as_deref()),
+        api_key_stored: infra.openai.api_key.is_some(),
+    }
+}
+
 /// `float(text)` in Python, or 0.0.
 pub fn to_float(text: &str) -> f64 {
     parse_float(text).unwrap_or(0.0)

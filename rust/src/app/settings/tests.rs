@@ -10,6 +10,7 @@ use super::*;
 struct Form {
     fields: HashMap<&'static str, String>,
     switches: HashMap<&'static str, bool>,
+    languages: IndexMap<String, String>,
 }
 
 impl FormValues for Form {
@@ -30,7 +31,7 @@ impl FormValues for Form {
     }
 
     fn language_models(&mut self) -> IndexMap<String, String> {
-        IndexMap::new()
+        self.languages.clone()
     }
 
     fn chosen_model_uri(&mut self) -> String {
@@ -296,4 +297,62 @@ fn after_the_editor_the_file_is_read_again() {
     let step = runtime.task_result(edited, &mut form, &mut front).ok();
     assert_eq!(step, Some(Step::Reloaded));
     assert_eq!(runtime.theme(), "nord");
+}
+
+/// A form filled with what each field shows at open.
+fn opened_form(values: &form::OpeningValues) -> Form {
+    Form {
+        fields: values
+            .text
+            .iter()
+            .map(|(id, value)| (*id, value.clone()))
+            .chain([("chosen-model", values.model.clone())])
+            .collect(),
+        switches: values.switches.iter().map(|(id, on)| (*id, *on)).collect(),
+        languages: values
+            .language_rows
+            .iter()
+            .filter(|(locale, model)| !locale.trim().is_empty() && !model.is_empty())
+            .map(|(locale, model)| (locale.trim().to_string(), model.clone()))
+            .collect(),
+    }
+}
+
+#[test]
+fn the_opening_values_collect_back_to_the_config_python_opens() {
+    const FIXTURES: &str = include_str!("../../../tests/fixtures/settings.json");
+    let cases: Vec<serde_json::Value> = serde_json::from_str(FIXTURES).unwrap();
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let paths = Paths::under(root.path());
+        if let Some(text) = case["config"].as_str() {
+            std::fs::create_dir_all(&paths.config_dir).unwrap();
+            std::fs::write(paths.config_dir.join("config.yaml"), text).unwrap();
+        }
+        let loaded = load(&paths, None);
+        let values = form::opening_values(&loaded, &[]);
+        let collected = collect(&mut opened_form(&values), &loaded.raw, false);
+        let collected = serde_json::to_value(&collected).unwrap();
+        assert_eq!(collected, case["opened"], "{name}: the config at open");
+    }
+}
+
+#[test]
+fn opening_values_show_a_custom_model_in_its_own_field() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = Paths::under(root.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    let text = "transcription:\n  model: /models/mine.bin\n  input_device: Gone mic\n";
+    std::fs::write(paths.config_dir.join("config.yaml"), text).unwrap();
+    let values = form::opening_values(&load(&paths, None), &["Desk".into()]);
+    assert_eq!(values.text("cfg-trans-custom-path"), "/models/mine.bin");
+    assert_eq!(values.text("cfg-diarization-interval"), "60");
+    assert_eq!(values.text("cfg-audio-device"), "Gone mic");
+    let labels: Vec<&str> = values
+        .device_options
+        .iter()
+        .map(|(label, _)| label.as_str())
+        .collect();
+    assert_eq!(labels, ["System default", "Desk", "Gone mic"]);
 }

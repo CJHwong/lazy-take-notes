@@ -29,7 +29,7 @@ use self::models::{LanguageEditor, ModelChooser, SpeakerState};
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::paths::Paths;
 use crate::app::session::Severity;
-use crate::app::settings::form::{FormValues, python_str};
+use crate::app::settings::form::{FormValues, opening_values, python_str};
 use crate::app::settings::{Edited, SPEAKER, SettingsIo, SettingsRuntime, Step, open_privacy};
 use crate::app::tasks::Tasks;
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Msg, Payload, Screen};
@@ -130,21 +130,19 @@ pub struct SettingsScreen {
 }
 
 fn build_pages(runtime: &SettingsRuntime, devices: &[String]) -> [Page; 5] {
-    let loaded = &runtime.loaded;
+    let values = opening_values(&runtime.loaded, devices);
     let store = runtime.store();
     let source = pages::Source {
-        raw: &loaded.raw,
-        infra: &loaded.infra,
+        values: &values,
         catalog: store.catalog(),
         cache_root: store.cache_root(),
-        input_devices: devices,
     };
     [
         pages::models_page(&source),
-        pages::digest_page(&loaded.raw),
-        pages::audio_page(&loaded.raw, source.input_devices),
-        pages::sessions_page(&loaded.raw, &loaded.infra),
-        pages::appearance_page(&loaded.infra),
+        pages::digest_page(&values),
+        pages::audio_page(&values),
+        pages::sessions_page(&values),
+        pages::appearance_page(&values),
     ]
 }
 
