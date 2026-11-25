@@ -5,7 +5,7 @@ use std::path::Path;
 use crate::adapters::paths::Paths;
 use crate::adapters::templates::YamlTemplates;
 use crate::adapters::whisper::transcriber::SubprocessWhisperTranscriber;
-use crate::app::container::{Loaded, build_llm_client, check_transcription_provider, load_config};
+use crate::app::container::{Loaded, check_transcription_provider, load_config};
 use crate::app::headless_run::{HeadlessArgs, load_template_key, new_runtime};
 use crate::app::keep_awake::keep_awake;
 use crate::app::logging::close_file_logging;
@@ -126,21 +126,9 @@ pub fn builder_screen(
     config_path: Option<&Path>,
     base: Option<(SessionTemplate, String)>,
 ) -> crate::tui::screens::template_builder::TemplateBuilderScreen {
-    use crate::tui::screens::template_builder::{BuilderSetup, TemplateBuilderScreen};
-    let config_path = config_path.map(Path::to_path_buf);
-    let example_paths = paths.clone();
-    let setup = Box::new(move || {
-        let loaded = load_config(config_path.as_deref(), None)?;
-        let example = YamlTemplates::new(&example_paths)
-            .load_template("default_en")
-            .map_err(|e| e.to_string())?;
-        Ok(BuilderSetup {
-            llm: build_llm_client(&loaded.infra)?,
-            model: loaded.config.digest.model.clone(),
-            provider: loaded.infra.llm_provider.clone(),
-            example,
-        })
-    });
+    use crate::app::template_builder::config_setup;
+    use crate::tui::screens::template_builder::TemplateBuilderScreen;
+    let setup = config_setup(paths, config_path);
     TemplateBuilderScreen::new(setup, YamlTemplates::new(paths), base)
 }
 

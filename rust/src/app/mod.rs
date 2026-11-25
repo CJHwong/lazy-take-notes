@@ -16,4 +16,5 @@ pub mod session_commands;
 pub mod session_start;
 pub mod status_command;
 pub mod tasks;
+pub mod template_builder;
 pub mod workers;
