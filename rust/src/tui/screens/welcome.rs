@@ -23,22 +23,7 @@ pub const WELCOME_BINDINGS: [Binding; 7] = [
     bind("enter", "select_mode", "Select").priority(),
 ];
 
-/// (mode, label, description), in Python's order.
-pub const MODES: [(&str, &str, &str); 5] = [
-    ("record", "Record", "Live transcription with AI digest"),
-    (
-        "transcribe",
-        "Transcribe",
-        "Transcribe an existing audio file",
-    ),
-    ("view", "View", "Browse previously saved sessions"),
-    (
-        "create-template",
-        "Create Template",
-        "Build a custom template with AI",
-    ),
-    ("config", "Settings", "Edit app configuration"),
-];
+pub use crate::app::modes::MODES;
 
 /// The mode the picker popped with.
 pub struct ChosenMode(pub &'static str);

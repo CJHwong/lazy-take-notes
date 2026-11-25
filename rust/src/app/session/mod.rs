@@ -72,6 +72,18 @@ impl dyn SessionIo + '_ {
     }
 }
 
+/// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
+pub fn format_spoken_time(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    if total >= 3600 {
+        return format!("{}h{}m", total / 3600, (total % 3600) / 60);
+    }
+    if total >= 60 {
+        return format!("{}m{}s", total / 60, total % 60);
+    }
+    format!("{total}s")
+}
+
 /// What the front end shows next, besides notices.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
@@ -277,6 +289,27 @@ impl SessionRuntime {
     }
 
     /// The user edited the session context.
+    /// One chip per speaker, in speaker order: the number, the name the user
+    /// gave (or empty), and the seconds of speech.
+    pub fn speaker_chips(&self) -> Vec<(u32, String, f64)> {
+        let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
+        for turn in &self.controller.speaker_turns {
+            *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
+        }
+        speech
+            .into_iter()
+            .map(|(speaker, seconds)| {
+                let name = self
+                    .controller
+                    .speaker_names
+                    .get(&speaker)
+                    .cloned()
+                    .unwrap_or_default();
+                (speaker, name, seconds)
+            })
+            .collect()
+    }
+
     pub fn set_user_context(&mut self, text: String) {
         self.controller.user_context = text;
     }

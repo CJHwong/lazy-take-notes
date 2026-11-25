@@ -12,7 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::adapters::session_controller::SessionController;
-use crate::app::session::{SessionRuntime, Step};
+use crate::app::session::{SessionRuntime, Step, format_spoken_time};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
@@ -173,18 +173,6 @@ impl Default for SessionView {
     }
 }
 
-/// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
-pub fn format_spoken_time(seconds: f64) -> String {
-    let total = seconds.max(0.0) as u64;
-    if total >= 3600 {
-        return format!("{}h{}m", total / 3600, (total % 3600) / 60);
-    }
-    if total >= 60 {
-        return format!("{}m{}s", total / 60, total % 60);
-    }
-    format!("{total}s")
-}
-
 impl SessionView {
     fn header_text(&self, rt: &SessionRuntime) -> String {
         let metadata = &rt.controller.template().metadata;
@@ -297,7 +285,7 @@ impl SessionView {
         header(frame, top, &self.header_text(rt), theme);
         let left = body.width / 2;
         // The speaker bar is `height: auto`: one row once a speaker is heard.
-        let chips = speaker_chips(rt);
+        let chips = rt.speaker_chips();
         let chip_rows = wrap_chips(&chips, body.width / 2);
         let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
@@ -625,27 +613,8 @@ impl SessionView {
 }
 
 /// Each speaker heard so far: number, name, and seconds of speech.
-fn speaker_chips(rt: &SessionRuntime) -> Vec<(u32, String, f64)> {
-    let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
-    for turn in &rt.controller.speaker_turns {
-        *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
-    }
-    speech
-        .into_iter()
-        .map(|(speaker, seconds)| {
-            let name = rt
-                .controller
-                .speaker_names
-                .get(&speaker)
-                .cloned()
-                .unwrap_or_default();
-            (speaker, name, seconds)
-        })
-        .collect()
-}
-
 fn speaker_order(rt: &SessionRuntime) -> Vec<u32> {
-    speaker_chips(rt).iter().map(|chip| chip.0).collect()
+    rt.speaker_chips().iter().map(|chip| chip.0).collect()
 }
 
 /// One chip per speaker: `padding: 0 1` on the bar, and each chip `padding: 0 1`,
