@@ -638,6 +638,16 @@ impl SessionView {
         notify(window, cx, what.into(), Severity::Information, COPY_TIMEOUT);
     }
 
+    /// The session folder now. A rename moves it.
+    pub fn output_dir(&self) -> &std::path::Path {
+        &self.mode.session().output_dir
+    }
+
+    /// A recording runs and has not stopped.
+    pub fn is_recording(&self) -> bool {
+        matches!(self.mode, Mode::Record(_)) && !self.status.stopped
+    }
+
     /// The window may close now. Otherwise the recording stops, and the app
     /// ends once the audio is flushed, or after the grace time.
     pub fn should_close(&mut self, _: &mut Window, cx: &mut Context<Self>) -> bool {

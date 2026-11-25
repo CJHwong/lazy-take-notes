@@ -8,13 +8,11 @@ mod dialogs;
 mod env;
 mod preflight;
 mod session;
-mod session_picker;
 mod settings;
 mod shell;
 mod template_picker;
 mod theme;
 mod view;
-mod welcome;
 mod widgets;
 
 use std::sync::OnceLock;
@@ -23,7 +21,16 @@ use gpui_kit::*;
 
 use crate::gui::shell::Shell;
 
-actions!(ltn, [Quit]);
+actions!(
+    ltn,
+    [
+        Quit,
+        CloseWindow,
+        NewRecording,
+        TranscribeFile,
+        OpenSettings
+    ]
+);
 
 /// Where sessions go when LTN_OUTPUT_DIR does not say.
 const DEFAULT_OUTPUT_DIR: &str = "~/Documents/LazyTakeNotes";
@@ -62,15 +69,41 @@ pub fn run() -> i32 {
         .with_assets(assets::Assets)
         .run(|cx: &mut App| {
             init(cx);
-            theme::apply(&crate::app::theme::saved_theme(), cx);
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-            cx.on_action(|_: &Quit, cx: &mut App| shell::request_quit(cx));
-            cx.set_menus([Menu::new("Lazy Take Notes").items([MenuItem::action("Quit", Quit)])]);
+            cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("cmd-w", CloseWindow, None),
+                KeyBinding::new("cmd-n", NewRecording, None),
+                KeyBinding::new("cmd-o", TranscribeFile, None),
+                KeyBinding::new("cmd-,", OpenSettings, None),
+            ]);
+            // A key reaches these while the window dispatches it, and the
+            // window cannot be updated then: each runs once the dispatch ends.
+            cx.on_action(|_: &Quit, cx: &mut App| cx.defer(shell::request_quit));
+            cx.on_action(|_: &CloseWindow, cx: &mut App| cx.defer(shell::request_quit));
+            cx.on_action(|_: &NewRecording, cx: &mut App| cx.defer(shell::new_recording));
+            cx.on_action(|_: &TranscribeFile, cx: &mut App| cx.defer(shell::transcribe_file));
+            cx.on_action(|_: &OpenSettings, cx: &mut App| cx.defer(shell::open_settings));
+            cx.set_menus([
+                Menu::new("Lazy Take Notes").items([
+                    MenuItem::action("Settings…", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Lazy Take Notes", Quit),
+                ]),
+                Menu::new("File").items([
+                    MenuItem::action("New Recording", NewRecording),
+                    MenuItem::action("Transcribe File…", TranscribeFile),
+                    MenuItem::separator(),
+                    MenuItem::action("Close Window", CloseWindow),
+                ]),
+            ]);
             let options = WindowOptions {
                 titlebar: Some(TitlebarOptions {
                     title: Some("Lazy Take Notes".into()),
-                    ..Default::default()
+                    appears_transparent: true,
+                    traffic_light_position: Some(shell::TRAFFIC_LIGHTS),
                 }),
+                // The panes draw the title bar row and move the window themselves.
+                app_owns_titlebar_drag: true,
                 window_bounds: Some(WindowBounds::centered(None, size(px(1200.), px(800.)), cx)),
                 window_min_size: Some(size(px(760.), px(520.))),
                 ..Default::default()
