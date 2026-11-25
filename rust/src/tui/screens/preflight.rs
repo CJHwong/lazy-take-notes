@@ -132,7 +132,7 @@ impl PreflightScreen {
             .spawn(move || {
                 let notify = |check: &Check| sender.post(CheckUpdate(check.clone()));
                 // run_preflight catches per check; this is the last guard.
-                let result = crate::tui::terminal::catching(|| {
+                let result = crate::app::tasks::catching(|| {
                     run_preflight(&plan, transcriber.as_mut(), &notify)
                 })
                 .inspect_err(|message| {

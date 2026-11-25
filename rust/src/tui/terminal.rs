@@ -4,9 +4,7 @@
 //! TUI runs, a panic on another thread, or one a dispatch catches, goes only to
 //! `debug.log`: printed to stderr it would draw over the screen.
 
-use std::cell::Cell;
 use std::io::{self, Stdout, Write};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Once;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -22,6 +20,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::app::logging::{install_logging, log_panic};
+use crate::app::tasks::is_catching;
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
@@ -30,17 +29,13 @@ static HOOK: Once = Once::new();
 /// During an error loop the host logs a count; a backtrace per panic would fill the disk.
 static QUIET_PANICS: AtomicBool = AtomicBool::new(false);
 
-thread_local! {
-    static CATCHING: Cell<bool> = const { Cell::new(false) };
-}
-
 fn install_hook() {
     HOOK.call_once(|| {
         install_logging();
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic| {
             let quiet = ACTIVE.load(Ordering::SeqCst)
-                && (CATCHING.get() || std::thread::current().name() != Some("main"));
+                && (is_catching() || std::thread::current().name() != Some("main"));
             if quiet {
                 if !QUIET_PANICS.load(Ordering::SeqCst) {
                     log_panic(panic);
@@ -112,20 +107,6 @@ pub fn restore() {
     );
     let _ = disable_raw_mode();
     let _ = stdout.flush();
-}
-
-/// Run `body`, turning a panic into its message. The hook logs the backtrace.
-pub fn catching<R>(body: impl FnOnce() -> R) -> Result<R, String> {
-    CATCHING.set(true);
-    let result = catch_unwind(AssertUnwindSafe(body));
-    CATCHING.set(false);
-    result.map_err(|payload| {
-        payload
-            .downcast_ref::<&str>()
-            .map(|text| (*text).to_string())
-            .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "panic".into())
-    })
 }
 
 /// Clear the normal screen before a TUI starts. Between two TUIs the terminal

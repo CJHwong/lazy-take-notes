@@ -14,5 +14,6 @@ pub mod preflight;
 pub mod session_commands;
 pub mod shell;
 pub mod status_command;
+pub mod tasks;
 pub mod tui_run;
 pub mod workers;

@@ -5,7 +5,6 @@
 //! until a screen takes it. A panic in a handler goes to `debug.log` with a toast,
 //! and the app keeps running: a meeting recording must not end because of a bug.
 
-use std::any::Any;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::sync::Arc;
@@ -28,9 +27,9 @@ use tracing::{error, info, warn};
 
 use crate::app::events::{Event, Poster};
 use crate::app::logging::{critical, see_debug_log};
-use crate::app::workers::audio::panic_text;
+use crate::app::tasks::{Tasks, catching};
 use crate::tui::keys::key_name;
-use crate::tui::terminal::{self, Term, catching};
+use crate::tui::terminal::{self, Term};
 use crate::tui::theme::Theme;
 
 /// How long a shutdown signal waits for the audio worker to flush its last chunk.
@@ -45,7 +44,7 @@ pub const STORM_LOG_INTERVAL: Duration = Duration::from_secs(60);
 const TICK: Duration = Duration::from_millis(250);
 pub const NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub type Payload = Box<dyn Any + Send>;
+pub use crate::app::tasks::Payload;
 
 /// Everything that reaches the loop besides a key.
 pub enum Msg {
@@ -214,53 +213,40 @@ impl Ctx {
         self.toasts.iter().map(|toast| toast.text.clone()).collect()
     }
 
+    /// Background work whose results come back to the screen being called now:
+    /// a task result as `Msg::Task`, a worker event as `Msg::Worker`.
+    pub fn tasks(&self) -> Tasks {
+        let (results, events, from) = (self.sender.clone(), self.sender.clone(), self.current);
+        Tasks::new(
+            self.runtime.clone(),
+            Arc::new(move |payload| {
+                let _ = results.send(Msg::From(from, Box::new(Msg::Task(payload))));
+            }),
+            Arc::new(move |event| {
+                events
+                    .send(Msg::From(from, Box::new(Msg::Worker(event))))
+                    .is_ok()
+            }),
+        )
+    }
+
     /// Run `future` on the runtime; its output comes back as `Msg::Task`.
     pub fn spawn<T, F>(&self, future: F) -> tokio::task::AbortHandle
     where
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
     {
-        let sender = self.sender.clone();
-        let from = self.current;
-        self.runtime
-            .spawn(async move {
-                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(future.await)))));
-            })
-            .abort_handle()
+        self.tasks().spawn(future)
     }
 
-    /// Like `spawn`, but a panic inside `future` comes back as `on_panic(message)`,
-    /// so the screen that waits for the result is never left waiting. A Textual
-    /// worker that raised did the same through its error handler. The panic hook
-    /// logs the stack.
+    /// `Tasks::spawn_or`, with the result coming back as `Msg::Task`.
     pub fn spawn_or<T, F, P>(&self, future: F, on_panic: P) -> tokio::task::AbortHandle
     where
         T: Send + 'static,
         F: Future<Output = T> + Send + 'static,
         P: FnOnce(String) -> T + Send + 'static,
     {
-        /// Aborting the outer task drops this, which aborts the inner one.
-        struct AbortOnDrop(tokio::task::AbortHandle);
-        impl Drop for AbortOnDrop {
-            fn drop(&mut self) {
-                self.0.abort();
-            }
-        }
-        let inner = self.runtime.spawn(future);
-        let guard = AbortOnDrop(inner.abort_handle());
-        let sender = self.sender.clone();
-        let from = self.current;
-        self.runtime
-            .spawn(async move {
-                let _guard = guard;
-                let output = match inner.await {
-                    Ok(output) => output,
-                    Err(e) if e.is_panic() => on_panic(panic_text(&e.into_panic())),
-                    Err(_) => return,
-                };
-                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(output)))));
-            })
-            .abort_handle()
+        self.tasks().spawn_or(future, on_panic)
     }
 
     /// Run `job` on its own thread; its output comes back as `Msg::Task`.
@@ -269,30 +255,17 @@ impl Ctx {
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
     {
-        let sender = self.sender.clone();
-        let from = self.current;
-        let spawned = std::thread::Builder::new()
-            .name(name.into())
-            .spawn(move || {
-                let _ = sender.send(Msg::From(from, Box::new(Msg::Task(Box::new(job())))));
-            });
-        if let Err(e) = spawned {
-            error!(target: "ltn.app", "Cannot start thread {name}: {e}");
-        }
+        self.tasks().spawn_thread(name, job)
     }
 
-    /// Like `spawn_thread`, but a panic inside `job` comes back as
-    /// `on_panic(message)`, as `spawn_or` does for a task. The panic hook logs
-    /// the stack.
+    /// `Tasks::spawn_thread_or`, with the result coming back as `Msg::Task`.
     pub fn spawn_thread_or<T, F, P>(&self, name: &str, job: F, on_panic: P)
     where
         T: Send + 'static,
         F: FnOnce() -> T + Send + 'static,
         P: FnOnce(String) -> T + Send + 'static,
     {
-        self.spawn_thread(name, move || {
-            crate::tui::terminal::catching(job).unwrap_or_else(on_panic)
-        });
+        self.tasks().spawn_thread_or(name, job, on_panic)
     }
 
     /// A sender a thread keeps to post several results, each as `Msg::Task`.
@@ -302,20 +275,7 @@ impl Ctx {
 
     /// A poster whose events arrive as `Msg::Worker`.
     pub fn poster(&self) -> Poster {
-        let (events, mut received) = unbounded_channel();
-        let sender = self.sender.clone();
-        let from = self.current;
-        self.runtime.spawn(async move {
-            while let Some(event) = received.recv().await {
-                if sender
-                    .send(Msg::From(from, Box::new(Msg::Worker(event))))
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        });
-        Poster::new(events)
+        self.tasks().poster()
     }
 
     pub fn set_theme(&mut self, name: &str) {
