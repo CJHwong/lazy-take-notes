@@ -11,12 +11,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use lazy_take_notes::adapters::audio::session_folder::SessionFolder;
 use lazy_take_notes::adapters::session_controller::SessionController;
 use lazy_take_notes::app::events::{AudioHealthReport, Cancel, Event, WorkerState};
+use lazy_take_notes::app::session::{Step, Worker};
 use lazy_take_notes::config::build_app_config;
 use lazy_take_notes::domain::speaker_turn::SpeakerTurn;
 use lazy_take_notes::ports::audio_source::{AudioError, AudioSource};
-use lazy_take_notes::tui::host::{Action, Host};
+use lazy_take_notes::tui::host::Host;
 use lazy_take_notes::tui::screens::record::{DiarizationLauncher, RecordScreen, RecordWorkers};
-use lazy_take_notes::tui::screens::session::{Mode, Session};
+use lazy_take_notes::tui::screens::session::Session;
 
 /// Remembers the last mute the screen set.
 #[derive(Default)]
@@ -539,13 +540,7 @@ fn a_lost_mic_stays_on_the_status_bar_until_it_returns() {
 /// A mode whose worker has finished.
 struct Idle;
 
-impl Mode for Idle {
-    fn hints(&self, _state: &str) -> &'static str {
-        ""
-    }
-    fn help_rows(&self) -> &'static [&'static str] {
-        &[]
-    }
+impl Worker for Idle {
     fn worker_busy(&self) -> bool {
         false
     }
@@ -575,14 +570,12 @@ fn it_closes_once_even_when_called_again() {
         .build()
         .unwrap();
     let mut host = Host::new("textual-dark", runtime.handle().clone());
-    assert!(matches!(session.close_session(), Action::Pop(None)));
-    assert!(matches!(session.close_session(), Action::None));
+    let session = &mut session.runtime;
+    assert_eq!(session.close_session(), Step::Close);
+    assert_eq!(session.close_session(), Step::None);
     session.flow.pending_quit = true;
     session.flow.final_attempted = true;
-    assert!(matches!(
-        session.continue_pending_quit(&Idle, host.ctx()),
-        Action::None
-    ));
+    assert_eq!(session.continue_pending_quit(&Idle, host.ctx()), Step::None);
 }
 
 #[test]

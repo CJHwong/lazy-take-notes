@@ -11,6 +11,7 @@ pub mod keep_awake;
 pub mod logging;
 pub mod plugin_command;
 pub mod preflight;
+pub mod session;
 pub mod session_commands;
 pub mod shell;
 pub mod status_command;

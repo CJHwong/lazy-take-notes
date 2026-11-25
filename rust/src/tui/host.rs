@@ -27,6 +27,7 @@ use tracing::{error, info, warn};
 
 use crate::app::events::{Event, Poster};
 use crate::app::logging::{critical, see_debug_log};
+use crate::app::session::SessionIo;
 use crate::app::tasks::{Tasks, catching};
 use crate::tui::keys::key_name;
 use crate::tui::terminal::{self, Term};
@@ -56,12 +57,7 @@ pub enum Msg {
     From(u64, Box<Msg>),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Severity {
-    Information,
-    Warning,
-    Error,
-}
+pub use crate::app::session::Severity;
 
 struct Toast {
     title: String,
@@ -304,6 +300,21 @@ impl Ctx {
     /// The job a screen asked to run suspended, for tests.
     pub fn take_suspend_job(&mut self) -> Option<Box<dyn FnOnce() -> Payload + Send>> {
         self.suspend_job.take().map(|(job, _)| job)
+    }
+}
+
+/// A session's notices become toasts; its tasks report to the screen called now.
+impl SessionIo for Ctx {
+    fn notify(&mut self, text: String, severity: Severity, timeout: Duration) {
+        self.notify_with(text, severity, timeout, "");
+    }
+
+    fn tasks(&self) -> Tasks {
+        Ctx::tasks(self)
+    }
+
+    fn exit(&mut self) {
+        Ctx::exit(self);
     }
 }
 

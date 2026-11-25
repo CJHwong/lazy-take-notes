@@ -1,30 +1,19 @@
 //! What the transcribe and record screens share (Python's `BaseApp`): the
-//! panels, the digest and quick-action tasks, the label, help and the quit flow.
-//!
-//! The controller stays on the screen. A digest is three steps:
-//! `begin_digest` here, the LLM call on a task, `finish_digest` when the reply
-//! comes back as a message. A newer digest aborts the running one and abandons
-//! its prompt at once, so the history never holds two prompts.
+//! panels, the speaker bar, help and the modals. The session itself, with its
+//! digests, quick actions, label and quit flow, is `app::session`. This view
+//! forwards input to it and draws what it holds.
 
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use tokio::task::AbortHandle;
-use tracing::{debug, error};
 
-use crate::adapters::os_error::OsError;
 use crate::adapters::session_controller::SessionController;
-use crate::app::container::safe_label;
-use crate::app::logging::see_debug_log;
-use crate::domain::session_files::SPEAKER_TRANSCRIPT;
-use crate::domain::speaker_turn::SpeakerTurn;
+use crate::app::session::{SessionRuntime, Step};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
-use crate::ports::llm::{ChatResponse, LlmError};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::modals::{DownloadModal, LabelModal, MarkdownModal};
@@ -35,7 +24,6 @@ use crate::tui::screens::view::{
 use crate::tui::widgets::split_bars;
 use crate::tui::widgets::status_bar::StatusBar;
 use crate::tui::widgets::text_area::TextArea;
-use crate::usecases::digest::DigestRequest;
 
 pub const SESSION_BINDINGS: [Binding; 8] = [
     bind("tab", "app.focus_next", "Switch Panel").hidden(),
@@ -47,19 +35,6 @@ pub const SESSION_BINDINGS: [Binding; 8] = [
     bind("o", "open_session_dir", "Open").hidden(),
     bind("h", "show_help", "Help").priority(),
 ];
-
-/// Most file systems cap one name at 255 bytes; the timestamp prefix and the
-/// separator use 18. CJK labels use 3 bytes per character.
-const LABEL_MAX_BYTES: usize = 200;
-
-/// Cut `label` to `LABEL_MAX_BYTES` without splitting a character.
-pub fn fit_name(label: &str) -> String {
-    let mut end = label.len().min(LABEL_MAX_BYTES);
-    while !label.is_char_boundary(end) {
-        end -= 1;
-    }
-    label[..end].to_string()
-}
 
 /// The header text. Textual reads `[` plus a letter, `#`, `/` or `@` as a
 /// markup tag and drops it, so a locale like ` [en]` never shows.
@@ -83,70 +58,6 @@ pub fn header_text(name: &str, description: &str, locale: &str, label: &str) -> 
     }
     text
 }
-
-/// The quit and final-digest state. No screen code, so the rules have unit tests.
-#[derive(Default, Debug)]
-pub struct Flow {
-    pub digest_running: bool,
-    pub query_running: bool,
-    pub label_running: bool,
-    pub final_done: bool,
-    pub pending_quit: bool,
-    /// Never reset: a pending quit tries the final digest once, then closes even if it failed.
-    pub final_attempted: bool,
-    pub final_started: bool,
-    pub session_closed: bool,
-}
-
-/// What a pending quit does next.
-#[derive(Debug, PartialEq, Eq)]
-pub enum QuitStep {
-    Wait,
-    RunFinal,
-    Close,
-}
-
-impl Flow {
-    pub fn quit_step(&self, needs_final: bool, worker_busy: bool) -> QuitStep {
-        if !self.pending_quit || self.digest_running || self.label_running || worker_busy {
-            return QuitStep::Wait;
-        }
-        if needs_final && !self.final_attempted {
-            return QuitStep::RunFinal;
-        }
-        QuitStep::Close
-    }
-}
-
-/// A digest reply, back from its task.
-pub struct DigestReply {
-    generation: u64,
-    reply: Result<ChatResponse, LlmError>,
-}
-
-struct InFlight {
-    generation: u64,
-    request: DigestRequest,
-    is_final: bool,
-    task: AbortHandle,
-}
-
-/// A quick action's result, back from its task.
-pub struct QueryReply {
-    label: String,
-    result: Option<Result<(String, String), String>>,
-}
-
-/// A digest whose prompt could not be built. It arrives as a message, as
-/// Python's worker posts its failure.
-pub struct DigestFailed {
-    generation: u64,
-    error: String,
-    is_final: bool,
-}
-
-/// The AI label, back from its task.
-pub struct LabelReply(Option<String>);
 
 /// Which panel has the focus, in Textual's tab order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -181,41 +92,85 @@ impl Focus {
     }
 }
 
-/// What differs between transcribe and record.
-pub trait Mode {
-    /// The key hints for a worker state.
-    fn hints(&self, state: &str) -> &'static str;
-    /// The help modal's key table rows.
-    fn help_rows(&self) -> &'static [&'static str];
-    /// True while the worker still delivers transcript lines.
-    fn worker_busy(&self) -> bool;
-    /// Move the session folder.
-    fn move_folder(&mut self, from: &Path, to: &Path) -> std::io::Result<()>;
+/// A screen's key hints for a session state.
+pub type Hints = fn(&str) -> &'static str;
+
+/// A session and the view that shows it, before a record or transcribe
+/// screen takes them.
+pub struct Session {
+    pub runtime: SessionRuntime,
+    pub view: SessionView,
 }
 
-pub struct Session {
-    pub controller: SessionController,
-    pub output_dir: PathBuf,
-    pub label: String,
-    pub missing_digest: Vec<String>,
-    pub missing_interactive: Vec<String>,
+impl Session {
+    pub fn new(
+        controller: SessionController,
+        output_dir: PathBuf,
+        label: &str,
+        missing_digest: Vec<String>,
+        missing_interactive: Vec<String>,
+    ) -> Self {
+        Self {
+            runtime: SessionRuntime::new(
+                controller,
+                output_dir,
+                label,
+                missing_digest,
+                missing_interactive,
+            ),
+            view: SessionView::default(),
+        }
+    }
+}
+
+/// What a closed modal gave back to the session.
+pub enum Resumed {
+    Nothing,
+    SpeakerName(u32, String),
+    Label(String),
+}
+
+pub struct SessionView {
     pub transcript: TranscriptPanel,
     pub digest: DigestPanel,
     pub context: TextArea,
     pub status: StatusBar,
     pub focus: Focus,
-    pub flow: Flow,
-    /// Periodic digests start on their own while recording; a file waits for its end.
-    pub auto_digest: bool,
-    generation: u64,
-    in_flight: Option<InFlight>,
-    last_persist_error: Option<String>,
+    /// The key hints for each session state.
+    pub hints: Hints,
+    /// The help modal's key table rows.
+    pub help_rows: &'static [&'static str],
     awaiting_label: bool,
     /// The speaker whose name prompt is open.
     awaiting_speaker: Option<u32>,
     /// The chip clicked once: its lines are highlighted, a second click renames.
     selected_speaker: Option<u32>,
-    download_open: bool,
+    /// What the view drew of the session so far.
+    shown_lines: usize,
+    shown_relabel: u64,
+    shown_digest: u64,
+    shown_state: &'static str,
+}
+
+impl Default for SessionView {
+    fn default() -> Self {
+        Self {
+            transcript: TranscriptPanel::default(),
+            digest: DigestPanel::default(),
+            context: TextArea::default(),
+            status: StatusBar::default(),
+            focus: Focus::Transcript,
+            hints: |_| "",
+            help_rows: &[],
+            awaiting_label: false,
+            awaiting_speaker: None,
+            selected_speaker: None,
+            shown_lines: 0,
+            shown_relabel: 0,
+            shown_digest: 0,
+            shown_state: "",
+        }
+    }
 }
 
 /// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
@@ -230,50 +185,20 @@ pub fn format_spoken_time(seconds: f64) -> String {
     format!("{total}s")
 }
 
-impl Session {
-    pub fn new(
-        controller: SessionController,
-        output_dir: PathBuf,
-        label: &str,
-        missing_digest: Vec<String>,
-        missing_interactive: Vec<String>,
-    ) -> Self {
-        Self {
-            controller,
-            output_dir,
-            label: label.into(),
-            missing_digest,
-            missing_interactive,
-            transcript: TranscriptPanel::default(),
-            digest: DigestPanel::default(),
-            context: TextArea::default(),
-            status: StatusBar::default(),
-            focus: Focus::Transcript,
-            flow: Flow::default(),
-            auto_digest: true,
-            generation: 0,
-            in_flight: None,
-            last_persist_error: None,
-            awaiting_label: false,
-            awaiting_speaker: None,
-            selected_speaker: None,
-            download_open: false,
-        }
-    }
-
-    fn header_text(&self) -> String {
-        let metadata = &self.controller.template().metadata;
+impl SessionView {
+    fn header_text(&self, rt: &SessionRuntime) -> String {
+        let metadata = &rt.controller.template().metadata;
         header_text(
             &metadata.name,
             &metadata.description,
             &metadata.locale,
-            &self.label,
+            &rt.label,
         )
     }
 
-    pub fn update_hints(&mut self, mode: &dyn Mode, state: &str) {
-        self.status.keybinding_hints = mode.hints(state).into();
-        self.status.quick_action_hints = self
+    /// Python's `on_mount` for the shared parts.
+    pub fn mount(&mut self, rt: &mut SessionRuntime) {
+        self.status.quick_action_hints = rt
             .controller
             .template()
             .quick_actions
@@ -282,15 +207,10 @@ impl Session {
             .map(|(index, action)| format!("[{}] {}", index + 1, action.label))
             .collect::<Vec<_>>()
             .join("  ");
-    }
-
-    /// Python's `on_mount` for the shared parts.
-    pub fn mount(&mut self, mode: &dyn Mode, ctx: &mut Ctx) {
-        self.update_hints(mode, "idle");
-        self.status.buf_max = self.controller.config().digest.min_lines;
-        self.status.ai_notes = self.missing_digest.is_empty();
-        if !self.missing_digest.is_empty() {
-            let pulls: Vec<String> = self
+        self.status.buf_max = rt.controller.config().digest.min_lines;
+        self.status.ai_notes = rt.missing_digest.is_empty();
+        if !rt.missing_digest.is_empty() {
+            let pulls: Vec<String> = rt
                 .missing_digest
                 .iter()
                 .map(|model| format!("`ollama pull {model}`"))
@@ -300,24 +220,84 @@ impl Session {
                 pulls.join("\n\n")
             ));
         }
-        if !self.missing_interactive.is_empty() {
-            let models = self.missing_interactive.join(", ");
-            ctx.warn(
-                format!(
-                    "Quick actions disabled: model {models} not found. Run: ollama pull {models}"
-                ),
-                Duration::from_secs(10),
-            );
+        self.sync(rt);
+    }
+
+    /// Bring the panels and the status bar up to the session's state.
+    pub fn sync(&mut self, rt: &mut SessionRuntime) {
+        let state = &mut rt.status;
+        let bar = &mut self.status;
+        // Paused first: stopping while paused leaves the pause out of the timer.
+        bar.set_paused(state.paused);
+        bar.set_recording(state.recording);
+        bar.set_stopped(state.stopped);
+        bar.audio_status = state.audio_status.clone();
+        bar.mic_muted = state.mic_muted;
+        bar.audio_alert = state.audio_alert.clone();
+        bar.transcribing = state.transcribing;
+        bar.labeling_speakers = state.labeling_speakers;
+        bar.activity = state.activity.clone();
+        bar.download_percent = state.download_percent;
+        bar.download_model = state.download_model.clone();
+        bar.buf_count = state.buf_count;
+        bar.last_digest_time = state.last_digest_at;
+        for rms in std::mem::take(&mut state.levels) {
+            bar.push_level(rms);
+        }
+        if state.state != self.shown_state {
+            self.shown_state = state.state;
+            bar.keybinding_hints = (self.hints)(state.state).into();
+        }
+        if state.context_locked {
+            self.context.read_only = true;
+        }
+        if state.digest_version != self.shown_digest {
+            self.shown_digest = state.digest_version;
+            self.digest.update_digest(&state.digest);
+        }
+        self.sync_lines(rt);
+    }
+
+    /// New lines go at the end; once speakers are known, every line is
+    /// rewritten with its label.
+    fn sync_lines(&mut self, rt: &SessionRuntime) {
+        let segments = &rt.controller.all_segments;
+        let relabeled = rt.status.relabel_version != self.shown_relabel;
+        let grown = segments.len() > self.shown_lines;
+        if relabeled || (grown && !rt.controller.speaker_turns.is_empty()) {
+            self.render_all_lines(rt);
+        } else if grown {
+            for segment in &segments[self.shown_lines..] {
+                self.append_line(segment, None);
+            }
+        }
+        self.shown_relabel = rt.status.relabel_version;
+        self.shown_lines = segments.len();
+    }
+
+    /// What the session asked for next, as a screen action.
+    pub fn show(&mut self, step: Step) -> Action {
+        match step {
+            Step::None => Action::None,
+            Step::ShowQuery {
+                title,
+                body,
+                is_error,
+            } => Action::Push(Box::new(MarkdownModal::query(&title, &body, is_error))),
+            Step::ShowDownload { model } => Action::Push(Box::new(DownloadModal::new(&model))),
+            Step::Close => Action::Pop(None),
         }
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
+    /// Draw the session as it is now. The view catches up with it first.
+    pub fn render(&mut self, rt: &mut SessionRuntime, frame: &mut Frame, area: Rect, ctx: &Ctx) {
+        self.sync(rt);
         let theme = &ctx.theme;
         let (top, body, bottom) = split_bars(area, 1, self.status.height());
-        header(frame, top, &self.header_text(), theme);
+        header(frame, top, &self.header_text(rt), theme);
         let left = body.width / 2;
         // The speaker bar is `height: auto`: one row once a speaker is heard.
-        let chips = self.speaker_chips();
+        let chips = speaker_chips(rt);
         let chip_rows = wrap_chips(&chips, body.width / 2);
         let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
@@ -366,7 +346,7 @@ impl Session {
     /// A click focuses the panel under it; the wheel scrolls the transcript or
     /// the digest under the pointer.
     /// A click on a speaker chip opens its name prompt, as Python's `on_click`.
-    pub fn mouse(&mut self, input: &MouseInput) -> Action {
+    pub fn mouse(&mut self, rt: &SessionRuntime, input: &MouseInput) -> Action {
         if let (Some(index), MouseKind::Click) = (input.on("speaker"), input.kind) {
             let speaker = index as u32;
             // A click puts the focus on the bar, so Enter renames the chip too.
@@ -374,17 +354,17 @@ impl Session {
             // The first click shows the speaker's lines; a second click on it renames.
             if self.selected_speaker != Some(speaker) {
                 self.selected_speaker = Some(speaker);
-                self.sync_highlight();
+                self.sync_highlight(rt);
                 return Action::None;
             }
-            return self.ask_speaker_name(speaker);
+            return self.ask_speaker_name(rt, speaker);
         }
-        self.scroll_or_focus(input);
+        self.scroll_or_focus(rt, input);
         Action::None
     }
 
-    fn ask_speaker_name(&mut self, speaker: u32) -> Action {
-        let current = self
+    fn ask_speaker_name(&mut self, rt: &SessionRuntime, speaker: u32) -> Action {
+        let current = rt
             .controller
             .speaker_names
             .get(&speaker)
@@ -398,20 +378,16 @@ impl Session {
         )))
     }
 
-    fn speaker_order(&self) -> Vec<u32> {
-        self.speaker_chips().iter().map(|chip| chip.0).collect()
-    }
-
-    fn move_focus(&mut self, step: isize) {
-        let speakers = self.speaker_order();
+    fn move_focus(&mut self, rt: &SessionRuntime, step: isize) {
+        let speakers = speaker_order(rt);
         self.focus = self.focus.moved(step, !speakers.is_empty());
         if self.focus == Focus::Speakers {
             select_on_entry(&speakers, &mut self.selected_speaker);
-            self.sync_highlight();
+            self.sync_highlight(rt);
         }
     }
 
-    fn scroll_or_focus(&mut self, input: &MouseInput) {
+    fn scroll_or_focus(&mut self, rt: &SessionRuntime, input: &MouseInput) {
         let focus = if input.on("transcript").is_some() {
             Focus::Transcript
         } else if input.on("digest").is_some() {
@@ -427,7 +403,7 @@ impl Session {
                 if focus == Focus::Transcript {
                     // A click in the transcript drops the highlight.
                     self.selected_speaker = None;
-                    self.sync_highlight();
+                    self.sync_highlight(rt);
                 }
                 return;
             }
@@ -450,13 +426,19 @@ impl Session {
     }
 
     /// Keys the focused panel or text box takes first. None when it does not take the key.
-    pub fn focused_key(&mut self, key: &KeyEvent, name: &str, ctx: &mut Ctx) -> Option<Action> {
+    pub fn focused_key(
+        &mut self,
+        rt: &mut SessionRuntime,
+        key: &KeyEvent,
+        name: &str,
+        ctx: &mut Ctx,
+    ) -> Option<Action> {
         match self.focus {
             Focus::Context => {
                 if !self.context.key(key, name) {
                     return None;
                 }
-                self.controller.user_context = self.context.text();
+                rt.set_user_context(self.context.text());
             }
             Focus::Transcript => {
                 match crate::tui::keys::action_for(&TRANSCRIPT_PANEL_BINDINGS, name)? {
@@ -467,10 +449,10 @@ impl Session {
                 }
             }
             Focus::Speakers => {
-                let speakers = self.speaker_order();
+                let speakers = speaker_order(rt);
                 match speaker_bar_key(name, &speakers, &mut self.selected_speaker)? {
-                    BarKey::Rename(speaker) => return Some(self.ask_speaker_name(speaker)),
-                    BarKey::Selected => self.sync_highlight(),
+                    BarKey::Rename(speaker) => return Some(self.ask_speaker_name(rt, speaker)),
+                    BarKey::Selected => self.sync_highlight(rt),
                 }
             }
             Focus::Digest => match crate::tui::keys::action_for(&DIGEST_PANEL_BINDINGS, name)? {
@@ -484,56 +466,71 @@ impl Session {
     }
 
     /// A printable key the focused, editable context box takes before any binding.
-    pub fn typed_into_context(&mut self, key: &KeyEvent, name: &str) -> bool {
+    pub fn typed_into_context(
+        &mut self,
+        rt: &mut SessionRuntime,
+        key: &KeyEvent,
+        name: &str,
+    ) -> bool {
         if self.focus != Focus::Context || !self.context.consumes(key) {
             return false;
         }
         self.context.key(key, name);
-        self.controller.user_context = self.context.text();
+        rt.set_user_context(self.context.text());
         true
     }
 
-    pub fn paste(&mut self, text: &str) {
+    pub fn paste(&mut self, rt: &mut SessionRuntime, text: &str) {
         if self.focus == Focus::Context {
             self.context.paste(text);
-            self.controller.user_context = self.context.text();
+            rt.set_user_context(self.context.text());
         }
     }
 
     /// The shared screen keys after the focused panel passed. None when not one of them.
-    pub fn screen_key(&mut self, mode: &mut dyn Mode, name: &str, ctx: &mut Ctx) -> Option<Action> {
+    pub fn screen_key(
+        &mut self,
+        rt: &mut SessionRuntime,
+        name: &str,
+        ctx: &mut Ctx,
+    ) -> Option<Action> {
         let action = crate::tui::keys::action_for(&SESSION_BINDINGS, name);
         match action {
-            Some("app.focus_next") => self.move_focus(1),
-            Some("app.focus_previous") => self.move_focus(-1),
+            Some("app.focus_next") => self.move_focus(rt, 1),
+            Some("app.focus_previous") => self.move_focus(rt, -1),
             Some("rename_session") => {
                 self.awaiting_label = true;
-                return Some(Action::Push(Box::new(LabelModal::session(&self.label))));
+                return Some(Action::Push(Box::new(LabelModal::session(&rt.label))));
             }
             Some("open_session_dir") if self.status.stopped => {
-                open_session_dir(&self.output_dir, ctx)
+                open_session_dir(&rt.output_dir, ctx)
             }
             Some("open_session_dir") => {}
-            Some("show_help") => return Some(self.show_help(mode)),
-            _ => return self.quick_action_key(name, ctx),
+            Some("show_help") => return Some(self.show_help(rt)),
+            _ => return self.quick_action_key(rt, name, ctx),
         }
         Some(Action::None)
     }
 
-    fn quick_action_key(&mut self, name: &str, ctx: &mut Ctx) -> Option<Action> {
-        let count = self.controller.template().quick_actions.len();
+    fn quick_action_key(
+        &mut self,
+        rt: &mut SessionRuntime,
+        name: &str,
+        ctx: &mut Ctx,
+    ) -> Option<Action> {
+        let count = rt.quick_action_count();
         let index: usize = name.parse().ok()?;
         if index == 0 || index > count {
             return None;
         }
         // The key that started it: a press, or a click on its hint (the host logs those).
         tracing::info!(target: "ltn.app", "quick action {index} started by key {name:?}");
-        self.quick_action(name, ctx);
+        rt.quick_action(name, ctx);
         Some(Action::None)
     }
 
-    fn show_help(&self, mode: &dyn Mode) -> Action {
-        let metadata = &self.controller.template().metadata;
+    fn show_help(&self, rt: &SessionRuntime) -> Action {
+        let metadata = &rt.controller.template().metadata;
         let mut lines: Vec<String> = Vec::new();
         if !metadata.name.is_empty() {
             lines.push(format!("**Template:** {}\n", metadata.name));
@@ -547,7 +544,7 @@ impl Session {
         if !lines.is_empty() {
             lines.push(String::new());
         }
-        let min_lines = self.controller.config().digest.min_lines;
+        let min_lines = rt.controller.config().digest.min_lines;
         lines.extend([
             "### Status Bar".to_string(),
             "| Indicator | Meaning |".into(),
@@ -562,39 +559,8 @@ impl Session {
             String::new(),
             "### Keybindings".into(),
         ]);
-        lines.extend(mode.help_rows().iter().map(|row| row.to_string()));
+        lines.extend(self.help_rows.iter().map(|row| row.to_string()));
         Action::Push(Box::new(MarkdownModal::help(&lines.join("\n"))))
-    }
-
-    // --- Worker events ---
-
-    /// Lines from the worker: keep, save, show, and maybe start a digest.
-    pub fn on_transcript_chunk(&mut self, segments: &[TranscriptSegment], ctx: &mut Ctx) {
-        debug!(
-            target: "ltn.app",
-            "TranscriptChunk received: {} segments, total_all={}",
-            segments.len(),
-            self.controller.all_segments.len() + segments.len()
-        );
-        let should_digest = self.controller.on_transcript_segments(segments);
-        self.report_persist_error(ctx);
-        if self.controller.speaker_turns.is_empty() {
-            for segment in segments {
-                self.append_line(segment, None);
-            }
-        } else {
-            self.render_all_lines();
-            // The screen labels each new line now; the saved file must not lag until the next pass.
-            self.save_speaker_transcript(ctx);
-        }
-        self.status.buf_count = self.controller.digest_state.buffer.len();
-        if self.auto_digest
-            && should_digest
-            && !self.flow.digest_running
-            && self.missing_digest.is_empty()
-        {
-            self.start_digest(false, ctx);
-        }
     }
 
     /// One transcript line: `[hh:mm:ss]` dim, then the text.
@@ -617,9 +583,9 @@ impl Session {
     }
 
     /// Highlight the selected speaker's lines under the label they carry now.
-    fn sync_highlight(&mut self) {
+    fn sync_highlight(&mut self, rt: &SessionRuntime) {
         self.transcript.highlight = self.selected_speaker.map(|speaker| {
-            self.controller
+            rt.controller
                 .speaker_names
                 .get(&speaker)
                 .filter(|name| !name.is_empty())
@@ -629,499 +595,57 @@ impl Session {
     }
 
     /// Rewrite every line with its speaker label (a diarization pass relabels old lines).
-    fn render_all_lines(&mut self) {
+    fn render_all_lines(&mut self, rt: &SessionRuntime) {
         self.transcript.clear();
-        self.sync_highlight();
-        let lines: Vec<(TranscriptSegment, Option<String>)> = self
-            .controller
-            .all_segments
-            .iter()
-            .map(|segment| (segment.clone(), self.controller.speaker_label(segment)))
-            .collect();
-        for (segment, label) in lines {
-            self.append_line(&segment, label.as_deref());
+        self.sync_highlight(rt);
+        for segment in &rt.controller.all_segments {
+            let label = rt.controller.speaker_label(segment);
+            self.append_line(segment, label.as_deref());
         }
-    }
-
-    /// Each speaker heard so far: number, name, and seconds of speech.
-    fn speaker_chips(&self) -> Vec<(u32, String, f64)> {
-        let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
-        for turn in &self.controller.speaker_turns {
-            *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
-        }
-        speech
-            .into_iter()
-            .map(|(speaker, seconds)| {
-                let name = self
-                    .controller
-                    .speaker_names
-                    .get(&speaker)
-                    .cloned()
-                    .unwrap_or_default();
-                (speaker, name, seconds)
-            })
-            .collect()
-    }
-
-    /// A diarization pass: keep the turns, save them, relabel the lines.
-    pub fn on_speaker_turns(&mut self, turns: Vec<SpeakerTurn>, ctx: &mut Ctx) {
-        self.controller.set_speaker_turns(turns);
-        self.persist_speakers(ctx);
-        self.render_all_lines();
-    }
-
-    fn persist_speakers(&mut self, ctx: &mut Ctx) {
-        let text = self.controller.speakers_json();
-        if let Err(e) = std::fs::write(self.output_dir.join("speakers.json"), text) {
-            self.speakers_not_saved("speakers.json", &e, ctx);
-            return;
-        }
-        self.save_speaker_transcript(ctx);
-    }
-
-    /// The transcript with the labels shown on screen, in the format `diarize` writes.
-    fn save_speaker_transcript(&mut self, ctx: &mut Ctx) {
-        let text = self.controller.speaker_transcript();
-        let path = self.output_dir.join(SPEAKER_TRANSCRIPT);
-        if let Err(e) = std::fs::write(path, text) {
-            self.speakers_not_saved(SPEAKER_TRANSCRIPT, &e, ctx);
-        }
-    }
-
-    fn speakers_not_saved(&mut self, name: &str, e: &std::io::Error, ctx: &mut Ctx) {
-        let shown = OsError::from_io(e, Some(&self.output_dir.join(name)), None);
-        error!(target: "ltn.app", "Could not save {name}: {e}");
-        if self.last_persist_error.as_deref() != Some("speakers") {
-            self.last_persist_error = Some("speakers".into());
-            ctx.warn(
-                format!("Could not save speakers: {shown}"),
-                Duration::from_secs(10),
-            );
-        }
-    }
-
-    /// Warn once per distinct disk failure; the session keeps going.
-    fn report_persist_error(&mut self, ctx: &mut Ctx) {
-        let Some(error) = self.controller.take_persist_error() else {
-            return;
-        };
-        if self.last_persist_error.as_deref() == Some(&error) {
-            return;
-        }
-        self.last_persist_error = Some(error.clone());
-        ctx.warn(
-            format!("{error}{}", see_debug_log()),
-            Duration::from_secs(10),
-        );
-    }
-
-    /// Download progress: show it, and open the download modal once.
-    pub fn on_download_progress(&mut self, percent: u32, model_name: &str) -> Action {
-        self.status.download_percent = percent as i32;
-        self.status.download_model = model_name.into();
-        if self.download_open {
-            return Action::None;
-        }
-        self.download_open = true;
-        Action::Push(Box::new(DownloadModal::new(model_name)))
-    }
-
-    /// The download modal closed itself on this state.
-    pub fn download_closed(&mut self) {
-        self.download_open = false;
-    }
-
-    // --- Digest ---
-
-    /// Start a digest. A running one is aborted and its prompt removed first.
-    pub fn start_digest(&mut self, is_final: bool, ctx: &mut Ctx) {
-        self.status.activity = match is_final {
-            true => "Final digest...".into(),
-            false => "Digesting...".into(),
-        };
-        if let Some(old) = self.in_flight.take() {
-            old.task.abort();
-            self.controller.abandon_digest(&old.request);
-        }
-        self.generation += 1;
-        self.flow.digest_running = true;
-        let generation = self.generation;
-        let request = match self.controller.begin_digest(is_final) {
-            Ok(request) => request,
-            Err(error) => {
-                ctx.spawn(async move {
-                    DigestFailed {
-                        generation,
-                        error,
-                        is_final,
-                    }
-                });
-                return;
-            }
-        };
-        let llm = self.controller.llm();
-        let model = self.controller.digest_model().to_string();
-        let messages = request.messages.clone();
-        let task = ctx.spawn_or(
-            async move {
-                DigestReply {
-                    generation,
-                    reply: llm.chat(&model, &messages).await,
-                }
-            },
-            move |message| DigestReply {
-                generation,
-                reply: Err(LlmError::new("panic", message)),
-            },
-        );
-        self.in_flight = Some(InFlight {
-            generation,
-            request,
-            is_final,
-            task,
-        });
-    }
-
-    /// The final digest, once until it fails.
-    pub fn run_final_digest(&mut self, ctx: &mut Ctx) {
-        if self.flow.final_started {
-            return;
-        }
-        self.flow.final_started = true;
-        self.flow.final_attempted = true;
-        self.start_digest(true, ctx);
-    }
-
-    /// A reply came back. A reply for a replaced digest is dropped.
-    fn on_digest_reply(&mut self, reply: DigestReply, mode: &dyn Mode, ctx: &mut Ctx) -> Action {
-        let current = self
-            .in_flight
-            .as_ref()
-            .is_some_and(|flight| flight.generation == reply.generation);
-        if !current {
-            return Action::None;
-        }
-        let Some(flight) = self.in_flight.take() else {
-            return Action::None;
-        };
-        let result = self
-            .controller
-            .finish_digest(&flight.request, flight.is_final, reply.reply);
-        if flight.generation == self.generation {
-            self.flow.digest_running = false;
-        }
-        match result {
-            Ok(markdown) => {
-                if flight.is_final && !self.flow.pending_quit {
-                    ctx.notify_with(
-                        "Final digest ready. Press q to quit.",
-                        crate::tui::host::Severity::Information,
-                        Duration::from_secs(10),
-                        "",
-                    );
-                }
-                self.digest_ready(&markdown, flight.is_final, mode, ctx)
-            }
-            Err(error) => self.digest_failed(&error, flight.is_final, mode, ctx),
-        }
-    }
-
-    fn on_digest_failed(&mut self, failed: DigestFailed, mode: &dyn Mode, ctx: &mut Ctx) -> Action {
-        if failed.generation != self.generation || self.in_flight.is_some() {
-            return Action::None;
-        }
-        self.flow.digest_running = false;
-        self.digest_failed(&failed.error, failed.is_final, mode, ctx)
-    }
-
-    fn digest_ready(
-        &mut self,
-        markdown: &str,
-        is_final: bool,
-        mode: &dyn Mode,
-        ctx: &mut Ctx,
-    ) -> Action {
-        self.digest.update_digest(markdown);
-        self.status.buf_count = self.controller.digest_state.buffer.len();
-        self.status.last_digest_time = Some(Instant::now());
-        self.status.activity.clear();
-        self.report_persist_error(ctx);
-        if is_final {
-            self.flow.final_done = true;
-            self.run_label_task(ctx);
-        }
-        self.continue_pending_quit(mode, ctx)
-    }
-
-    fn digest_failed(
-        &mut self,
-        error: &str,
-        is_final: bool,
-        mode: &dyn Mode,
-        ctx: &mut Ctx,
-    ) -> Action {
-        if is_final && !self.flow.pending_quit {
-            ctx.error(
-                "Final digest failed. Press q to quit.",
-                Duration::from_secs(10),
-            );
-        }
-        // Allow a retry after a failed final.
-        self.flow.final_started = false;
-        self.status.activity.clear();
-        ctx.error(
-            format!("Digest failed: {error}{}", see_debug_log()),
-            Duration::from_secs(8),
-        );
-        self.continue_pending_quit(mode, ctx)
-    }
-
-    /// True when the session has notes to finish and AI notes are on.
-    pub fn needs_final_digest(&self) -> bool {
-        if !self.missing_digest.is_empty() || self.flow.final_done {
-            return false;
-        }
-        let state = &self.controller.digest_state;
-        !state.buffer.is_empty() || state.digest_count > 0
-    }
-
-    fn ai_off(&self, models: &[String], feature: &str, ctx: &mut Ctx) -> bool {
-        if models.is_empty() {
-            return false;
-        }
-        ctx.warn(
-            format!(
-                "{feature} are off for this session: {} failed the start check. The transcript is still recorded.",
-                models.join(", ")
-            ),
-            Duration::from_secs(6),
-        );
-        true
-    }
-
-    pub fn force_digest(&mut self, ctx: &mut Ctx) {
-        if self.ai_off(&self.missing_digest.clone(), "AI notes", ctx) {
-            return;
-        }
-        if self.flow.digest_running {
-            ctx.warn("Digest already in progress", Duration::from_secs(3));
-            return;
-        }
-        if self.controller.digest_state.buffer.is_empty() {
-            ctx.notify_with(
-                "Nothing in buffer to digest yet",
-                crate::tui::host::Severity::Information,
-                Duration::from_secs(3),
-                "",
-            );
-            return;
-        }
-        self.start_digest(false, ctx);
-    }
-
-    // --- Quick actions and the label ---
-
-    fn quick_action(&mut self, key: &str, ctx: &mut Ctx) {
-        if self.ai_off(&self.missing_interactive.clone(), "Quick actions", ctx) {
-            return;
-        }
-        if self.flow.digest_running {
-            ctx.warn("Digest in progress, please wait", Duration::from_secs(3));
-            return;
-        }
-        if self.flow.query_running {
-            ctx.warn(
-                "Quick action already running, please wait",
-                Duration::from_secs(3),
-            );
-            return;
-        }
-        let actions = &self.controller.template().quick_actions;
-        let label = key
-            .parse::<usize>()
-            .ok()
-            .and_then(|index| actions.get(index.wrapping_sub(1)))
-            .map_or(key.to_string(), |action| action.label.clone());
-        self.status.activity = format!("{label}...");
-        self.flow.query_running = true;
-        let job = self.controller.quick_action_job(key);
-        let fallback = label.clone();
-        ctx.spawn_or(
-            async move {
-                QueryReply {
-                    label,
-                    result: job.await,
-                }
-            },
-            move |message| QueryReply {
-                label: fallback,
-                result: Some(Err(message)),
-            },
-        );
-    }
-
-    fn on_query_reply(&mut self, reply: QueryReply) -> Action {
-        self.flow.query_running = false;
-        let (body, title, is_error) = match reply.result {
-            None => return Action::None,
-            Some(Ok((text, label))) => (text, label, false),
-            Some(Err(error)) => {
-                error!(target: "ltn.app", "Quick action failed: {error}");
-                (format!("Error: {error}"), reply.label, true)
-            }
-        };
-        self.status.activity.clear();
-        Action::Push(Box::new(MarkdownModal::query(&title, &body, is_error)))
-    }
-
-    fn run_label_task(&mut self, ctx: &mut Ctx) {
-        if self.flow.label_running
-            || !self.controller.config().output.auto_label
-            || !self.label.is_empty()
-        {
-            return;
-        }
-        let Some(job) = self.controller.label_job() else {
-            return;
-        };
-        self.flow.label_running = true;
-        ctx.spawn_or(async move { LabelReply(job.await) }, |_| LabelReply(None));
-    }
-
-    fn on_label_reply(&mut self, reply: LabelReply, mode: &mut dyn Mode, ctx: &mut Ctx) -> Action {
-        if let Some(label) = reply.0
-            && self.label.is_empty()
-        {
-            self.apply_label(&label, mode, ctx);
-        }
-        self.flow.label_running = false;
-        self.continue_pending_quit(mode, ctx)
-    }
-
-    /// Rename the folder to `<timestamp>_<label>` and show the label.
-    pub fn apply_label(&mut self, label: &str, mode: &mut dyn Mode, ctx: &mut Ctx) {
-        let safe = fit_name(&safe_label(label.trim()));
-        if safe.is_empty() {
-            return;
-        }
-        let current = self
-            .output_dir
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        // The timestamp is always the first 17 characters: "2026-02-21_143052".
-        let prefix: String = current.chars().take(17).collect();
-        let new_name = format!("{prefix}_{safe}");
-        let new_path = self
-            .output_dir
-            .parent()
-            .map_or_else(|| PathBuf::from(&new_name), |parent| parent.join(&new_name));
-        if new_path != self.output_dir {
-            if new_path.exists() {
-                ctx.error(
-                    format!("Session folder {new_name} already exists"),
-                    Duration::from_secs(8),
-                );
-                return;
-            }
-            if let Err(e) = mode.move_folder(&self.output_dir, &new_path) {
-                let text = OsError::from_io(&e, Some(&self.output_dir), Some(&new_path));
-                error!(target: "ltn.app", "Could not rename {}: {text}", self.output_dir.display());
-                ctx.error(
-                    format!("Could not rename the session folder: {text}"),
-                    Duration::from_secs(8),
-                );
-                return;
-            }
-            self.output_dir = new_path.clone();
-            self.controller.relocate(new_path);
-        }
-        self.label = safe.clone();
-        ctx.notify_with(
-            format!("Session: {safe}"),
-            crate::tui::host::Severity::Information,
-            Duration::from_secs(3),
-            "",
-        );
     }
 
     /// The label modal or another screen this one pushed closed.
-    pub fn resumed(&mut self, result: Option<Payload>, mode: &mut dyn Mode, ctx: &mut Ctx) {
+    pub fn resumed(&mut self, result: Option<Payload>) -> Resumed {
+        let text = result.and_then(|payload| payload.downcast::<String>().ok());
         if let Some(speaker) = self.awaiting_speaker.take() {
             // Escape or an empty name keeps the old one.
-            if let Some(name) = result.and_then(|payload| payload.downcast::<String>().ok()) {
-                self.controller.set_speaker_name(speaker, *name);
-                self.persist_speakers(ctx);
-                self.render_all_lines();
-            }
-            return;
+            return match text {
+                Some(name) => Resumed::SpeakerName(speaker, *name),
+                None => Resumed::Nothing,
+            };
         }
         if !std::mem::take(&mut self.awaiting_label) {
-            return;
+            return Resumed::Nothing;
         }
-        if let Some(label) = result.and_then(|payload| payload.downcast::<String>().ok()) {
-            self.apply_label(&label, mode, ctx);
-        }
-    }
-
-    // --- Quit ---
-
-    /// After q: wait for the worker, finish the notes once, let the label land, then close.
-    pub fn continue_pending_quit(&mut self, mode: &dyn Mode, ctx: &mut Ctx) -> Action {
-        match self
-            .flow
-            .quit_step(self.needs_final_digest(), mode.worker_busy())
-        {
-            QuitStep::Wait => Action::None,
-            QuitStep::RunFinal => {
-                self.run_final_digest(ctx);
-                Action::None
-            }
-            QuitStep::Close => self.close_session(),
+        match text {
+            Some(label) => Resumed::Label(*label),
+            None => Resumed::Nothing,
         }
     }
+}
 
-    /// Leave the session screen once, closing any modal above it first.
-    pub fn close_session(&mut self) -> Action {
-        if self.flow.session_closed {
-            return Action::None;
-        }
-        self.flow.session_closed = true;
-        self.flow.pending_quit = false;
-        Action::Pop(None)
+/// Each speaker heard so far: number, name, and seconds of speech.
+fn speaker_chips(rt: &SessionRuntime) -> Vec<(u32, String, f64)> {
+    let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
+    for turn in &rt.controller.speaker_turns {
+        *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
     }
+    speech
+        .into_iter()
+        .map(|(speaker, seconds)| {
+            let name = rt
+                .controller
+                .speaker_names
+                .get(&speaker)
+                .cloned()
+                .unwrap_or_default();
+            (speaker, name, seconds)
+        })
+        .collect()
+}
 
-    /// A task result for the session. Gives the message back when it is not one.
-    pub fn task_message(
-        &mut self,
-        payload: Payload,
-        mode: &mut dyn Mode,
-        ctx: &mut Ctx,
-    ) -> Result<Action, Payload> {
-        let payload = match payload.downcast::<DigestReply>() {
-            Ok(reply) => return Ok(self.on_digest_reply(*reply, mode, ctx)),
-            Err(payload) => payload,
-        };
-        let payload = match payload.downcast::<DigestFailed>() {
-            Ok(failed) => return Ok(self.on_digest_failed(*failed, mode, ctx)),
-            Err(payload) => payload,
-        };
-        let payload = match payload.downcast::<QueryReply>() {
-            Ok(reply) => return Ok(self.on_query_reply(*reply)),
-            Err(payload) => payload,
-        };
-        match payload.downcast::<LabelReply>() {
-            Ok(reply) => Ok(self.on_label_reply(*reply, mode, ctx)),
-            Err(payload) => Err(payload),
-        }
-    }
-
-    /// Abort the running tasks when the screen goes away.
-    pub fn abort_tasks(&mut self) {
-        if let Some(flight) = self.in_flight.take() {
-            flight.task.abort();
-        }
-    }
+fn speaker_order(rt: &SessionRuntime) -> Vec<u32> {
+    speaker_chips(rt).iter().map(|chip| chip.0).collect()
 }
 
 /// One chip per speaker: `padding: 0 1` on the bar, and each chip `padding: 0 1`,
@@ -1252,42 +776,6 @@ mod tests {
         assert_eq!(
             header_text("Mine", "", "1x", ""),
             "  lazy-take-notes | Mine [1x]"
-        );
-    }
-
-    #[test]
-    fn a_long_label_is_cut_on_a_character_boundary() {
-        let label = "會".repeat(100);
-        let fitted = fit_name(&label);
-        assert_eq!(fitted.len(), 198);
-        assert!(fitted.chars().all(|c| c == '會'));
-    }
-
-    #[test]
-    fn a_pending_quit_waits_then_runs_the_final_digest_once_then_closes() {
-        let mut flow = Flow::default();
-        assert_eq!(flow.quit_step(true, false), QuitStep::Wait, "no quit asked");
-        flow.pending_quit = true;
-        assert_eq!(
-            flow.quit_step(true, true),
-            QuitStep::Wait,
-            "the worker still sends lines"
-        );
-        flow.digest_running = true;
-        assert_eq!(flow.quit_step(true, false), QuitStep::Wait);
-        flow.digest_running = false;
-        assert_eq!(flow.quit_step(true, false), QuitStep::RunFinal);
-        flow.final_attempted = true;
-        assert_eq!(
-            flow.quit_step(true, false),
-            QuitStep::Close,
-            "a failed final is not retried"
-        );
-        flow.label_running = true;
-        assert_eq!(
-            flow.quit_step(false, false),
-            QuitStep::Wait,
-            "the AI label may still land"
         );
     }
 }
