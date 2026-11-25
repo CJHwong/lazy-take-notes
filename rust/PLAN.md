@@ -106,6 +106,26 @@ What another platform needs, found when the switch landed:
 
 A pinned platform also needs a `release.yml` job, a target in `package.sh`, and a key in `pin_rust_release.py`.
 
+## GUI mode (decided 2026-11-25)
+
+A native window built with GPUI Kit. It replaces the Trolley `.app`. The terminal app stays the default for the `take-note` command and does not change.
+
+- Cargo feature `gui`, off by default. `gpui-kit` (pinned `=0.11.0`) is an optional dependency that only `--features gui` compiles. The release tarball the Python launcher runs is built without it.
+- `gui/` is a front end beside `tui/`. It imports `app/` and below, never `tui/`, and `tui/` never imports `gui/`. `gpui` and `gpui_kit` appear only in `gui/`. Each screen is a view over the same UI-free runtime the TUI uses (`app/session/`, and runtimes for preflight, settings and the template builder).
+- The `.app` executable is a second binary that needs the `gui` feature. With no arguments it opens the window. With arguments it runs the normal command line, so the whisper child (`current_exe()` plus a subcommand) works inside the bundle.
+- A Finder start has no login shell: the app restores `PATH` the way `ltn-launch` does, and its Info.plist carries the microphone and system audio usage strings.
+- Closing the window or Cmd-Q while recording takes the shutdown path: stop the audio, wait for the flush, then exit.
+- The toolchain moves to Rust 1.98: GPUI Kit does not build on 1.93 or 1.96.
+- A tokio worker reaches a GPUI view through the existing channels: the view awaits the receiver in a foreground task (tested in a spike).
+
+Scope: every TUI screen. That is the menu, the pickers, preflight, record, transcribe, view, Settings, the template builder and the modals. When the `.app` passes its real runs, `scripts/trolley/` and the Trolley parts of `release.sh` and the desktop app guide go.
+
+Non-goals:
+- No Python change.
+- No Intel, Linux or Windows GUI. Those Macs lose the `.app` and keep the `take-note` command.
+- No TUI behavior change.
+- No feature the TUI does not have.
+
 ## Plugins
 
 Python plugins keep working: the Rust app runs them in a separate Python process, the plugin host, and talks to it in JSON. Nothing in a plugin changes.

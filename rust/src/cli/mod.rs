@@ -123,6 +123,16 @@ pub enum PluginAction {
 }
 
 /// Parse the arguments and run the command. Returns the exit code.
+/// The whole program: the whisper child, else the command line.
+pub fn entry() -> i32 {
+    // The whisper child is this same program; it never goes through the CLI parser.
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() == 3 && args[1] == crate::adapters::whisper::WORKER_COMMAND {
+        return crate::adapters::whisper::worker::run(&args[2]);
+    }
+    main()
+}
+
 pub fn main() -> i32 {
     let cli = Cli::parse();
     if let Some(path) = cli.config.as_deref().filter(|path| !path.exists()) {
