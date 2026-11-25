@@ -23,40 +23,22 @@ pub const WELCOME_BINDINGS: [Binding; 7] = [
     bind("enter", "select_mode", "Select").priority(),
 ];
 
+use crate::app::logo;
 pub use crate::app::modes::MODES;
+use crate::app::theme::Rgb;
 
 /// The mode the picker popped with.
 pub struct ChosenMode(pub &'static str);
 
-const PIG: Color = Color::Rgb(0xE8, 0xA8, 0x20);
-const TEAL: Color = Color::Rgb(0x4A, 0x9E, 0x9E);
-const OUTLINE: Color = Color::Rgb(0x2A, 0x18, 0x18);
-const SNOUT: Color = Color::Rgb(0xC4, 0x7A, 0x10);
+const PIG: Color = rgb(logo::PIG);
+const TEAL: Color = rgb(logo::TEAL);
 
-/// The banner pixels: two rows per text row. `.` is the screen background.
-const PIXELS: [&str; 12] = [
-    "..TTTTTTTTTTTTTTTT..",
-    ".TT.DDDDDDDDDDDD.TT.",
-    "TT.DPPPPPPPPPPPPD.TT",
-    "TT.DPDDPPPPPPDDPD.TT",
-    "TT.DPPPPPPPPPPPPD.TT",
-    "TT.DPPPSSSSSSPPPD.TT",
-    ".T.DPPPSDSSDSPPPD.T.",
-    "...DPPPSSSSSSPPPD...",
-    "...DPPPPPPPPPPPPD...",
-    "....DPPPPPPPPPPD....",
-    ".....DPPPPPPPPD.....",
-    "......DDDDDDDD......",
-];
+const fn rgb(color: Rgb) -> Color {
+    Color::Rgb(color.0, color.1, color.2)
+}
 
 fn pixel(code: u8) -> Option<Color> {
-    match code {
-        b'P' => Some(PIG),
-        b'T' => Some(TEAL),
-        b'D' => Some(OUTLINE),
-        b'S' => Some(SNOUT),
-        _ => None,
-    }
+    logo::pixel(code).map(rgb)
 }
 
 /// One text cell from a top and a bottom pixel, as Python's `_cell`.
@@ -71,7 +53,7 @@ fn cell(top: Option<Color>, bottom: Option<Color>) -> Span<'static> {
 }
 
 fn banner() -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = PIXELS
+    let mut lines: Vec<Line<'static>> = logo::PIXELS
         .chunks(2)
         .map(|pair| {
             let (top, bottom) = (pair[0].as_bytes(), pair[1].as_bytes());

@@ -4,20 +4,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use crate::adapters::config_file::load_raw;
-use crate::adapters::paths::Paths;
-use crate::tui::theme::DEFAULT_THEME;
-
-/// The theme in the default config file. `--config` does not change it, as in Python.
-pub fn saved_theme() -> String {
-    let Some(paths) = Paths::for_user() else {
-        return DEFAULT_THEME.into();
-    };
-    load_raw(&paths, None, None)
-        .ok()
-        .and_then(|raw| raw.get("theme")?.as_str().map(str::to_string))
-        .unwrap_or_else(|| DEFAULT_THEME.into())
-}
+pub use crate::app::theme::saved_theme;
 
 fn clipboard_command() -> Vec<&'static str> {
     if cfg!(target_os = "macos") {
