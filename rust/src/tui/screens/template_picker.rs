@@ -1,6 +1,5 @@
 //! Pick the template that configures a session (Python's `TemplatePicker`).
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -13,7 +12,7 @@ use ratatui::widgets::Paragraph;
 use tracing::warn;
 
 use crate::adapters::templates::YamlTemplates;
-use crate::domain::template::SessionTemplate;
+use crate::app::template_catalog::{NO_TEMPLATES, Row, TemplateCatalog};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Msg, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
 use crate::tui::screens::modals::MarkdownModal;
@@ -32,8 +31,6 @@ pub enum TemplateChoice {
     /// `a`: edit this template with the AI builder, then show the picker again.
     EditWithAi(String),
 }
-
-const NO_TEMPLATES: &str = "**No templates yet.**\n\nPress n to create one, or turn on Show built-in templates in Settings > Sessions.";
 
 /// The editor command: `$VISUAL`, then `$EDITOR`, then the platform's opener.
 pub fn resolve_editor() -> Option<Vec<String>> {
@@ -55,12 +52,6 @@ pub fn resolve_editor() -> Option<Vec<String>> {
     Some(fallback.iter().map(|part| part.to_string()).collect())
 }
 
-/// One list row: a locale header, which cannot be highlighted, or a template.
-enum Row {
-    Locale(String),
-    Template(String),
-}
-
 /// The editor ended; reload this template.
 struct Edited(String);
 
@@ -69,10 +60,7 @@ pub struct Answer(pub bool);
 
 pub struct TemplatePicker {
     picker: Picker,
-    templates: YamlTemplates,
-    user_names: BTreeSet<String>,
-    builtin_names: BTreeSet<String>,
-    loaded: BTreeMap<String, SessionTemplate>,
+    catalog: TemplateCatalog,
     rows: Vec<Row>,
     current: Option<String>,
     /// Set after `e`: a GUI editor returns at once, so reload again on focus.
@@ -82,32 +70,14 @@ pub struct TemplatePicker {
 
 impl TemplatePicker {
     pub fn new(templates: YamlTemplates, show_builtins: bool, noticed: PathBuf) -> Self {
-        let user_names = templates.user_names();
-        let builtin_names = templates.builtin_names();
-        let mut loaded = BTreeMap::new();
-        for name in templates.all_names() {
-            let hidden =
-                !show_builtins && builtin_names.contains(&name) && !user_names.contains(&name);
-            if hidden {
-                continue;
-            }
-            match templates.load_template(&name) {
-                Ok(template) => {
-                    loaded.insert(name, template);
-                }
-                Err(e) => warn!(target: "ltn.app", "Template {name} does not load: {e}"),
-            }
-        }
+        let catalog = TemplateCatalog::new(templates, show_builtins);
         let mut picker = Picker::new("Filter templates...", 40);
         picker.list.wrap = true;
         // Nothing to filter, and a focused filter would take the n key.
-        picker.list_focused = loaded.is_empty();
+        picker.list_focused = catalog.loaded.is_empty();
         let mut screen = Self {
             picker,
-            templates,
-            user_names,
-            builtin_names,
-            loaded,
+            catalog,
             rows: Vec::new(),
             current: None,
             pending_reload: None,
@@ -122,21 +92,7 @@ impl TemplatePicker {
     }
 
     fn rebuild(&mut self, query: &str) {
-        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for (name, template) in &self.loaded {
-            let matches = query.is_empty()
-                || name.to_lowercase().contains(query)
-                || template.metadata.description.to_lowercase().contains(query);
-            if matches {
-                let locale = template.metadata.locale.clone();
-                groups.entry(locale).or_default().push(name.clone());
-            }
-        }
-        self.rows.clear();
-        for (locale, names) in groups {
-            self.rows.push(Row::Locale(locale));
-            self.rows.extend(names.into_iter().map(Row::Template));
-        }
+        self.rows = self.catalog.rows(query);
         let disabled = self
             .rows
             .iter()
@@ -146,7 +102,9 @@ impl TemplatePicker {
         self.current = self.highlighted();
         match self.current.clone() {
             Some(name) => self.show_preview(&name),
-            None if self.loaded.is_empty() => self.picker.preview.set_markdown(NO_TEMPLATES),
+            None if self.catalog.loaded.is_empty() => {
+                self.picker.preview.set_markdown(NO_TEMPLATES)
+            }
             None => self.picker.preview.set_markdown("*No matching templates*"),
         }
     }
@@ -159,60 +117,9 @@ impl TemplatePicker {
     }
 
     fn show_preview(&mut self, name: &str) {
-        let Some(template) = self.loaded.get(name) else {
-            return;
-        };
-        self.picker
-            .preview
-            .set_markdown(&self.preview_markdown(name, template));
-    }
-
-    fn preview_markdown(&self, name: &str, template: &SessionTemplate) -> String {
-        let meta = &template.metadata;
-        let source = if self.user_names.contains(name) {
-            "\\[user]"
-        } else {
-            "\\[built-in]"
-        };
-        let mut lines = vec![
-            format!("## {}  {source}", meta.name),
-            String::new(),
-            match meta.description.is_empty() {
-                true => String::new(),
-                false => format!("> {}", meta.description),
-            },
-            String::new(),
-            format!("**Locale:** `{}`", meta.locale),
-        ];
-        if !template.quick_actions.is_empty() {
-            lines.extend([String::new(), "### Quick Actions".into()]);
-            for (index, action) in template.quick_actions.iter().enumerate() {
-                lines.push(format!(
-                    "- **`{}`** {} \u{2014} {}",
-                    index + 1,
-                    action.label,
-                    action.description
-                ));
-            }
+        if let Some(markdown) = self.catalog.preview_markdown(name) {
+            self.picker.preview.set_markdown(&markdown);
         }
-        if !template.recognition_hints.is_empty() {
-            lines.extend([
-                String::new(),
-                format!(
-                    "**Recognition hints:** {}",
-                    template.recognition_hints.join(", ")
-                ),
-            ]);
-        }
-        lines.extend([
-            "".into(),
-            "---".into(),
-            "".into(),
-            "### System Prompt".into(),
-            "".into(),
-        ]);
-        lines.push(template.system_prompt.clone());
-        lines.join("\n")
     }
 
     fn row_line(&self, row: &Row) -> Line<'static> {
@@ -223,7 +130,7 @@ impl TemplatePicker {
                 Style::default().add_modifier(Modifier::BOLD),
             )),
             Row::Template(name) => {
-                let template = &self.loaded[name];
+                let template = &self.catalog.loaded[name];
                 let label = match template.metadata.name.is_empty() {
                     true => name.clone(),
                     false => template.metadata.name.clone(),
@@ -232,7 +139,7 @@ impl TemplatePicker {
                     Span::raw(format!("{label}  ")),
                     Span::styled(format!("({})", template.metadata.locale), dim),
                 ];
-                if self.user_names.contains(name) {
+                if self.catalog.user_names.contains(name) {
                     spans.push(Span::raw("  "));
                     spans.push(Span::styled("[user]", dim));
                 }
@@ -252,7 +159,7 @@ impl TemplatePicker {
             );
             return;
         };
-        let path = match self.templates.ensure_user_copy(&name) {
+        let path = match self.catalog.templates.ensure_user_copy(&name) {
             Ok(path) => path,
             Err(e) => {
                 ctx.error(
@@ -276,18 +183,12 @@ impl TemplatePicker {
 
     /// Reload a template after an outside edit, rebuild the list, keep it highlighted.
     fn reload_after_edit(&mut self, name: &str, ctx: &mut Ctx) {
-        self.user_names = self.templates.user_names();
-        match self.templates.load_template(name) {
-            Ok(template) => {
-                self.loaded.insert(name.to_string(), template);
-            }
-            Err(_) => {
-                ctx.warn(
-                    format!("Template \"{name}\" has invalid YAML \u{2014} changes ignored"),
-                    Duration::from_secs(5),
-                );
-                return;
-            }
+        if self.catalog.reload(name).is_err() {
+            ctx.warn(
+                format!("Template \"{name}\" has invalid YAML \u{2014} changes ignored"),
+                Duration::from_secs(5),
+            );
+            return;
         }
         let query = self.query();
         self.rebuild(&query);
@@ -306,7 +207,7 @@ impl TemplatePicker {
         let Some(name) = self.current.clone() else {
             return Action::None;
         };
-        if !self.user_names.contains(&name) {
+        if !self.catalog.user_names.contains(&name) {
             ctx.warn("Only user templates can be deleted", Duration::from_secs(5));
             return Action::None;
         }
@@ -317,27 +218,12 @@ impl TemplatePicker {
         let Some(name) = self.current.clone() else {
             return;
         };
-        if self.templates.delete_user_template(&name).is_err() {
+        if self.catalog.delete(&name).is_err() {
             ctx.error(
                 format!("\"{name}\" is not a user template"),
                 Duration::from_secs(5),
             );
             return;
-        }
-        self.user_names = self.templates.user_names();
-        // A built-in with the same key comes back; otherwise the template is gone.
-        let builtin = self
-            .builtin_names
-            .contains(&name)
-            .then(|| self.templates.load_template(&name).ok())
-            .flatten();
-        match builtin {
-            Some(template) => {
-                self.loaded.insert(name.clone(), template);
-            }
-            None => {
-                self.loaded.remove(&name);
-            }
         }
         let query = self.query();
         self.rebuild(&query);
@@ -395,7 +281,10 @@ impl Screen for TemplatePicker {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
-        let header = format!("  Select a template ({} available)", self.loaded.len());
+        let header = format!(
+            "  Select a template ({} available)",
+            self.catalog.loaded.len()
+        );
         let rows: Vec<Line<'static>> = self.rows.iter().map(|row| self.row_line(row)).collect();
         self.picker.render(
             frame,

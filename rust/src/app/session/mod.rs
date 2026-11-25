@@ -86,6 +86,9 @@ pub fn format_spoken_time(seconds: f64) -> String {
     format!("{total}s")
 }
 
+/// How long a shutdown waits for the audio worker to flush its last chunk.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
 /// What the front end shows next, besides notices.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {

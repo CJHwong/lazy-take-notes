@@ -33,8 +33,7 @@ use crate::tui::keys::key_name;
 use crate::tui::terminal::{self, Term};
 use crate::tui::theme::Theme;
 
-/// How long a shutdown signal waits for the audio worker to flush its last chunk.
-pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+pub use crate::app::session::SHUTDOWN_GRACE;
 /// Extra time for the app's own shutdown before the watchdog ends the process.
 pub const FORCE_EXIT_AFTER: Duration = Duration::from_secs(5);
 /// More unexpected errors than this inside the window means an error loop.

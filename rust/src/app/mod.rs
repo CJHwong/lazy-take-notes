@@ -21,4 +21,5 @@ pub mod status_command;
 pub mod tasks;
 pub mod theme;
 pub mod template_builder;
+pub mod template_catalog;
 pub mod workers;
