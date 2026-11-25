@@ -33,7 +33,12 @@ static LOOP: LazyLock<BacktrackingRegex> =
 
 /// One flag per 0.1 s frame: louder than both the threshold and twice the chunk's quietest tenth.
 pub fn voiced_frames(audio: &[f32], silence_threshold: f64) -> Vec<bool> {
-    let levels: Vec<f64> = audio.chunks_exact(FRAME).map(rms).collect();
+    let levels: Vec<f64> = audio
+        .as_chunks::<FRAME>()
+        .0
+        .iter()
+        .map(|frame| rms(frame))
+        .collect();
     if levels.is_empty() {
         return Vec::new();
     }

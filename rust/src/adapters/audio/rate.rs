@@ -151,8 +151,10 @@ impl RateConverter {
         }
         let whole = self.pending.len() / BLOCK * BLOCK;
         let blocks = self.pending[..whole]
-            .chunks_exact(BLOCK)
-            .map(<[f32]>::to_vec)
+            .as_chunks::<BLOCK>()
+            .0
+            .iter()
+            .map(|block| block.to_vec())
             .collect();
         self.pending.drain(..whole);
         blocks

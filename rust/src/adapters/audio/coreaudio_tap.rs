@@ -96,8 +96,10 @@ impl Run {
             return;
         }
         let samples: Vec<f32> = raw
-            .chunks_exact(BYTES_PER_SAMPLE)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<BYTES_PER_SAMPLE>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         if !self.signal_seen.load(Ordering::Relaxed) && samples.iter().any(|&s| s != 0.0) {
             self.signal_seen.store(true, Ordering::Relaxed);

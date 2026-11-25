@@ -40,8 +40,10 @@ fn add_echo(mic: &mut [f32], call: &[f32], scale: f32, delay: f64) {
 /// The gain after each 512-sample block.
 fn gains(mic: &[f32], call: &[f32]) -> Vec<f64> {
     let mut boost = MicBoost::new(0.05, 10.0, 16_000);
-    mic.chunks_exact(BLOCK)
-        .zip(call.chunks_exact(BLOCK))
+    mic.as_chunks::<BLOCK>()
+        .0
+        .iter()
+        .zip(call.as_chunks::<BLOCK>().0)
         .map(|(mic, call)| {
             boost.apply(mic, call);
             boost.gain()
@@ -240,7 +242,12 @@ fn the_stats_line_says_what_each_source_sent() {
     let mut boost = MicBoost::new(0.05, 10.0, 16_000);
     let mic = track(&[(11, 0.004, true, 0.0, 2.0)], 2.0);
     let call = track(SILENT, 2.0);
-    for (mic, call) in mic.chunks_exact(BLOCK).zip(call.chunks_exact(BLOCK)) {
+    for (mic, call) in mic
+        .as_chunks::<BLOCK>()
+        .0
+        .iter()
+        .zip(call.as_chunks::<BLOCK>().0)
+    {
         boost.apply(mic, call);
     }
     let line = boost.stats_line();
@@ -293,7 +300,9 @@ fn the_remote_answering_right_after_the_user_does_not_get_the_users_gain() {
 fn speech_rms(audio: &[f32], from: f64, to: f64) -> f64 {
     let part = &audio[(from * RATE) as usize..((to * RATE) as usize).min(audio.len())];
     let loud: Vec<f64> = part
-        .chunks_exact(BLOCK)
+        .as_chunks::<BLOCK>()
+        .0
+        .iter()
         .map(|block| {
             (block
                 .iter()
@@ -309,8 +318,10 @@ fn speech_rms(audio: &[f32], from: f64, to: f64) -> f64 {
 
 fn boosted(mic: &[f32], call: &[f32]) -> Vec<f32> {
     let mut boost = MicBoost::new(0.05, 10.0, 16_000);
-    mic.chunks_exact(BLOCK)
-        .zip(call.chunks_exact(BLOCK))
+    mic.as_chunks::<BLOCK>()
+        .0
+        .iter()
+        .zip(call.as_chunks::<BLOCK>().0)
         .flat_map(|(mic, call)| boost.apply(mic, call))
         .collect()
 }

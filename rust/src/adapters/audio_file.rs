@@ -79,8 +79,10 @@ fn load_with(path: &Path, ffmpeg: &Path, timeout: Duration) -> Result<Vec<f32>, 
     }
     // A trailing partial sample is dropped, as numpy would refuse it; ffmpeg never writes one.
     Ok(output
-        .chunks_exact(4)
-        .map(|bytes| f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_le_bytes(*bytes))
         .collect())
 }
 

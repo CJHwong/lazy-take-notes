@@ -73,7 +73,9 @@ fn rms(samples: &[f32]) -> f64 {
 /// RMS of each whole 256-sample frame. A partial frame at the end is dropped.
 fn frame_rms(samples: &[f32]) -> Vec<f32> {
     samples
-        .chunks_exact(FRAME_SAMPLES)
+        .as_chunks::<FRAME_SAMPLES>()
+        .0
+        .iter()
         .map(|frame| (frame.iter().map(|s| s * s).sum::<f32>() / FRAME_SAMPLES as f32).sqrt())
         .collect()
 }

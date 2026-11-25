@@ -61,8 +61,10 @@ pub fn read_request(input: &mut impl BufRead) -> io::Result<Option<(Request, Vec
     let mut bytes = vec![0; request.samples * 4];
     input.read_exact(&mut bytes)?;
     let audio = bytes
-        .chunks_exact(4)
-        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|b| f32::from_le_bytes(*b))
         .collect();
     Ok(Some((request, audio)))
 }
