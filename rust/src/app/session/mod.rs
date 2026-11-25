@@ -9,6 +9,7 @@
 
 pub mod file;
 pub mod record;
+pub mod status_line;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
