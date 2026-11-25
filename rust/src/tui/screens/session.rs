@@ -12,6 +12,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::adapters::session_controller::SessionController;
+use crate::app::session::texts;
+pub use crate::app::session::texts::header_text;
 use crate::app::session::{SessionRuntime, Step, format_spoken_time};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload};
@@ -35,29 +37,6 @@ pub const SESSION_BINDINGS: [Binding; 8] = [
     bind("o", "open_session_dir", "Open").hidden(),
     bind("h", "show_help", "Help").priority(),
 ];
-
-/// The header text. Textual reads `[` plus a letter, `#`, `/` or `@` as a
-/// markup tag and drops it, so a locale like ` [en]` never shows.
-pub fn header_text(name: &str, description: &str, locale: &str, label: &str) -> String {
-    let mut text = format!("  lazy-take-notes | {name}");
-    if !description.is_empty() {
-        text.push_str(&format!(" - {description}"));
-    }
-    let tag_like = locale
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_alphabetic() || matches!(c, '#' | '/' | '@'));
-    // The space before the tag stays.
-    match (locale.is_empty(), tag_like) {
-        (true, _) => {}
-        (false, true) => text.push(' '),
-        (false, false) => text.push_str(&format!(" [{locale}]")),
-    }
-    if !label.is_empty() {
-        text.push_str(&format!(" \u{2014} {label}"));
-    }
-    text
-}
 
 /// Which panel has the focus, in Textual's tab order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -198,15 +177,8 @@ impl SessionView {
         self.status.buf_max = rt.controller.config().digest.min_lines;
         self.status.ai_notes = rt.missing_digest.is_empty();
         if !rt.missing_digest.is_empty() {
-            let pulls: Vec<String> = rt
-                .missing_digest
-                .iter()
-                .map(|model| format!("`ollama pull {model}`"))
-                .collect();
-            self.digest.update_digest(&format!(
-                "**LLM model unavailable**\n\nDigests are disabled. To enable:\n\n{}\n\nThen restart.",
-                pulls.join("\n\n")
-            ));
+            self.digest
+                .update_digest(&texts::missing_models_notice(&rt.missing_digest));
         }
         self.sync(rt);
     }
@@ -502,46 +474,16 @@ impl SessionView {
     }
 
     fn show_help(&self, rt: &SessionRuntime) -> Action {
-        let metadata = &rt.controller.template().metadata;
-        let mut lines: Vec<String> = Vec::new();
-        if !metadata.name.is_empty() {
-            lines.push(format!("**Template:** {}\n", metadata.name));
-        }
-        if !metadata.description.is_empty() {
-            lines.push(format!("**Description:** {}\n", metadata.description));
-        }
-        if !metadata.locale.is_empty() {
-            lines.push(format!("**Locale:** {}\n", metadata.locale));
-        }
-        if !lines.is_empty() {
-            lines.push(String::new());
-        }
-        let min_lines = rt.controller.config().digest.min_lines;
-        lines.extend([
-            "### Status Bar".to_string(),
-            "| Indicator | Meaning |".into(),
-            "|-----------|---------|".into(),
-            "| `\u{25cf} Rec` `\u{275a}\u{275a} Paused` `\u{25a0} Stopped` `\u{25cb} Idle` | Recording state |".into(),
-            format!("| `buf N/{min_lines}` | Lines buffered toward next digest (fires at {min_lines}) |"),
-            "| `00:00:00` | Recording time, pauses excluded |".into(),
-            "| `last Xs ago` | Time elapsed since the last digest |".into(),
-            "| `\u{2581}\u{2582}\u{2584}\u{2588}\u{2584}\u{2582}` | Mic input level \u{2014} flat means silence detected |".into(),
-            "| `\u{27f3} Transcribing\u{2026}` | Speech-to-text in progress |".into(),
-            "| `\u{27f3} Digesting\u{2026}` | LLM digest cycle in progress |".into(),
-            String::new(),
-            "### Keybindings".into(),
-        ]);
-        lines.extend(self.help_rows.iter().map(|row| row.to_string()));
-        Action::Push(Box::new(MarkdownModal::help(&lines.join("\n"))))
+        Action::Push(Box::new(MarkdownModal::help(&texts::help_markdown(
+            rt,
+            self.help_rows,
+        ))))
     }
 
     /// One transcript line: `[hh:mm:ss]` dim, then the text.
     fn append_line(&mut self, segment: &TranscriptSegment, label: Option<&str>) {
         let timestamp = format_wall_time(segment.wall_start);
-        let plain = match label {
-            Some(label) => format!("{label}: {}", segment.text),
-            None => segment.text.clone(),
-        };
+        let plain = texts::spoken_text(segment, label);
         self.transcript
             .all_text
             .push(format!("[{timestamp}] {plain}"));

@@ -10,6 +10,7 @@
 pub mod file;
 pub mod record;
 pub mod status_line;
+pub mod texts;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
