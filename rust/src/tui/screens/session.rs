@@ -215,23 +215,7 @@ impl SessionView {
     pub fn sync(&mut self, rt: &mut SessionRuntime) {
         let state = &mut rt.status;
         let bar = &mut self.status;
-        // Paused first: stopping while paused leaves the pause out of the timer.
-        bar.set_paused(state.paused);
-        bar.set_recording(state.recording);
-        bar.set_stopped(state.stopped);
-        bar.audio_status = state.audio_status.clone();
-        bar.mic_muted = state.mic_muted;
-        bar.audio_alert = state.audio_alert.clone();
-        bar.transcribing = state.transcribing;
-        bar.labeling_speakers = state.labeling_speakers;
-        bar.activity = state.activity.clone();
-        bar.download_percent = state.download_percent;
-        bar.download_model = state.download_model.clone();
-        bar.buf_count = state.buf_count;
-        bar.last_digest_time = state.last_digest_at;
-        for rms in std::mem::take(&mut state.levels) {
-            bar.push_level(rms);
-        }
+        bar.sync_from(state);
         if state.state != self.shown_state {
             self.shown_state = state.state;
             bar.keybinding_hints = (self.hints)(state.state).into();

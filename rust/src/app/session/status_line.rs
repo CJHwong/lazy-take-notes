@@ -87,6 +87,27 @@ impl Default for StatusLine {
 }
 
 impl StatusLine {
+    /// Catch up with the session, and take the input levels it gathered.
+    pub fn sync_from(&mut self, status: &mut super::Status) {
+        // Paused first: stopping while paused leaves the pause out of the timer.
+        self.set_paused(status.paused);
+        self.set_recording(status.recording);
+        self.set_stopped(status.stopped);
+        self.audio_status = status.audio_status.clone();
+        self.mic_muted = status.mic_muted;
+        self.audio_alert = status.audio_alert.clone();
+        self.transcribing = status.transcribing;
+        self.labeling_speakers = status.labeling_speakers;
+        self.activity = status.activity.clone();
+        self.download_percent = status.download_percent;
+        self.download_model = status.download_model.clone();
+        self.buf_count = status.buf_count;
+        self.last_digest_time = status.last_digest_at;
+        for rms in std::mem::take(&mut status.levels) {
+            self.push_level(rms);
+        }
+    }
+
     /// The elapsed timer starts on the first change to recording.
     pub fn set_recording(&mut self, value: bool) {
         self.recording = value;
