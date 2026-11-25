@@ -8,7 +8,9 @@ use clap::{Args, Parser, Subcommand};
 use crate::adapters::pyrepr::py_repr_json;
 use crate::app::container::{load_config, resolve_base_dir};
 use crate::app::headless_run::{self, HeadlessArgs};
-use crate::app::{diarize_command, plugin_command, session_commands, status_command};
+use crate::app::{diarize_command, session_commands, status_command};
+
+pub mod plugin_command;
 
 #[derive(Parser)]
 #[command(
@@ -211,7 +213,7 @@ fn record(
 ) -> Result<i32, String> {
     check_template_language(options)?;
     if !options.headless {
-        return crate::app::tui_run::record(&headless_args(config, output_dir, options), mute_mic);
+        return crate::tui::run::record(&headless_args(config, output_dir, options), mute_mic);
     }
     require_headless_template(options)?;
     headless_run::record(&headless_args(config, output_dir, options), mute_mic)
@@ -250,7 +252,7 @@ fn transcribe_tui(
     let picked;
     let audio_file = match audio_file {
         Some(audio_file) => audio_file,
-        None => match crate::app::tui_run::pick_file()? {
+        None => match crate::tui::run::pick_file()? {
             Some(path) => {
                 picked = path.display().to_string();
                 picked.as_str()
@@ -262,7 +264,7 @@ fn transcribe_tui(
         let quoted = py_repr_json(&serde_json::Value::String(audio_file.into()));
         return Err(format!("{quoted} is not a valid file."));
     }
-    crate::app::tui_run::transcribe(
+    crate::tui::run::transcribe(
         &headless_args(config, output_dir, options),
         Path::new(audio_file),
     )
@@ -355,7 +357,7 @@ fn view(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String> 
 fn create_template(config: Option<&Path>) -> Result<i32, String> {
     let paths = crate::adapters::paths::Paths::for_user().ok_or("no home folder")?;
     let runtime = crate::app::headless_run::new_runtime()?;
-    let screen = crate::app::tui_run::builder_screen(&paths, config, None);
+    let screen = crate::tui::run::builder_screen(&paths, config, None);
     crate::tui::host::run_screen(
         Box::new(screen),
         &crate::tui::system::saved_theme(),
@@ -407,7 +409,7 @@ fn shell(config: Option<&Path>, output_dir: Option<&str>) -> Result<i32, String>
     let kiosk = true;
     let runtime = crate::app::headless_run::new_runtime()?;
     crate::tui::terminal::clear_normal_screen();
-    let root = Box::new(crate::app::shell::Shell::new(config, output_dir, kiosk));
+    let root = Box::new(crate::tui::shell::Shell::new(config, output_dir, kiosk));
     let outcome = crate::tui::host::run_screen(
         root,
         &crate::tui::system::saved_theme(),

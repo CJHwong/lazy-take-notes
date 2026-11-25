@@ -8,5 +8,5 @@ fn main() {
     if args.len() == 3 && args[1] == WORKER_COMMAND {
         std::process::exit(worker::run(&args[2]));
     }
-    std::process::exit(lazy_take_notes::app::cli::main());
+    std::process::exit(lazy_take_notes::cli::main());
 }

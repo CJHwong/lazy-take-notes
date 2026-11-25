@@ -3,7 +3,9 @@
 pub mod host;
 pub mod keys;
 pub mod markdown;
+pub mod run;
 pub mod screens;
+pub mod shell;
 pub mod system;
 pub mod terminal;
 pub mod text;

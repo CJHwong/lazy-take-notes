@@ -11,9 +11,9 @@ use crate::adapters::paths::Paths;
 use crate::adapters::plugins::host::{Incoming, PluginHost};
 use crate::adapters::plugins::manifest::{Manifest, parse_spec_name};
 use crate::app::headless_run::HeadlessArgs;
-use crate::app::tui_run::{TranscribeSource, transcribe_source};
 use crate::domain::session_files::NOTES;
 use crate::domain::transcript::TranscriptSegment;
+use crate::tui::run::{TranscribeSource, transcribe_source};
 
 /// Say what is happening when a host start takes longer than this.
 const START_NOTICE_AFTER: Duration = Duration::from_secs(2);
