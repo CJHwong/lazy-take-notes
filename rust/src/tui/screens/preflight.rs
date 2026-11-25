@@ -39,17 +39,7 @@ const YELLOW: Color = Color::Rgb(0xff, 0xff, 0x00);
 const RED: Color = Color::Rgb(0xff, 0x00, 0x00);
 const CYAN: Color = Color::Rgb(0x00, 0xff, 0xff);
 
-/// Builds the plan again from config.yaml, so Retry sees a fix made there.
-pub type Reload = Box<dyn Fn() -> Result<PreflightPlan, String>>;
-
-/// What the screen hands back when the session may start.
-pub struct PreflightOutcome {
-    pub report: PreflightReport,
-    /// The plan the last checks ran with. The session must use its objects.
-    pub plan: Arc<PreflightPlan>,
-    /// The transcriber the checks loaded the model into.
-    pub transcriber: Box<dyn Transcriber>,
-}
+pub use crate::app::preflight::{PreflightOutcome, Reload};
 
 /// One check changed, from the check thread.
 struct CheckUpdate(Check);
@@ -132,7 +122,7 @@ impl PreflightScreen {
             .spawn(move || {
                 let notify = |check: &Check| sender.post(CheckUpdate(check.clone()));
                 // run_preflight catches per check; this is the last guard.
-                let result = crate::tui::terminal::catching(|| {
+                let result = crate::app::tasks::catching(|| {
                     run_preflight(&plan, transcriber.as_mut(), &notify)
                 })
                 .inspect_err(|message| {

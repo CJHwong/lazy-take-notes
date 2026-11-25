@@ -59,6 +59,21 @@ Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exer
 * Library mocking is only permitted at the L3 (Adapter) boundary.
 
 
+## Rust Layers
+
+The Rust app in `rust/` keeps the same four layers under role names:
+
+| Python | Rust |
+|---|---|
+| `l1_entities` | `domain/` |
+| `l2_use_cases` | `ports/`, `usecases/` |
+| `l3_interface_adapters` | `adapters/`, `config.rs` |
+| `l4_frameworks_and_drivers` | `app/` (no UI), then `tui/`, then `cli/` |
+
+Each layer imports only the layers above it in the table, and `app/` only before `tui/` and `cli/`. ratatui and crossterm stay in `tui/` and `cli/`. `rust/scripts/check_layers.py` enforces both rules in prek.
+
+`app/session/` runs a session without a screen: digests, quick actions, the label, speakers, workers and the quit flow. A front end implements `SessionIo` (notices, tasks, exit), forwards input and worker events, shows each `Step` it gets back, and draws the runtime's `Status`. The TUI screens in `tui/screens/{session,record,transcribe}.rs` are such views.
+
 ## Concurrency Model
 
 ```

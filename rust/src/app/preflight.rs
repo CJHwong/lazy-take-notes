@@ -741,6 +741,18 @@ pub fn format_report_line(check: &Check) -> String {
     line
 }
 
+/// Builds the plan again from config.yaml, so Retry sees a fix made there.
+pub type Reload = Box<dyn Fn() -> Result<PreflightPlan, String>>;
+
+/// What the screen hands back when the session may start.
+pub struct PreflightOutcome {
+    pub report: PreflightReport,
+    /// The plan the last checks ran with. The session must use its objects.
+    pub plan: Arc<PreflightPlan>,
+    /// The transcriber the checks loaded the model into.
+    pub transcriber: Box<dyn Transcriber>,
+}
+
 #[cfg(test)]
 #[path = "preflight_tests.rs"]
 pub(crate) mod tests;

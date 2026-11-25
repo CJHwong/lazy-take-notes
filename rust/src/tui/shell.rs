@@ -15,11 +15,10 @@ use crate::app::container::{Loaded, load_config, resolve_base_dir};
 use crate::app::headless_run::load_template_key;
 use crate::app::keep_awake::{KeepAwake, keep_awake};
 use crate::app::logging::close_file_logging;
-use crate::app::tui_run::{
-    TranscribeStart, builder_screen, preflight_llm, preflight_screen, record_screen,
-};
+use crate::app::session_start::{TranscribeStart, preflight_llm};
 use crate::domain::template::SessionTemplate;
 use crate::tui::host::{Action, Ctx, Msg, Payload, Screen, Severity};
+use crate::tui::run::{builder_screen, preflight_screen, record_screen};
 use crate::tui::screens::file_picker::FilePicker;
 use crate::tui::screens::preflight::PreflightOutcome;
 use crate::tui::screens::session_picker::{SessionPicker, picked_dir};
@@ -260,10 +259,13 @@ impl Shell {
         let Some(audio_path) = self.audio_path.clone() else {
             return self.failed("start_transcribe", "no audio file", ctx);
         };
-        match start.screen(
-            &crate::app::tui_run::TranscribeSource::Audio(audio_path),
-            missing,
-        ) {
+        match start
+            .start(
+                &crate::tui::run::TranscribeSource::Audio(audio_path),
+                missing,
+            )
+            .map(crate::tui::run::transcribe_screen)
+        {
             Ok(screen) => {
                 self.logging = true;
                 self.waiting = Waiting::Mode;

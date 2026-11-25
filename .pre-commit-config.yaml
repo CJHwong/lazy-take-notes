@@ -42,3 +42,9 @@ repos:
         pass_filenames: false
         language: system
         entry: uv run lint-imports
+    -   id: rust-layers
+        name: Rust layer check
+        files: ^rust/(src/.*\.rs|scripts/check_layers\.py)$
+        pass_filenames: false
+        language: system
+        entry: uv run --script rust/scripts/check_layers.py
