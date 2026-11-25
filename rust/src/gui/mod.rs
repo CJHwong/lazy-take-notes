@@ -4,6 +4,7 @@
 
 mod bridge;
 mod builder;
+mod dialogs;
 mod env;
 mod preflight;
 mod session;

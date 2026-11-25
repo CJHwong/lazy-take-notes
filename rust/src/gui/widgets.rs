@@ -34,22 +34,21 @@ pub fn mascot(pixel: Pixels) -> Div {
     div().flex().flex_col().children(rows)
 }
 
-/// The bar at the top: the app, then what this screen is about.
+/// The bar at the top, as the TUI's header: bold, centered, on `primary`.
 pub fn header(title: impl Into<SharedString>, cx: &App) -> Div {
     div()
         .flex()
         .flex_none()
         .items_center()
-        .gap_3()
-        .h(px(34.))
+        .justify_center()
+        .h(px(30.))
         .px_4()
-        .bg(color(cx, "panel"))
-        .text_color(on(cx, "foreground", "panel"))
+        .bg(color(cx, "primary"))
+        .text_color(on(cx, "text", "primary"))
+        .font_weight(FontWeight::BOLD)
         .text_sm()
-        .child(brand(px(14.)))
         .child(
             div()
-                .flex_1()
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
@@ -116,13 +115,12 @@ pub fn hint(key: &'static str, label: impl Into<SharedString>, name: &'static st
     }
 }
 
+/// What a click on a footer hint runs, with the hint's key name.
+pub type OnPress = Rc<dyn Fn(&'static str, &mut Window, &mut App)>;
+
 /// The footer: each key in its key color, then its label. A click on a hint
 /// does what the key does.
-pub fn footer(
-    hints: Vec<Hint>,
-    on_press: Rc<dyn Fn(&'static str, &mut Window, &mut App)>,
-    cx: &App,
-) -> Div {
+pub fn footer(hints: Vec<Hint>, on_press: OnPress, cx: &App) -> Div {
     let items = hints.into_iter().enumerate().map(|(index, hint)| {
         let on_press = on_press.clone();
         let name = hint.name;

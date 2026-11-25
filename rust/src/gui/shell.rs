@@ -44,9 +44,8 @@ enum Flow {
 /// The screen the window shows.
 enum Screen {
     Welcome(Entity<Welcome>),
-    TemplatePicker(Entity<TemplatePickerView>, Flow),
-    /// The builder, opened from the template picker of `Some(flow)`, or from the menu.
-    Builder(Entity<BuilderView>, Option<Flow>),
+    TemplatePicker(Entity<TemplatePickerView>),
+    Builder(Entity<BuilderView>),
     Preflight(Entity<PreflightView>),
     /// The AI check of a transcription runs.
     Checking,
@@ -202,7 +201,7 @@ impl Shell {
         let subscription = cx.subscribe_in(&picker, window, move |shell, _, event, window, cx| {
             shell.on_template(flow, event, window, cx)
         });
-        self.show(Screen::TemplatePicker(picker, flow), subscription, cx);
+        self.show(Screen::TemplatePicker(picker), subscription, cx);
     }
 
     fn on_template(
@@ -260,7 +259,7 @@ impl Shell {
                 None => shell.finished(window, cx),
             }
         });
-        self.show(Screen::Builder(builder, flow), subscription, cx);
+        self.show(Screen::Builder(builder), subscription, cx);
     }
 
     fn start_record(
@@ -465,8 +464,8 @@ impl Render for Shell {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body: AnyElement = match &self.screen {
             Screen::Welcome(view) => view.clone().into_any_element(),
-            Screen::TemplatePicker(view, _) => view.clone().into_any_element(),
-            Screen::Builder(view, _) => view.clone().into_any_element(),
+            Screen::TemplatePicker(view) => view.clone().into_any_element(),
+            Screen::Builder(view) => view.clone().into_any_element(),
             Screen::Preflight(view) => view.clone().into_any_element(),
             Screen::Checking => div()
                 .size_full()

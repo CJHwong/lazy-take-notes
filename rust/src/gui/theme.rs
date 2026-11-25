@@ -148,6 +148,61 @@ pub fn apply(name: &str, cx: &mut App) {
         theme.progress_bar = c("primary");
         theme.window_border = c("border-blurred");
         theme.switch = c("panel");
+        // Buttons, as Textual's: `surface` by default, the variant color otherwise.
+        theme.button = c("surface");
+        theme.button_hover = c("boost");
+        theme.button_active = c("surface-active");
+        theme.button_foreground = on("foreground", "surface");
+        let colors = std::ops::DerefMut::deref_mut(theme);
+        for (variable, fill, hover, active, text) in [
+            (
+                "primary",
+                &mut colors.button_primary,
+                &mut colors.button_primary_hover,
+                &mut colors.button_primary_active,
+                &mut colors.button_primary_foreground,
+            ),
+            (
+                "secondary",
+                &mut colors.button_secondary,
+                &mut colors.button_secondary_hover,
+                &mut colors.button_secondary_active,
+                &mut colors.button_secondary_foreground,
+            ),
+            (
+                "warning",
+                &mut colors.button_warning,
+                &mut colors.button_warning_hover,
+                &mut colors.button_warning_active,
+                &mut colors.button_warning_foreground,
+            ),
+            (
+                "error",
+                &mut colors.button_danger,
+                &mut colors.button_danger_hover,
+                &mut colors.button_danger_active,
+                &mut colors.button_danger_foreground,
+            ),
+            (
+                "success",
+                &mut colors.button_success,
+                &mut colors.button_success_hover,
+                &mut colors.button_success_active,
+                &mut colors.button_success_foreground,
+            ),
+            (
+                "accent",
+                &mut colors.button_info,
+                &mut colors.button_info_hover,
+                &mut colors.button_info_active,
+                &mut colors.button_info_foreground,
+            ),
+        ] {
+            *fill = c(variable);
+            *hover = c(&format!("{variable}-lighten-1"));
+            *active = c(&format!("{variable}-darken-1"));
+            *text = on("text", variable);
+        }
     });
     cx.set_global(GuiTheme(palette));
     cx.refresh_windows();
