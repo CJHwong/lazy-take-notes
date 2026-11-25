@@ -713,6 +713,7 @@ impl Page {
         )
     }
 
+    #[cfg(test)]
     pub fn set_switch(&mut self, id: &str, value: bool) {
         if let Some(Kind::Switch { on, .. }) = self.item_mut(id).map(|item| &mut item.kind) {
             *on = value;
@@ -726,6 +727,7 @@ impl Page {
         }
     }
 
+    #[cfg(test)]
     pub fn select_mut(&mut self, id: &str) -> Option<&mut Select> {
         match self.item_mut(id).map(|item| &mut item.kind) {
             Some(Kind::Select { select, .. }) => Some(select),
@@ -740,6 +742,7 @@ impl Page {
         }
     }
 
+    #[cfg(test)]
     pub fn text_area_mut(&mut self, id: &str) -> Option<&mut TextArea> {
         match self.item_mut(id).map(|item| &mut item.kind) {
             Some(Kind::TextArea(area)) => Some(area),

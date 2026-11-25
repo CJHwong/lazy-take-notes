@@ -7,40 +7,15 @@ use yaml_serde::Value;
 use super::form::{Button, Item, Kind, Page};
 use super::models::{LanguageEditor, ModelChooser, SpeakerState};
 use super::preview::Preview;
+use crate::app::settings::form::{
+    DEFAULT_DEVICE, DIARIZATION_DEVICES, LLM_PROVIDERS, THEME_ORDER, TRANSCRIPTION_PROVIDERS,
+    format_number, python_str,
+};
 use crate::config::InfraConfig;
 use crate::domain::model_asset::ModelAsset;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::select::Select;
 use crate::tui::widgets::text_area::TextArea;
-
-/// Textual's `available_themes`, in its order. The theme select lists them so.
-pub const THEME_ORDER: [&str; 20] = [
-    "textual-dark",
-    "textual-light",
-    "nord",
-    "gruvbox",
-    "catppuccin-mocha",
-    "textual-ansi",
-    "dracula",
-    "tokyo-night",
-    "monokai",
-    "flexoki",
-    "catppuccin-latte",
-    "catppuccin-frappe",
-    "catppuccin-macchiato",
-    "solarized-light",
-    "solarized-dark",
-    "rose-pine",
-    "rose-pine-moon",
-    "rose-pine-dawn",
-    "atom-one-dark",
-    "atom-one-light",
-];
-
-pub const LLM_PROVIDERS: [&str; 2] = ["ollama", "openai"];
-pub const TRANSCRIPTION_PROVIDERS: [&str; 1] = ["whisper-cpp"];
-pub const DIARIZATION_DEVICES: [&str; 5] = ["auto", "cpu", "metal", "cuda", "vulkan"];
-pub const DEFAULT_DEVICE: &str = "__default__";
 
 /// What the pages are built from.
 pub struct Source<'a> {
@@ -50,38 +25,6 @@ pub struct Source<'a> {
     pub catalog: &'a [ModelAsset],
     pub cache_root: &'a Path,
     pub input_devices: &'a [String],
-}
-
-/// `str(value)` of a config value, as Python shows it in a field.
-pub fn python_str(value: Option<&Value>) -> String {
-    match value {
-        None => String::new(),
-        Some(Value::Null) => "None".into(),
-        Some(Value::Bool(flag)) => (if *flag { "True" } else { "False" }).into(),
-        Some(Value::Number(number)) => match number.as_f64() {
-            Some(float) if number.is_f64() => crate::adapters::pyrepr::float_repr(float),
-            _ => number.to_string(),
-        },
-        Some(Value::String(text)) => text.clone(),
-        Some(other) => yaml_serde::to_string(other)
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
-    }
-}
-
-/// `format_number`: a whole number without the trailing `.0`.
-pub fn format_number(value: Option<&Value>) -> String {
-    let number = match value {
-        Some(Value::Number(number)) => number.as_f64(),
-        Some(Value::String(text)) => text.trim().parse::<f64>().ok(),
-        _ => None,
-    };
-    match number {
-        Some(number) if number.fract() == 0.0 && number.is_finite() => format!("{}", number as i64),
-        Some(number) => crate::adapters::pyrepr::float_repr(number),
-        None => python_str(value),
-    }
 }
 
 fn get<'v>(raw: &'v Value, section: &str, key: &str) -> Option<&'v Value> {

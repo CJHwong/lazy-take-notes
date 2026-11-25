@@ -1,18 +1,99 @@
 //! What the settings form reads from config.yaml and what Save writes back.
+//! The front end owns the fields; it lends them through `FormValues`.
 
 use std::path::Path;
 
+use indexmap::IndexMap;
 use yaml_serde::{Mapping, Value};
 
-use super::form::Page;
-use super::models::{LanguageEditor, ModelChooser};
-use super::pages::DEFAULT_DEVICE;
 use crate::adapters::config_file::{deep_merge, load_raw};
 use crate::adapters::paths::Paths;
 use crate::config::{
     InfraConfig, build_infra_config, defaults, drop_removed_language_models,
     language_models_for_file,
 };
+use crate::domain::model_asset::ModelAsset;
+
+/// Textual's `available_themes`, in its order. The theme select lists them so.
+pub const THEME_ORDER: [&str; 20] = [
+    "textual-dark",
+    "textual-light",
+    "nord",
+    "gruvbox",
+    "catppuccin-mocha",
+    "textual-ansi",
+    "dracula",
+    "tokyo-night",
+    "monokai",
+    "flexoki",
+    "catppuccin-latte",
+    "catppuccin-frappe",
+    "catppuccin-macchiato",
+    "solarized-light",
+    "solarized-dark",
+    "rose-pine",
+    "rose-pine-moon",
+    "rose-pine-dawn",
+    "atom-one-dark",
+    "atom-one-light",
+];
+
+pub const LLM_PROVIDERS: [&str; 2] = ["ollama", "openai"];
+pub const TRANSCRIPTION_PROVIDERS: [&str; 1] = ["whisper-cpp"];
+pub const DIARIZATION_DEVICES: [&str; 5] = ["auto", "cpu", "metal", "cuda", "vulkan"];
+/// The device select's value for the system default input.
+pub const DEFAULT_DEVICE: &str = "__default__";
+
+/// The fields of the form, by Python's widget id. A front end implements it
+/// over its own widgets, so the runtime reads the values the user sees.
+pub trait FormValues {
+    /// A text field's value.
+    fn input(&mut self, id: &str) -> String;
+    fn switch(&mut self, id: &str) -> bool;
+    fn select(&mut self, id: &str) -> String;
+    fn text_area(&mut self, id: &str) -> String;
+    /// The language overrides in row order, without a row that lacks a locale or a model.
+    fn language_models(&mut self) -> IndexMap<String, String>;
+    /// The `hf://` URI of the marked speech model row, or empty.
+    fn chosen_model_uri(&mut self) -> String;
+}
+
+/// The canonical `hf://` URI of a cataloged asset.
+pub fn model_uri(asset: &ModelAsset) -> String {
+    format!("hf://{}/{}", asset.hf_repo, asset.entry)
+}
+
+/// `str(value)` of a config value, as Python shows it in a field.
+pub fn python_str(value: Option<&Value>) -> String {
+    match value {
+        None => String::new(),
+        Some(Value::Null) => "None".into(),
+        Some(Value::Bool(flag)) => (if *flag { "True" } else { "False" }).into(),
+        Some(Value::Number(number)) => match number.as_f64() {
+            Some(float) if number.is_f64() => crate::adapters::pyrepr::float_repr(float),
+            _ => number.to_string(),
+        },
+        Some(Value::String(text)) => text.clone(),
+        Some(other) => yaml_serde::to_string(other)
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    }
+}
+
+/// `format_number`: a whole number without the trailing `.0`.
+pub fn format_number(value: Option<&Value>) -> String {
+    let number = match value {
+        Some(Value::Number(number)) => number.as_f64(),
+        Some(Value::String(text)) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    };
+    match number {
+        Some(number) if number.fract() == 0.0 && number.is_finite() => format!("{}", number as i64),
+        Some(number) => crate::adapters::pyrepr::float_repr(number),
+        None => python_str(value),
+    }
+}
 
 /// Keys the form fully owns. A blank or removed entry in the form deletes the key.
 pub const FORM_OWNED: [&[&str]; 2] = [&["transcription", "models"], &["digest", "max_lines"]];
@@ -46,26 +127,6 @@ pub fn load(paths: &Paths, config_path: Option<&Path>) -> Loaded {
             error: e.to_string(),
         },
     }
-}
-
-/// Find the page that holds `id`.
-fn page_of<'p>(pages: &'p [Page; 5], id: &str) -> &'p Page {
-    pages
-        .iter()
-        .find(|page| page.item(id).is_some())
-        .unwrap_or(&pages[0])
-}
-
-fn input(pages: &[Page; 5], id: &str) -> String {
-    page_of(pages, id).input(id)
-}
-
-fn switch(pages: &[Page; 5], id: &str) -> bool {
-    page_of(pages, id).switch(id)
-}
-
-fn select(pages: &[Page; 5], id: &str) -> String {
-    page_of(pages, id).select(id)
 }
 
 /// `float(text)` in Python, or 0.0.
@@ -113,20 +174,17 @@ fn parse_int(text: &str) -> Option<i64> {
 }
 
 /// The custom path when set, else the chosen row, else the saved model.
-fn model_value(pages: &mut [Page; 5], raw: &Value) -> String {
-    let custom = input(pages, "cfg-trans-custom-path").trim().to_string();
+fn model_value(form: &mut dyn FormValues, raw: &Value) -> String {
+    let custom = form.input("cfg-trans-custom-path").trim().to_string();
     if !custom.is_empty() {
         return custom;
     }
-    let chosen = pages[0]
-        .custom::<ModelChooser>("models-chooser")
-        .map(|chooser| chooser.selected_uri())
-        .unwrap_or_default();
+    let chosen = form.chosen_model_uri();
     let value = match chosen.is_empty() {
         true => raw
             .get("transcription")
             .and_then(|t| t.get("model"))
-            .map(|model| super::pages::python_str(Some(model)))
+            .map(|model| python_str(Some(model)))
             .unwrap_or_default(),
         false => chosen,
     };
@@ -180,50 +238,44 @@ fn split_lines(text: &str) -> Vec<&str> {
 }
 
 /// Read every field and build the config data, as `_collect_form_data`.
-pub fn collect(pages: &mut [Page; 5], raw: &Value, clear_api_key: bool) -> Value {
+pub fn collect(form: &mut dyn FormValues, raw: &Value, clear_api_key: bool) -> Value {
     let diarization = raw.get("diarization");
     let saved = |key: &str| {
         diarization
             .and_then(|d| d.get(key))
-            .map(|v| super::pages::python_str(Some(v)))
+            .map(|v| python_str(Some(v)))
             .unwrap_or_default()
     };
     let mut openai = vec![(
         "base_url",
-        Value::from(input(pages, "cfg-openai-base-url").trim()),
+        Value::from(form.input("cfg-openai-base-url").trim()),
     )];
-    let api_key = input(pages, "cfg-openai-api-key").trim().to_string();
+    let api_key = form.input("cfg-openai-api-key").trim().to_string();
     if clear_api_key {
         openai.push(("api_key", Value::Null));
     } else if !api_key.is_empty() {
         openai.push(("api_key", Value::from(api_key)));
     }
-    let language = pages[0]
-        .custom::<LanguageEditor>("models-language")
-        .map(|editor| editor.values())
-        .unwrap_or_default();
-    let device = select(pages, "cfg-audio-device");
+    let language = form.language_models();
+    let device = form.select("cfg-audio-device");
     let device = match device == DEFAULT_DEVICE {
         true => Value::Null,
         false => Value::from(device),
     };
-    let model = model_value(pages, raw);
-    let float = |id: &str| Value::from(to_float(&input(pages, id)));
-    let int = |id: &str| Value::from(to_int(&input(pages, id)));
+    let model = model_value(form, raw);
+    let float = |form: &mut dyn FormValues, id: &str| Value::from(to_float(&form.input(id)));
+    let int = |form: &mut dyn FormValues, id: &str| Value::from(to_int(&form.input(id)));
     let mut digest = vec![
-        (
-            "model",
-            Value::from(input(pages, "cfg-digest-model").trim()),
-        ),
-        ("min_lines", int("cfg-digest-min-lines")),
-        ("min_interval", float("cfg-digest-min-interval")),
-        ("compact_token_threshold", int("cfg-digest-compact")),
+        ("model", Value::from(form.input("cfg-digest-model").trim())),
+        ("min_lines", int(form, "cfg-digest-min-lines")),
+        ("min_interval", float(form, "cfg-digest-min-interval")),
+        ("compact_token_threshold", int(form, "cfg-digest-compact")),
     ];
-    let max_lines = input(pages, "cfg-digest-max-lines").trim().to_string();
+    let max_lines = form.input("cfg-digest-max-lines").trim().to_string();
     if !max_lines.is_empty() {
         digest.push(("max_lines", Value::from(to_int(&max_lines))));
     }
-    let hints_text = page_of(pages, "cfg-recognition-hints").text_area("cfg-recognition-hints");
+    let hints_text = form.text_area("cfg-recognition-hints");
     let hints: Vec<Value> = split_lines(hints_text.trim())
         .into_iter()
         .map(str::trim)
@@ -231,24 +283,21 @@ pub fn collect(pages: &mut [Page; 5], raw: &Value, clear_api_key: bool) -> Value
         .map(Value::from)
         .collect();
     map(vec![
-        (
-            "llm_provider",
-            Value::from(select(pages, "cfg-llm-provider")),
-        ),
+        ("llm_provider", Value::from(form.select("cfg-llm-provider"))),
         (
             "transcription_provider",
-            Value::from(select(pages, "cfg-trans-provider")),
+            Value::from(form.select("cfg-trans-provider")),
         ),
-        ("theme", Value::from(select(pages, "cfg-theme"))),
+        ("theme", Value::from(form.select("cfg-theme"))),
         (
             "show_builtin_templates",
-            Value::from(switch(pages, "cfg-show-builtin-templates")),
+            Value::from(form.switch("cfg-show-builtin-templates")),
         ),
         (
             "ollama",
             map(vec![(
                 "host",
-                Value::from(input(pages, "cfg-ollama-host").trim()),
+                Value::from(form.input("cfg-ollama-host").trim()),
             )]),
         ),
         ("openai", map(openai)),
@@ -261,10 +310,10 @@ pub fn collect(pages: &mut [Page; 5], raw: &Value, clear_api_key: bool) -> Value
                     Value::Mapping(language_models_for_file(&language)),
                 ),
                 ("input_device", device),
-                ("chunk_duration", float("cfg-trans-chunk")),
-                ("overlap", float("cfg-trans-overlap")),
-                ("silence_threshold", float("cfg-trans-silence")),
-                ("pause_duration", float("cfg-trans-pause")),
+                ("chunk_duration", float(form, "cfg-trans-chunk")),
+                ("overlap", float(form, "cfg-trans-overlap")),
+                ("silence_threshold", float(form, "cfg-trans-silence")),
+                ("pause_duration", float(form, "cfg-trans-pause")),
             ]),
         ),
         ("digest", map(digest)),
@@ -273,22 +322,19 @@ pub fn collect(pages: &mut [Page; 5], raw: &Value, clear_api_key: bool) -> Value
             map(vec![
                 (
                     "enabled",
-                    Value::from(switch(pages, "cfg-diarization-enabled")),
+                    Value::from(form.switch("cfg-diarization-enabled")),
                 ),
                 ("binary", Value::from(saved("binary"))),
                 ("model", Value::from(saved("model"))),
-                (
-                    "device",
-                    Value::from(select(pages, "cfg-diarization-device")),
-                ),
-                ("interval_s", float("cfg-diarization-interval")),
+                ("device", Value::from(form.select("cfg-diarization-device"))),
+                ("interval_s", float(form, "cfg-diarization-interval")),
             ]),
         ),
         (
             "interactive",
             map(vec![(
                 "model",
-                Value::from(input(pages, "cfg-interactive-model").trim()),
+                Value::from(form.input("cfg-interactive-model").trim()),
             )]),
         ),
         (
@@ -296,27 +342,27 @@ pub fn collect(pages: &mut [Page; 5], raw: &Value, clear_api_key: bool) -> Value
             map(vec![
                 (
                     "directory",
-                    Value::from(input(pages, "cfg-output-dir").trim()),
+                    Value::from(form.input("cfg-output-dir").trim()),
                 ),
                 (
                     "save_audio",
-                    Value::from(switch(pages, "cfg-output-save-audio")),
+                    Value::from(form.switch("cfg-output-save-audio")),
                 ),
                 (
                     "save_notes_history",
-                    Value::from(switch(pages, "cfg-output-save-notes-history")),
+                    Value::from(form.switch("cfg-output-save-notes-history")),
                 ),
                 (
                     "save_context",
-                    Value::from(switch(pages, "cfg-output-save-context")),
+                    Value::from(form.switch("cfg-output-save-context")),
                 ),
                 (
                     "save_debug_log",
-                    Value::from(switch(pages, "cfg-output-save-debug-log")),
+                    Value::from(form.switch("cfg-output-save-debug-log")),
                 ),
                 (
                     "auto_label",
-                    Value::from(switch(pages, "cfg-output-auto-label")),
+                    Value::from(form.switch("cfg-output-auto-label")),
                 ),
             ]),
         ),
@@ -330,7 +376,7 @@ enum Number {
 }
 
 /// `_numeric_errors`: a field that is not a number, or out of range. Blank passes.
-pub fn numeric_errors(pages: &[Page; 5]) -> Vec<String> {
+pub fn numeric_errors(form: &mut dyn FormValues) -> Vec<String> {
     let checks: [(&str, &str, Number, Option<Number>); 9] = [
         (
             "cfg-trans-chunk",
@@ -378,7 +424,7 @@ pub fn numeric_errors(pages: &[Page; 5]) -> Vec<String> {
     };
     let mut errors = Vec::new();
     for (id, label, minimum, maximum) in checks {
-        let text = input(pages, id).trim().to_string();
+        let text = form.input(id).trim().to_string();
         if text.is_empty() {
             continue;
         }

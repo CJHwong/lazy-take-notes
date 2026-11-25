@@ -14,16 +14,13 @@ use ratatui::text::Span;
 use super::form::{Custom, FormEvent, spans_at};
 use crate::adapters::model_catalog::{asset_for_model, expand_model_alias};
 use crate::app::download_progress::{describe, megabytes};
-use crate::domain::model_asset::{AssetProgress, AssetState, AssetStatus, ModelAsset};
+use crate::app::settings::form::model_uri;
+use crate::app::settings::{ModelRow, SpeakerStatus};
+use crate::domain::model_asset::{AssetStatus, ModelAsset};
 use crate::tui::text::{str_width, truncate};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::select::{Select, SelectKey, compact_button_width, draw_compact_button};
-
-/// The canonical `hf://` URI of a cataloged asset.
-pub fn model_uri(asset: &ModelAsset) -> String {
-    format!("hf://{}/{}", asset.hf_repo, asset.entry)
-}
 
 fn status_text(status: AssetStatus) -> &'static str {
     match status {
@@ -113,19 +110,10 @@ fn draw_progress(frame: &mut Frame, area: Rect, done: u64, total: u64, theme: &T
     );
 }
 
-#[derive(Clone)]
-struct RowState {
-    status: AssetStatus,
-    progress: Option<AssetProgress>,
-    /// Bytes kept after a cancel; the status then reads "Paused".
-    kept: u64,
-    paused: bool,
-}
-
 /// The speech model rows. The marked row is the default model.
 pub struct ModelChooser {
     assets: Vec<ModelAsset>,
-    states: HashMap<&'static str, RowState>,
+    states: HashMap<&'static str, ModelRow>,
     selected: Option<&'static str>,
     /// Each focus stop at the last draw.
     hits: Vec<(Rect, usize)>,
@@ -142,7 +130,7 @@ impl ModelChooser {
             .map(|asset| {
                 (
                     asset.id,
-                    RowState {
+                    ModelRow {
                         status: AssetStatus::Missing,
                         progress: None,
                         kept: 0,
@@ -173,46 +161,12 @@ impl ModelChooser {
         }
     }
 
-    pub fn set_state(&mut self, state: &AssetState) {
-        if let Some(row) = self.states.get_mut(state.asset.id) {
-            row.status = state.status;
-            row.paused = false;
-            if state.status != AssetStatus::Downloading {
-                row.progress = None;
+    /// Show the rows as the runtime has them.
+    pub fn show_rows(&mut self, rows: &HashMap<&'static str, ModelRow>) {
+        for (id, row) in &mut self.states {
+            if let Some(shown) = rows.get(id) {
+                *row = shown.clone();
             }
-        }
-    }
-
-    pub fn mark_downloading(&mut self, asset_id: &str) {
-        if let Some(row) = self.states.get_mut(asset_id) {
-            row.kept = 0;
-            row.status = AssetStatus::Downloading;
-            row.progress = None;
-            row.paused = false;
-        }
-    }
-
-    pub fn set_progress(&mut self, asset_id: &str, progress: AssetProgress) {
-        let size = self
-            .assets
-            .iter()
-            .find(|a| a.id == asset_id)
-            .map_or(1, |a| a.size.max(1));
-        if let Some(row) = self.states.get_mut(asset_id) {
-            let total = if progress.total > 0 {
-                progress.total
-            } else {
-                size
-            };
-            row.progress = Some(AssetProgress { total, ..progress });
-            row.kept = progress.downloaded;
-        }
-    }
-
-    /// After Cancel: the `.part` stays, and Download continues from it.
-    pub fn mark_paused(&mut self, asset_id: &str) {
-        if let Some(row) = self.states.get_mut(asset_id) {
-            row.paused = row.kept > 0;
         }
     }
 
@@ -668,6 +622,14 @@ pub struct SpeakerState {
 }
 
 impl SpeakerState {
+    /// Show the row as the runtime has it.
+    pub fn show(&mut self, speaker: &SpeakerStatus) {
+        self.status = speaker.status.clone();
+        self.install = speaker.install;
+        self.remove = speaker.remove;
+        self.cancel = speaker.cancel;
+    }
+
     fn buttons(&self) -> Vec<(&'static str, &'static str)> {
         let mut list = Vec::new();
         if self.install {

@@ -15,6 +15,7 @@ pub mod preflight_runtime;
 pub mod session;
 pub mod session_commands;
 pub mod session_start;
+pub mod settings;
 pub mod status_command;
 pub mod tasks;
 pub mod template_builder;

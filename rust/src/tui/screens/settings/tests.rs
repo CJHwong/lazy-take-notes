@@ -1,7 +1,10 @@
 //! The settings form against Python's: the data at open and the file after Save.
 //! `scripts/gen_settings_fixtures.py` records the Python side.
 
+use std::path::Path;
+
 use serde_json::Value as Json;
+use yaml_serde::Value;
 
 use super::models::LanguageEditor;
 use super::*;
