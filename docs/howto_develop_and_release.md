@@ -29,22 +29,23 @@ scripts/package.sh                          # build dist/lazy-take-notes-<arch>-
 
 ## Release the native app
 
-1. Run the Release workflow by hand: **Actions > Release > Run workflow**. This is a dry run: it builds and checks the package, keeps it as a workflow artifact, and publishes nothing.
-2. Tag the commit and push the tag:
+1. Set `version` in `rust/Cargo.toml` to the new version, and commit it with `rust/Cargo.lock`. The `.app` takes its version from this file, and the Homebrew cask takes its version from the tag, so the two must match.
+2. Run the Release workflow by hand: **Actions > Release > Run workflow**. This is a dry run: it builds and checks the packages, keeps them as a workflow artifact, and publishes nothing.
+3. Tag the commit and push the tag:
 
    ```bash
    git tag -a v0.3.0 -m "lazy-take-notes v0.3.0"
    git push origin v0.3.0
    ```
 
-   The workflow publishes a GitHub Release with the package and its SHA-256. A tag with a `-`, such as `v0.3.0-rc.1`, is a prerelease.
-3. Pin the release on a branch and test it:
+   The workflow publishes a GitHub Release with the terminal package, `Lazy-Take-Notes-arm64-macos.zip` (the window app), and their SHA-256 files. It then writes `Casks/lazy-take-notes.rb` to `CJHwong/homebrew-tap` with the `HOMEBREW_TAP_KEY` deploy key. A tag with a `-`, such as `v0.3.0-rc.1`, is a prerelease and leaves the cask alone.
+4. Pin the release on a branch and test it:
 
    ```bash
    uv run scripts/pin_rust_release.py v0.3.0
    ```
 
    Commit `src/lazy_take_notes/rust_release.py`, push the branch, and run `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@<branch> take-note --version`.
-4. Merge the branch. Users get the release when the pin reaches `main`.
+5. Merge the branch. Users of the Python launcher get the release when the pin reaches `main`.
 
 Never move a tag that a pin uses. The pin holds the package's SHA-256, so a rebuilt package fails the check. Release a new tag instead.
