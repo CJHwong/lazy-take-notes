@@ -37,7 +37,7 @@ use crate::gui::dialogs;
 use crate::gui::preflight::{PreflightEvent, PreflightView};
 use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
 use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
-use crate::gui::template_picker::{StartAction, TemplatePickerEvent, TemplatePickerView};
+use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
 use crate::gui::widgets::{
     DragArm, brand, caption, empty_state, mascot, pane_header, pane_title, source_row, title_strip,
@@ -67,7 +67,8 @@ enum Stage {
 
 /// The one recording or transcription, from its template choice to its end.
 struct Live {
-    flow: Flow,
+    /// Set when the user picks Record or Transcribe File in the picker.
+    flow: Option<Flow>,
     stage: Stage,
     _subscription: Option<Subscription>,
     /// The setup checks inside the template picker, while they show.
@@ -234,29 +235,35 @@ impl Shell {
         self.finished(None, window, cx);
     }
 
-    /// New Recording or Transcribe File. With a flow running, the pane shows it instead.
-    fn start(&mut self, flow: Flow, window: &mut Window, cx: &mut Context<Self>) {
+    /// New Session: the template picker, whose title bar starts a recording
+    /// or a transcription. With a flow running, the pane shows it instead.
+    fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.live.is_some() {
             return self.show_detail(Detail::Live, None, cx);
         }
         self.live = Some(Live {
-            flow,
+            flow: None,
             stage: Stage::Checking,
             _subscription: None,
             _checks: None,
         });
-        match flow {
-            Flow::Record => self.open_picker(window, cx),
-            Flow::Transcribe => self.choose_audio(window, cx),
+        self.open_picker(window, cx);
+    }
+
+    fn set_flow(&mut self, flow: Flow) {
+        if let Some(live) = self.live.as_mut() {
+            live.flow = Some(flow);
         }
     }
 
-    fn flow(&self) -> Option<Flow> {
-        self.live.as_ref().map(|live| live.flow)
-    }
-
-    /// The system's file dialog, then the template picker.
-    fn choose_audio(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The system's file dialog, then the transcription. A cancelled dialog
+    /// leaves the picker as it was.
+    fn choose_audio(
+        &mut self,
+        template: SessionTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let paths = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -268,12 +275,13 @@ impl Shell {
                 Ok(Ok(Some(paths))) => paths.into_iter().next(),
                 _ => None,
             };
-            let _ = this.update_in(cx, |shell, window, cx| match picked {
-                Some(path) => {
-                    shell.audio_path = Some(path);
-                    shell.open_picker(window, cx);
-                }
-                None => shell.finished(None, window, cx),
+            let _ = this.update_in(cx, |shell, window, cx| {
+                let Some(path) = picked else {
+                    return;
+                };
+                shell.audio_path = Some(path);
+                shell.set_flow(Flow::Transcribe);
+                shell.start_transcribe(&template, window, cx);
             });
         })
         .detach();
@@ -285,28 +293,7 @@ impl Shell {
             Ok(loaded) => loaded,
             Err(e) => return self.failed("open_picker", &e, window, cx),
         };
-        let action = match self.flow() {
-            Some(Flow::Transcribe) => {
-                let name = self.audio_path.as_ref().and_then(|path| path.file_name());
-                let title = match name {
-                    Some(name) => format!("Transcribe {}", name.to_string_lossy()),
-                    None => "Transcribe File".into(),
-                };
-                StartAction {
-                    title: title.into(),
-                    label: "Transcribe",
-                    icon: IconName::FileText,
-                    record: false,
-                }
-            }
-            _ => StartAction {
-                title: "New Recording".into(),
-                label: "Start Recording",
-                icon: IconName::Mic,
-                record: true,
-            },
-        };
-        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, Some(action), window, cx));
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, true, window, cx));
         self.loaded = Some(loaded);
         let subscription = cx.subscribe_in(&picker, window, Self::on_template);
         self.set_stage(Stage::TemplatePicker(picker), subscription, cx);
@@ -323,7 +310,7 @@ impl Shell {
             return self.failed("on_template", "no config loaded", window, cx);
         };
         let templates = YamlTemplates::new(&loaded.paths);
-        let key = match event {
+        let (key, flow) = match event {
             TemplatePickerEvent::Cancelled => return self.finished(None, window, cx),
             TemplatePickerEvent::Create => return self.open_flow_builder(None, window, cx),
             TemplatePickerEvent::EditWithAi(key) => {
@@ -332,14 +319,16 @@ impl Shell {
                     Err(e) => self.failed("on_template", &e, window, cx),
                 };
             }
-            TemplatePickerEvent::Picked(key) => key,
+            TemplatePickerEvent::Record(key) => (key, Flow::Record),
+            TemplatePickerEvent::Transcribe(key) => (key, Flow::Transcribe),
         };
-        match load_template_key(&templates, key) {
-            Ok(template) if self.flow() == Some(Flow::Record) => {
+        match (load_template_key(&templates, key), flow) {
+            (Ok(template), Flow::Record) => {
+                self.set_flow(Flow::Record);
                 self.start_record(template, window, cx)
             }
-            Ok(template) => self.start_transcribe(&template, window, cx),
-            Err(e) => self.failed("on_template", &e, window, cx),
+            (Ok(template), Flow::Transcribe) => self.choose_audio(template, window, cx),
+            (Err(e), _) => self.failed("on_template", &e, window, cx),
         }
     }
 
@@ -563,14 +552,14 @@ impl Shell {
             Ok(loaded) => loaded,
             Err(e) => return self.failed("open_templates", &e, window, cx),
         };
-        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, None, window, cx));
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, false, window, cx));
         let subscription = cx.subscribe_in(&picker, window, move |shell, _, event, window, cx| {
             let base = match event {
                 TemplatePickerEvent::Cancelled => {
                     return shell.show_detail(Detail::Empty, None, cx);
                 }
                 // The page browses; a session starts from the sidebar.
-                TemplatePickerEvent::Picked(_) => return,
+                TemplatePickerEvent::Record(_) | TemplatePickerEvent::Transcribe(_) => return,
                 TemplatePickerEvent::Create => None,
                 TemplatePickerEvent::EditWithAi(key) => {
                     match shell.load().and_then(|loaded| {
@@ -822,9 +811,7 @@ impl Shell {
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> Div {
-        let record: OnClick = Rc::new(|shell, window, cx| shell.start(Flow::Record, window, cx));
-        let transcribe: OnClick =
-            Rc::new(|shell, window, cx| shell.start(Flow::Transcribe, window, cx));
+        let start: OnClick = Rc::new(|shell, window, cx| shell.start(window, cx));
         let templates: OnClick = Rc::new(|shell, window, cx| shell.open_templates(window, cx));
         let settings: OnClick = Rc::new(|shell, window, cx| shell.open_settings(window, cx));
         let on_templates = matches!(self.detail, Detail::Templates(_) | Detail::Builder(_));
@@ -841,7 +828,7 @@ impl Shell {
             .border_r_1()
             .border_color(border)
             .child(title_strip("sidebar-title", &self.sidebar_drag).w_full())
-            .child(self.start_buttons(record, transcribe, cx))
+            .child(self.start_button(start, cx))
             .child(
                 div()
                     .id("sessions")
@@ -882,41 +869,24 @@ impl Shell {
 
     /// The two ways to start, over the session list. Recording is the app's
     /// main act, so it is the one red, full-width button in the window.
-    fn start_buttons(&self, record: OnClick, transcribe: OnClick, cx: &mut Context<Self>) -> Div {
-        // One choice with a default: the same size and shape, recording in red.
-        div()
-            .flex()
-            .flex_none()
-            .gap(space::SM)
-            .px(space::SM)
-            .pb(space::MD)
-            .child(
-                Button::new("new-recording")
-                    .danger()
-                    .with_size(control::HERO)
-                    .flex_1()
-                    .icon(IconName::Mic)
-                    .label("Record")
-                    .tooltip("Start a new recording")
-                    .on_click(cx.listener(move |shell, _, window, cx| {
-                        shell.leave_page_then(record.clone(), window, cx)
-                    })),
-            )
-            .child(
-                Button::new("transcribe-file")
-                    .outline()
-                    .with_size(control::HERO)
-                    .flex_1()
-                    .icon(IconName::File)
-                    .label("Transcribe")
-                    .tooltip("Transcribe an audio file")
-                    .on_click(cx.listener(move |shell, _, window, cx| {
-                        shell.leave_page_then(transcribe.clone(), window, cx)
-                    })),
-            )
+    /// New Session: the one way in. Record and Transcribe File come after
+    /// the template, in the picker's title bar.
+    fn start_button(&self, start: OnClick, cx: &mut Context<Self>) -> Div {
+        div().flex().flex_none().px(space::SM).pb(space::MD).child(
+            Button::new("new-session")
+                .primary()
+                .with_size(control::HERO)
+                .w_full()
+                .icon(IconName::Plus)
+                .label("New Session")
+                .tooltip("Choose a template, then record or transcribe")
+                .on_click(cx.listener(move |shell, _, window, cx| {
+                    shell.leave_page_then(start.clone(), window, cx)
+                })),
+        )
     }
 
-    /// The mascot, and the two ways to start.
+    /// The mascot, and the way to start.
     fn empty_state(&self, cx: &Context<Self>) -> AnyElement {
         div()
             .size_full()
@@ -928,29 +898,14 @@ impl Shell {
             .child(mascot(size::MASCOT_PIXEL))
             .child(brand(text::LARGE_TITLE))
             .child(
-                div()
-                    .flex()
-                    .gap(space::SM)
-                    .pt(space::SM)
-                    .child(
-                        Button::new("start-recording")
-                            .danger()
-                            .with_size(control::HERO)
-                            .icon(IconName::Mic)
-                            .label("New Recording")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.start(Flow::Record, window, cx)
-                            })),
-                    )
-                    .child(
-                        Button::new("start-transcribe")
-                            .with_size(control::HERO)
-                            .icon(IconName::File)
-                            .label("Transcribe File…")
-                            .on_click(cx.listener(|shell, _, window, cx| {
-                                shell.start(Flow::Transcribe, window, cx)
-                            })),
-                    ),
+                div().pt(space::SM).child(
+                    Button::new("start-session")
+                        .primary()
+                        .with_size(control::HERO)
+                        .icon(IconName::Plus)
+                        .label("New Session")
+                        .on_click(cx.listener(|shell, _, window, cx| shell.start(window, cx))),
+                ),
             )
             .into_any_element()
     }
@@ -963,14 +918,14 @@ impl Shell {
         match &self.detail {
             Detail::Empty => (Some("".into()), self.empty_state(cx)),
             Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
-                // The picker draws its own title bar, with the start button.
-                Some((Stage::TemplatePicker(view), _)) => (None, view.clone().into_any_element()),
-                Some((Stage::Builder(view), _)) => (None, view.clone().into_any_element()),
-                Some((Stage::Checking, Flow::Transcribe)) => (
+                Some((Stage::Checking, Some(Flow::Transcribe))) => (
                     Some("Transcribe File".into()),
                     muted("Checking the AI provider…"),
                 ),
-                Some((Stage::Checking, Flow::Record)) => (Some("New Recording".into()), muted("")),
+                Some((Stage::Checking, _)) => (Some("New Session".into()), muted("")),
+                // The picker draws its own title bar, with the start button.
+                Some((Stage::TemplatePicker(view), _)) => (None, view.clone().into_any_element()),
+                Some((Stage::Builder(view), _)) => (None, view.clone().into_any_element()),
                 Some((Stage::Session(view), _)) => (None, view.clone().into_any_element()),
                 None => (Some("".into()), self.empty_state(cx)),
             },
@@ -1043,20 +998,10 @@ fn with_shell(cx: &mut App, f: impl FnOnce(&mut Shell, &mut Window, &mut Context
     });
 }
 
-pub fn new_recording(cx: &mut App) {
+pub fn new_session(cx: &mut App) {
     with_shell(cx, |shell, window, cx| {
         shell.leave_page_then(
-            Rc::new(|shell, window, cx| shell.start(Flow::Record, window, cx)),
-            window,
-            cx,
-        )
-    });
-}
-
-pub fn transcribe_file(cx: &mut App) {
-    with_shell(cx, |shell, window, cx| {
-        shell.leave_page_then(
-            Rc::new(|shell, window, cx| shell.start(Flow::Transcribe, window, cx)),
+            Rc::new(|shell, window, cx| shell.start(window, cx)),
             window,
             cx,
         )

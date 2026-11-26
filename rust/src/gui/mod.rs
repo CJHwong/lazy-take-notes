@@ -28,8 +28,7 @@ actions!(
     [
         Quit,
         CloseWindow,
-        NewRecording,
-        TranscribeFile,
+        NewSession,
         OpenSettings,
         ShowHelp,
         TogglePause,
@@ -126,8 +125,7 @@ pub fn run() -> i32 {
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("cmd-w", CloseWindow, None),
-                KeyBinding::new("cmd-n", NewRecording, None),
-                KeyBinding::new("cmd-o", TranscribeFile, None),
+                KeyBinding::new("cmd-n", NewSession, None),
                 KeyBinding::new("cmd-,", OpenSettings, None),
             ]);
             let session = Some(SESSION_CONTEXT);
@@ -150,8 +148,7 @@ pub fn run() -> i32 {
             // window cannot be updated then: each runs once the dispatch ends.
             cx.on_action(|_: &Quit, cx: &mut App| cx.defer(shell::request_quit));
             cx.on_action(|_: &CloseWindow, cx: &mut App| cx.defer(shell::request_quit));
-            cx.on_action(|_: &NewRecording, cx: &mut App| cx.defer(shell::new_recording));
-            cx.on_action(|_: &TranscribeFile, cx: &mut App| cx.defer(shell::transcribe_file));
+            cx.on_action(|_: &NewSession, cx: &mut App| cx.defer(shell::new_session));
             cx.on_action(|_: &OpenSettings, cx: &mut App| cx.defer(shell::open_settings));
             // The live session pane shows its own help; this one serves the rest.
             cx.on_action(|_: &ShowHelp, cx: &mut App| cx.defer(shell::show_help));
@@ -162,8 +159,7 @@ pub fn run() -> i32 {
                     MenuItem::action("Quit Lazy Take Notes", Quit),
                 ]),
                 Menu::new("File").items([
-                    MenuItem::action("New Recording", NewRecording),
-                    MenuItem::action("Transcribe File…", TranscribeFile),
+                    MenuItem::action("New Session", NewSession),
                     MenuItem::separator(),
                     MenuItem::action("Close Window", CloseWindow),
                 ]),

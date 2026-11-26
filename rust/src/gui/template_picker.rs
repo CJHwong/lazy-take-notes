@@ -31,7 +31,8 @@ use crate::gui::widgets::{
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum TemplatePickerEvent {
-    Picked(String),
+    Record(String),
+    Transcribe(String),
     Create,
     EditWithAi(String),
     Cancelled,
@@ -47,8 +48,9 @@ pub struct TemplatePickerView {
     scroll: ScrollHandle,
     /// The list has the keys; otherwise the filter box has them.
     list_focused: bool,
-    /// The pane title and the start button, in a flow.
-    action: Option<StartAction>,
+    /// The picker starts a session: its title bar holds Record and
+    /// Transcribe File.
+    starts: bool,
     /// The setup checks of the chosen template, in place of its preview.
     checks: Option<Entity<PreflightView>>,
     focus: FocusHandle,
@@ -62,23 +64,8 @@ pub struct TemplatePickerView {
 
 impl EventEmitter<TemplatePickerEvent> for TemplatePickerView {}
 
-/// What a flow starts from the picker: the pane title, and the start button
-/// at the title bar's right end. A recording starts from the red button.
-#[derive(Clone)]
-pub struct StartAction {
-    pub title: SharedString,
-    pub label: &'static str,
-    pub icon: IconName,
-    pub record: bool,
-}
-
 impl TemplatePickerView {
-    pub fn new(
-        loaded: &Loaded,
-        action: Option<StartAction>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(loaded: &Loaded, starts: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let catalog = TemplateCatalog::new(
             YamlTemplates::new(&loaded.paths),
             loaded.infra.show_builtin_templates,
@@ -96,7 +83,7 @@ impl TemplatePickerView {
             preview,
             scroll: ScrollHandle::new(),
             list_focused,
-            action,
+            starts,
             checks: None,
             focus: cx.focus_handle(),
             drag: DragArm::default(),
@@ -240,7 +227,13 @@ impl TemplatePickerView {
 
     fn pick(&mut self, cx: &mut Context<Self>) {
         if let Some(key) = self.current() {
-            cx.emit(TemplatePickerEvent::Picked(key));
+            cx.emit(TemplatePickerEvent::Record(key));
+        }
+    }
+
+    fn transcribe(&mut self, cx: &mut Context<Self>) {
+        if let Some(key) = self.current() {
+            cx.emit(TemplatePickerEvent::Transcribe(key));
         }
     }
 
@@ -600,30 +593,33 @@ impl TemplatePickerView {
             )
     }
 
-    /// The flow's title bar: the title, then Cancel and the start button at
-    /// the right end. While the checks run, the start button waits.
-    fn render_header(&self, action: StartAction, cx: &mut Context<Self>) -> Stateful<Div> {
+    /// The flow's title bar: the title, then Cancel, Transcribe File and
+    /// Record at the right end. While the checks run, both starts wait.
+    fn render_header(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let checking = self
             .checks
             .as_ref()
             .is_some_and(|checks| checks.read(cx).running());
-        let start = Button::new("start")
+        let idle = self.current().is_none() || checking;
+        let transcribe = Button::new("start-transcribe")
+            .outline()
             .with_size(control::CONTROL)
-            .icon(action.icon)
-            .label(if checking {
-                "Checking…"
-            } else {
-                action.label
-            })
+            .icon(IconName::File)
+            .label("Transcribe File…")
+            .tooltip("Make notes from an audio file with this template")
+            .disabled(idle)
+            .on_click(cx.listener(|view, _, _, cx| view.transcribe(cx)));
+        let record = Button::new("start-record")
+            .danger()
+            .with_size(control::CONTROL)
+            .icon(IconName::Mic)
+            .label(if checking { "Checking…" } else { "Record" })
+            .tooltip("Record a meeting with this template")
             .loading(checking)
-            .disabled(self.current().is_none() || checking)
+            .disabled(idle)
             .on_click(cx.listener(|view, _, _, cx| view.pick(cx)));
-        let start = match action.record {
-            true => start.danger(),
-            false => start.primary(),
-        };
         pane_header("picker-title", &self.drag, cx)
-            .child(pane_title(action.title))
+            .child(pane_title("New Session"))
             .child(div().flex_1())
             .child(
                 Button::new("cancel-start")
@@ -632,7 +628,8 @@ impl TemplatePickerView {
                     .label("Cancel")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Cancelled))),
             )
-            .child(start)
+            .child(transcribe)
+            .child(record)
     }
 }
 
@@ -727,10 +724,7 @@ impl Render for TemplatePickerView {
                 })
                 .into_any_element(),
         };
-        let header = self
-            .action
-            .clone()
-            .map(|action| self.render_header(action, cx));
+        let header = self.starts.then(|| self.render_header(cx));
         div()
             .key_context("TemplatePicker")
             .track_focus(&self.focus)

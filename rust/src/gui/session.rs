@@ -61,8 +61,7 @@ pub const SHORTCUTS: &str = "\
 | `⇧⌘R` | Show the session folder in Finder |
 | `Tab` | Move between the transcript, the speakers and the session context |
 | `←` `→` `Return` | On the speakers: choose one, name it |
-| `⌘N` | New recording |
-| `⌘O` | Transcribe a file |
+| `⌘N` | New session: choose a template, then record or transcribe |
 | `⌘,` | Settings |
 | `⌘W` `⌘Q` | Close the window; a recording stops and saves first |";
 
