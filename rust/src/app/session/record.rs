@@ -13,7 +13,7 @@ use crate::adapters::audio::session_folder::SessionFolder;
 use crate::app::events::{AudioHealthReport, Cancel, Event, Nudge, Poster, WorkerState};
 use crate::app::headless::Launcher;
 use crate::app::logging::see_debug_log;
-use crate::app::session::{SessionIo, SessionRuntime, Step, Worker};
+use crate::app::session::{SessionIo, SessionRuntime, Step, Text, Worker};
 use crate::app::tasks::Payload;
 use crate::ports::audio_source::AudioSource;
 
@@ -357,7 +357,8 @@ impl RecordRuntime {
         }
         let session = &mut self.session;
         if session.flow.digest_running {
-            io.info("Quitting when the digest finishes.", Duration::from_secs(4));
+            let text = io.text(Text::QuitAfterDigest);
+            io.info(text, Duration::from_secs(4));
         }
         session.flow.pending_quit = true;
         // Waits for the worker's Stopped while the flush still runs.

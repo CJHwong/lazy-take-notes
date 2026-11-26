@@ -12,7 +12,7 @@ use gpui_kit::*;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::app::events::Event;
-use crate::app::session::{SessionIo, Severity};
+use crate::app::session::{SessionIo, Severity, Text};
 use crate::app::tasks::{Payload, Tasks};
 
 /// What arrives for a view from its background work.
@@ -102,11 +102,17 @@ impl SessionIo for GuiIo<'_> {
         self.exited = true;
     }
 
-    /// The window has no quit key to name, and calls the digest the notes.
-    fn final_digest_notice(&self, ok: bool) -> &'static str {
-        match ok {
-            true => "Final notes ready.",
-            false => "Final notes failed. Update Notes tries again.",
+    /// The window names its buttons, not keys, and calls the digest the notes.
+    fn text(&self, text: Text) -> &'static str {
+        match text {
+            Text::FinalReady => "Final notes ready.",
+            Text::FinalFailed => "Final notes failed. Update Notes tries again.",
+            Text::Digesting => "Updating notes…",
+            Text::FinalDigesting => "Writing final notes…",
+            Text::ManualHint => "Update Notes writes the notes now.",
+            Text::AlreadyDigesting => "The notes are already updating.",
+            Text::NothingToDigest => "No new lines for the notes yet.",
+            Text::QuitAfterDigest => "Finishing when the notes are done.",
         }
     }
 }

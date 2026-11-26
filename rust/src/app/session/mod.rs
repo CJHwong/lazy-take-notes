@@ -57,12 +57,39 @@ pub trait SessionIo {
     fn tasks(&self) -> Tasks;
     /// End the app now.
     fn exit(&mut self);
-    /// The notice when the final digest ends. The terminal names its quit
-    /// key; a front end with no such key says less.
-    fn final_digest_notice(&self, ok: bool) -> &'static str {
-        match ok {
-            true => "Final digest ready. Press q to quit.",
-            false => "Final digest failed. Press q to quit.",
+    /// The words for `text`. The terminal's name its keys; a front end with
+    /// other controls and other words overrides this.
+    fn text(&self, text: Text) -> &'static str {
+        text.terminal()
+    }
+}
+
+/// A notice or a status text whose words depend on the front end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Text {
+    FinalReady,
+    FinalFailed,
+    /// The status while a digest runs, and while the final one runs.
+    Digesting,
+    FinalDigesting,
+    ManualHint,
+    AlreadyDigesting,
+    NothingToDigest,
+    QuitAfterDigest,
+}
+
+impl Text {
+    /// The terminal app's words.
+    pub fn terminal(self) -> &'static str {
+        match self {
+            Text::FinalReady => "Final digest ready. Press q to quit.",
+            Text::FinalFailed => "Final digest failed. Press q to quit.",
+            Text::Digesting => "Digesting...",
+            Text::FinalDigesting => "Final digest...",
+            Text::ManualHint => "Press d to digest manually",
+            Text::AlreadyDigesting => "Digest already in progress",
+            Text::NothingToDigest => "Nothing in buffer to digest yet",
+            Text::QuitAfterDigest => "Quitting when the digest finishes.",
         }
     }
 }
@@ -434,10 +461,11 @@ impl SessionRuntime {
 
     /// Start a digest. A running one is aborted and its prompt removed first.
     pub fn start_digest(&mut self, is_final: bool, io: &mut dyn SessionIo) {
-        self.status.activity = match is_final {
-            true => "Final digest...".into(),
-            false => "Digesting...".into(),
+        let text = match is_final {
+            true => Text::FinalDigesting,
+            false => Text::Digesting,
         };
+        self.status.activity = io.text(text).into();
         if let Some(old) = self.in_flight.take() {
             old.task.abort();
             self.controller.abandon_digest(&old.request);
@@ -518,7 +546,7 @@ impl SessionRuntime {
         match result {
             Ok(markdown) => {
                 if flight.is_final && !self.flow.pending_quit {
-                    let text = io.final_digest_notice(true);
+                    let text = io.text(Text::FinalReady);
                     io.info(text, Duration::from_secs(10));
                 }
                 self.digest_ready(&markdown, flight.is_final, worker, io)
@@ -568,7 +596,7 @@ impl SessionRuntime {
         io: &mut dyn SessionIo,
     ) -> Step {
         if is_final && !self.flow.pending_quit {
-            let text = io.final_digest_notice(false);
+            let text = io.text(Text::FinalFailed);
             io.error(text, Duration::from_secs(10));
         }
         // Allow a retry after a failed final.
@@ -609,11 +637,13 @@ impl SessionRuntime {
             return;
         }
         if self.flow.digest_running {
-            io.warn("Digest already in progress", Duration::from_secs(3));
+            let text = io.text(Text::AlreadyDigesting);
+            io.warn(text, Duration::from_secs(3));
             return;
         }
         if self.controller.digest_state.buffer.is_empty() {
-            io.info("Nothing in buffer to digest yet", Duration::from_secs(3));
+            let text = io.text(Text::NothingToDigest);
+            io.info(text, Duration::from_secs(3));
             return;
         }
         self.start_digest(false, io);
