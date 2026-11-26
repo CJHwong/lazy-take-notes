@@ -1,13 +1,18 @@
-//! A recording or a file transcription, as the TUI's record and transcribe
-//! screens: the transcript and the speaker chips on the left, the digest and
-//! the session context on the right, the status line and the keys below. The
-//! session itself is `app::session`; this view forwards input and draws it.
+//! A recording or a file transcription in the detail pane: the title and the
+//! toolbar in the title bar row, the transcript and the speakers on the left,
+//! the digest and the session context on the right, and a status strip below.
+//! The commands are toolbar buttons and the Session menu. The session itself
+//! is `app::session`; this view forwards input and draws it.
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::text::{TextView, TextViewState};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use tracing::{error, info};
@@ -16,7 +21,7 @@ use crate::app::events::Event;
 use crate::app::notices::CONSENT_NOTICE_BODY;
 use crate::app::session::file::FileRuntime;
 use crate::app::session::record::RecordRuntime;
-use crate::app::session::status_line::StatusLine;
+use crate::app::session::status_line::{LEVEL_TOP, StatusLine};
 use crate::app::session::texts;
 use crate::app::session::{SHUTDOWN_GRACE, SessionIo, SessionRuntime, Severity, Step};
 use crate::app::session_start::{FileStart, RecordStart};
@@ -24,18 +29,43 @@ use crate::app::tasks::Payload;
 use crate::domain::transcript::format_wall_time;
 use crate::gui::bridge::{Bridge, GuiIo, Incoming, notify};
 use crate::gui::dialogs::{self, Extra};
-use crate::gui::theme::{color, on, tinted};
-use crate::gui::widgets::{Hint, footer, header, hint, panel};
+use crate::gui::widgets::{DragArm, title_strip};
+use crate::gui::{
+    CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
+    QuickAction4, QuickAction5, RenameSession, SESSION_CONTEXT, ShowHelp, ShowInFinder,
+    StopSession, ToggleMute, TogglePause, quick_action,
+};
 
-/// The keys a quick action takes, by position.
-const QUICK_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 const COPY_TIMEOUT: Duration = Duration::from_secs(2);
 const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
-/// How often the status line redraws its timer and level meter.
+/// How often the status strip redraws its timer and level meter.
 const TICK: Duration = Duration::from_millis(250);
+const CONTEXT_HEIGHT: Pixels = px(140.);
+const STATUS_HEIGHT: Pixels = px(28.);
+
+/// The window's keys, for the Help menu.
+pub const SHORTCUTS: &str = "\
+| Key | Action |
+|-----|--------|
+| `Space` | Pause or resume the recording |
+| `⌘.` | Stop |
+| `⌘↩` | Finish: write the final digest and save |
+| `⌘D` | Digest now |
+| `⇧⌘M` | Mute or unmute the microphone |
+| `⌘1` to `⌘5` | The template's quick actions |
+| `⇧⌘C` | Copy the transcript |
+| `⌥⌘C` | Copy the digest |
+| `⌘L` | Rename the session |
+| `⇧⌘R` | Show the session folder in Finder |
+| `Tab` | Move between the transcript, the speakers and the session context |
+| `←` `→` `Return` | On the speakers: choose one, name it |
+| `⌘N` | New recording |
+| `⌘O` | Transcribe a file |
+| `⌘,` | Settings |
+| `⌘W` `⌘Q` | Close the window; a recording stops and saves first |";
 
 pub enum SessionEvent {
-    /// Back to the menu.
+    /// The session ended: show what it saved.
     Closed,
     /// The window closes: the app ends.
     Exit,
@@ -62,13 +92,19 @@ impl Mode {
     }
 }
 
-/// Which panel the keys go to, in the TUI's Tab order.
+/// Where Tab is: the keys of the speakers work only on them.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Focus {
     Transcript,
     Speakers,
-    Digest,
     Context,
+}
+
+/// What a copy takes.
+#[derive(Clone, Copy)]
+enum Copied {
+    Transcript,
+    Digest,
 }
 
 /// One drawn transcript line.
@@ -89,8 +125,14 @@ pub struct SessionView {
     transcript: ListState,
     digest: Entity<TextViewState>,
     context: Entity<TextareaState>,
-    /// The speaker chip clicked once: a second click renames it.
+    /// The session label, edited in place in the title bar row.
+    title: Entity<InputState>,
+    shown_label: String,
+    drag: DragArm,
+    /// The speaker chosen with the keys; its lines are marked.
     selected_speaker: Option<u32>,
+    /// The speaker chip under the pointer; its lines are marked.
+    hovered_speaker: Option<u32>,
     /// The window close waits for the audio flush.
     closing: bool,
     shown_lines: usize,
@@ -111,7 +153,7 @@ impl SessionView {
             silence_threshold,
         } = start;
         let mode = Mode::Record(Box::new(RecordRuntime::new(session, workers)));
-        let mut view = Self::new(mode, "Record", "", silence_threshold, window, cx);
+        let mut view = Self::new(mode, silence_threshold, window, cx);
         view.mount(window, cx);
         let noticed = match &view.mode {
             Mode::Record(record) => record.consent_noticed.clone(),
@@ -132,22 +174,13 @@ impl SessionView {
             silence_threshold,
         } = start;
         let mode = Mode::File(Box::new(FileRuntime::new(session, launcher)));
-        let mut view = Self::new(
-            mode,
-            "Transcribe",
-            "● Transcribing",
-            silence_threshold,
-            window,
-            cx,
-        );
+        let mut view = Self::new(mode, silence_threshold, window, cx);
         view.mount(window, cx);
         view
     }
 
     fn new(
         mode: Mode,
-        mode_label: &str,
-        active_label: &str,
         silence_threshold: f64,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -166,17 +199,22 @@ impl SessionView {
         let context = cx.new(|cx| {
             TextareaState::new(window, cx).placeholder("Notes for the AI: names, topic, goals...")
         });
-        let subscriptions = vec![cx.subscribe_in(&context, window, Self::on_context)];
+        let label = mode.session().label.clone();
+        let title = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Untitled")
+                .default_value(shown_title(&label))
+        });
+        let subscriptions = vec![
+            cx.subscribe_in(&context, window, Self::on_context),
+            cx.subscribe_in(&title, window, Self::on_title),
+        ];
         let transcript = ListState::new(0, ListAlignment::Top, px(400.));
         transcript.set_follow_mode(FollowMode::Tail);
         let mut status = StatusLine::default();
-        status.mode_label = mode_label.into();
         status.silence_threshold = silence_threshold;
-        if !active_label.is_empty() {
-            status.active_label = active_label.into();
-        }
         let focus_handle = cx.focus_handle();
-        // The context box may take the focus as it mounts; the keys start on the view.
+        // An input may take the focus as it mounts; the keys start on the view.
         cx.defer_in(window, |view, window, cx| {
             view.focus_handle.focus(window, cx)
         });
@@ -190,7 +228,11 @@ impl SessionView {
             transcript,
             digest,
             context,
+            title,
+            shown_label: label,
+            drag: DragArm::default(),
             selected_speaker: None,
+            hovered_speaker: None,
             closing: false,
             shown_lines: 0,
             shown_relabel: 0,
@@ -217,21 +259,23 @@ impl SessionView {
         result
     }
 
+    /// A command: run it on the session, then show what it asked for.
+    fn run(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        call: impl FnOnce(&mut Mode, &mut dyn SessionIo) -> Step,
+    ) {
+        let step = self.with_io(window, cx, call);
+        self.show(step, window, cx);
+    }
+
     fn mount(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.with_io(window, cx, |mode, io| match mode {
             Mode::Record(record) => record.mount(io),
             Mode::File(file) => file.mount(io),
         });
         let session = self.mode.session();
-        self.status.quick_action_hints = session
-            .controller
-            .template()
-            .quick_actions
-            .iter()
-            .enumerate()
-            .map(|(index, action)| format!("[{}] {}", index + 1, action.label))
-            .collect::<Vec<_>>()
-            .join("  ");
         self.status.buf_max = session.controller.config().digest.min_lines;
         self.status.ai_notes = session.missing_digest.is_empty();
         if !session.missing_digest.is_empty() {
@@ -269,7 +313,7 @@ impl SessionView {
         })
     }
 
-    /// Bring the panels and the status line up to the session's state.
+    /// Bring the panes, the title and the status strip up to the session's state.
     fn sync(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let session = self.mode.session_mut();
         self.status.sync_from(&mut session.status);
@@ -283,8 +327,21 @@ impl SessionView {
             self.digest
                 .update(cx, |view, cx| view.set_text(&digest, cx));
         }
+        self.sync_title(window, cx);
         self.sync_lines();
-        let _ = window;
+    }
+
+    /// The AI label, or a rename that changed the text: the title shows it,
+    /// unless the user is typing there.
+    fn sync_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let label = self.mode.session().label.clone();
+        if label == self.shown_label || self.title_focused(window, cx) {
+            return;
+        }
+        self.title.update(cx, |title, cx| {
+            title.set_value(shown_title(&label), window, cx)
+        });
+        self.shown_label = label;
     }
 
     /// New lines go at the end; a speaker pass rewrites every line with its label.
@@ -305,7 +362,7 @@ impl SessionView {
             let label = labeled.then(|| controller.speaker_label(segment)).flatten();
             let plain = texts::spoken_text(segment, label.as_deref());
             self.lines.push(Line {
-                time: format!("[{}]", format_wall_time(segment.wall_start)).into(),
+                time: format_wall_time(segment.wall_start).into(),
                 text: plain.clone().into(),
                 plain,
             });
@@ -341,7 +398,7 @@ impl SessionView {
 
     fn show_download(&mut self, model: String, window: &mut Window, cx: &mut Context<Self>) {
         let body = format!(
-            "Downloading **{model}** for the first time. It is cached for later sessions.\n\nThe progress shows in the status line."
+            "Downloading **{model}** for the first time. It is cached for later sessions.\n\nThe progress shows in the status strip."
         );
         let view = cx.entity().downgrade();
         let on_close: dialogs::Callback = Rc::new(move |_, cx| {
@@ -377,15 +434,57 @@ impl SessionView {
         cx.notify();
     }
 
+    /// Return keeps the new title; leaving the field keeps it too.
+    fn on_title(
+        &mut self,
+        _: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            InputEvent::PressEnter { .. } => self.focus_handle.focus(window, cx),
+            InputEvent::Blur => self.commit_title(window, cx),
+            InputEvent::Change | InputEvent::Focus => {}
+        }
+    }
+
+    fn commit_title(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let typed = self.title.read(cx).value().trim().to_string();
+        if typed == shown_title(&self.mode.session().label) {
+            return;
+        }
+        self.run(window, cx, |mode, io| {
+            match mode {
+                Mode::Record(record) => record.apply_label(&typed, io),
+                Mode::File(file) => file.apply_label(&typed, io),
+            }
+            Step::None
+        });
+        // An empty or refused name leaves the label as it was: show that again.
+        let label = self.mode.session().label.clone();
+        self.title.update(cx, |title, cx| {
+            title.set_value(shown_title(&label), window, cx)
+        });
+        self.shown_label = label;
+    }
+
+    fn title_focused(&self, window: &Window, cx: &App) -> bool {
+        self.title.read(cx).focus_handle(cx).is_focused(window)
+    }
+
+    /// The session state: `recording` while audio flows, `paused`, or another.
     fn state(&self) -> &'static str {
         self.mode.session().status.state
     }
 
-    fn hints(&self) -> &'static str {
-        match &self.mode {
-            Mode::Record(_) => texts::record_hints(self.state()),
-            Mode::File(_) => texts::file_hints(self.state()),
-        }
+    /// Audio flows or waits on a pause: Stop applies, Finish does not yet.
+    fn active(&self) -> bool {
+        matches!(self.state(), "recording" | "paused")
+    }
+
+    fn is_record(&self) -> bool {
+        matches!(self.mode, Mode::Record(_))
     }
 
     fn speakers(&self) -> Vec<(u32, String, f64)> {
@@ -407,12 +506,7 @@ impl SessionView {
     }
 
     fn move_focus(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
-        const ORDER: [Focus; 4] = [
-            Focus::Transcript,
-            Focus::Speakers,
-            Focus::Digest,
-            Focus::Context,
-        ];
+        const ORDER: [Focus; 3] = [Focus::Transcript, Focus::Speakers, Focus::Context];
         let has_speakers = !self.speakers().is_empty();
         let mut at = ORDER.iter().position(|f| *f == self.focus).unwrap_or(0) as isize;
         loop {
@@ -424,93 +518,80 @@ impl SessionView {
         self.set_focus(ORDER[at as usize], window, cx);
     }
 
-    /// A key, or a click on its hint. `name` is the TUI's key name.
-    fn press(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if self.focus == Focus::Speakers && self.speaker_key(name, window, cx) {
+    fn toggle_pause(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: pause or resume");
+        self.run(window, cx, |mode, io| {
+            if let Mode::Record(record) = mode {
+                record.toggle_pause(io);
+            }
+            Step::None
+        });
+    }
+
+    fn stop(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: stop");
+        self.run(window, cx, |mode, io| {
+            match mode {
+                Mode::Record(record) => record.stop_recording(io),
+                Mode::File(file) => file.stop_transcription(io),
+            }
+            Step::None
+        });
+    }
+
+    /// The final digest, then the saved session. A second press does not
+    /// wait for the AI label.
+    fn finish(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: finish");
+        self.run(window, cx, |mode, io| match mode {
+            Mode::Record(record) => record.quit(io),
+            Mode::File(file) => file.quit(io),
+        });
+    }
+
+    fn digest_now(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: digest now");
+        self.run(window, cx, |mode, io| {
+            match mode {
+                Mode::Record(record) => record.force_digest(io),
+                Mode::File(file) => file.force_digest(io),
+            }
+            Step::None
+        });
+    }
+
+    fn toggle_mute(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: mute or unmute");
+        self.run(window, cx, |mode, io| {
+            if let Mode::Record(record) = mode {
+                record.toggle_mic(io);
+            }
+            Step::None
+        });
+    }
+
+    /// The quick action at `index`, from 0.
+    fn quick_action(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if index >= self.mode.session().quick_action_count() {
             return;
         }
-        let step = match name {
-            "q" => self.with_io(window, cx, |mode, io| match mode {
-                Mode::Record(record) => record.quit(io),
-                Mode::File(file) => file.quit(io),
-            }),
-            "space" => self.with_io(window, cx, |mode, io| {
-                if let Mode::Record(record) = mode {
-                    record.toggle_pause(io);
-                }
-                Step::None
-            }),
-            "s" => self.with_io(window, cx, |mode, io| {
-                match mode {
-                    Mode::Record(record) => record.stop_recording(io),
-                    Mode::File(file) => file.stop_transcription(io),
-                }
-                Step::None
-            }),
-            "d" => self.with_io(window, cx, |mode, io| {
-                match mode {
-                    Mode::Record(record) => record.force_digest(io),
-                    Mode::File(file) => file.force_digest(io),
-                }
-                Step::None
-            }),
-            "m" => self.with_io(window, cx, |mode, io| {
-                if let Mode::Record(record) = mode {
-                    record.toggle_mic(io);
-                }
-                Step::None
-            }),
-            "c" => {
-                self.copy(window, cx);
-                Step::None
-            }
-            "l" => {
-                self.ask_label(window, cx);
-                Step::None
-            }
-            "o" if self.status.stopped => {
-                cx.open_with_system(&self.mode.session().output_dir);
-                Step::None
-            }
-            "h" => {
-                self.show_help(window, cx);
-                Step::None
-            }
-            "tab" => {
-                self.move_focus(1, window, cx);
-                Step::None
-            }
-            "shift-tab" => {
-                self.move_focus(-1, window, cx);
-                Step::None
-            }
-            "ctrl-q" => {
-                if !self.should_close(window, cx) {
-                    return;
-                }
-                cx.emit(SessionEvent::Exit);
-                Step::None
-            }
-            _ => self.quick_action(name, window, cx),
-        };
-        self.show(step, window, cx);
+        let key = (index + 1).to_string();
+        info!(target: "ltn.app", "quick action {key} started");
+        self.run(window, cx, |mode, io| {
+            mode.session_mut().quick_action(&key, io);
+            Step::None
+        });
     }
 
-    fn quick_action(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) -> Step {
-        let count = self.mode.session().quick_action_count();
-        match name.parse::<usize>() {
-            Ok(index) if (1..=count).contains(&index) => {
-                info!(target: "ltn.app", "quick action {index} started by key {name:?}");
-                self.with_io(window, cx, |mode, io| {
-                    mode.session_mut().quick_action(name, io)
-                });
-            }
-            _ => {}
-        }
-        Step::None
+    fn rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.title.update(cx, |title, cx| title.focus(window, cx));
     }
 
-    /// Left and right choose a speaker; Enter names it. True when the key was one of them.
+    fn show_in_finder(&mut self, cx: &mut Context<Self>) {
+        cx.reveal_path(self.output_dir());
+    }
+
+    /// Left and right choose a speaker; Return names it. True when the key was one of them.
     fn speaker_key(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let speakers: Vec<u32> = self.speakers().iter().map(|chip| chip.0).collect();
         let at = self
@@ -532,12 +613,10 @@ impl SessionView {
         true
     }
 
+    /// A click on a speaker names it.
     fn click_speaker(&mut self, speaker: u32, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected_speaker = Some(speaker);
         self.set_focus(Focus::Speakers, window, cx);
-        if self.selected_speaker != Some(speaker) {
-            self.selected_speaker = Some(speaker);
-            return;
-        }
         self.ask_speaker_name(speaker, window, cx);
     }
 
@@ -559,43 +638,39 @@ impl SessionView {
             "Speaker name...",
             move |name, window, cx| {
                 let _ = view.update(cx, |view, cx| {
-                    view.with_io(window, cx, |mode, io| {
-                        mode.session_mut().set_speaker_name(speaker, name, io)
+                    view.run(window, cx, |mode, io| {
+                        mode.session_mut().set_speaker_name(speaker, name, io);
+                        Step::None
                     });
-                    view.show(Step::None, window, cx);
                 });
             },
         );
     }
 
-    fn ask_label(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let current = self.mode.session().label.clone();
-        let view = cx.entity().downgrade();
-        dialogs::prompt(
-            window,
-            cx,
-            "Session label",
-            &current,
-            "Session label...",
-            move |label, window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.with_io(window, cx, |mode, io| match mode {
-                        Mode::Record(record) => record.apply_label(&label, io),
-                        Mode::File(file) => file.apply_label(&label, io),
-                    });
-                    view.show(Step::None, window, cx);
-                });
-            },
-        );
-    }
-
+    /// The template, its quick actions, then the window's keys.
     fn show_help(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let rows: &[&str] = match &self.mode {
-            Mode::Record(_) => &texts::RECORD_HELP_ROWS,
-            Mode::File(_) => &texts::FILE_HELP_ROWS,
-        };
-        let body = texts::help_markdown(self.mode.session(), rows);
-        dialogs::markdown(window, cx, "Help", &body, "primary", None, None);
+        let template = self.mode.session().controller.template();
+        let metadata = &template.metadata;
+        let mut lines = Vec::new();
+        for (name, value) in [
+            ("Template", &metadata.name),
+            ("Description", &metadata.description),
+            ("Locale", &metadata.locale),
+        ] {
+            if !value.is_empty() {
+                lines.push(format!("**{name}:** {value}\n"));
+            }
+        }
+        if !template.quick_actions.is_empty() {
+            lines.push("### Quick Actions".into());
+            for (index, action) in template.quick_actions.iter().enumerate() {
+                lines.push(format!("{}. {}", index + 1, action.label));
+            }
+            lines.push(String::new());
+        }
+        lines.push("### Keyboard Shortcuts".into());
+        lines.push(SHORTCUTS.into());
+        dialogs::markdown(window, cx, "Help", &lines.join("\n"), "primary", None, None);
     }
 
     /// The session context, once it is locked: the copies end with it.
@@ -606,32 +681,34 @@ impl SessionView {
         }
     }
 
-    /// `c`: the digest when it has the focus, otherwise the transcript.
-    fn copy(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn copy(&mut self, copied: Copied, window: &mut Window, cx: &mut Context<Self>) {
         let context = self.copy_suffix(cx);
-        let (mut text, what, empty) = if self.focus == Focus::Digest {
-            let digest = self.mode.session().status.digest.clone();
-            (digest, "Digest copied", "No digest to copy")
-        } else {
-            let lines: Vec<String> = self
-                .lines
-                .iter()
-                .map(|line| format!("{} {}", line.time, line.plain))
-                .collect();
-            (
-                lines.join("\n"),
-                "Transcript copied",
-                "No transcript to copy",
-            )
+        let (mut text, what, empty) = match copied {
+            Copied::Digest => {
+                let digest = self.mode.session().status.digest.clone();
+                (digest, "Digest copied", "No digest to copy")
+            }
+            Copied::Transcript => {
+                let lines: Vec<String> = self
+                    .lines
+                    .iter()
+                    .map(|line| format!("[{}] {}", line.time, line.plain))
+                    .collect();
+                (
+                    lines.join("\n"),
+                    "Transcript copied",
+                    "No transcript to copy",
+                )
+            }
         };
         if text.is_empty() {
             notify(window, cx, empty.into(), Severity::Warning, COPY_TIMEOUT);
             return;
         }
         if !context.is_empty() {
-            text.push_str(&match self.focus {
-                Focus::Digest => format!("\n\n---\n\n**Session Context**\n\n{context}"),
-                _ => format!("\n\n---\nSession Context:\n{context}"),
+            text.push_str(&match copied {
+                Copied::Digest => format!("\n\n---\n\n**Session Context**\n\n{context}"),
+                Copied::Transcript => format!("\n\n---\nSession Context:\n{context}"),
             });
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -645,7 +722,7 @@ impl SessionView {
 
     /// A recording runs and has not stopped.
     pub fn is_recording(&self) -> bool {
-        matches!(self.mode, Mode::Record(_)) && !self.status.stopped
+        self.is_record() && !self.status.stopped
     }
 
     /// The window may close now. Otherwise the recording stops, and the app
@@ -670,39 +747,256 @@ impl SessionView {
         false
     }
 
+    /// The keys with no Cmd: Space, Tab, and the speaker keys. A text field
+    /// takes them, except Escape, which leaves the field.
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let keystroke = &event.keystroke;
-        let name = match (
-            keystroke.modifiers.control,
-            keystroke.modifiers.shift,
-            keystroke.key.as_str(),
-        ) {
-            (true, _, "q") => "ctrl-q".to_string(),
-            (_, true, "tab") => "shift-tab".to_string(),
-            (false, _, key) if !keystroke.modifiers.platform && !keystroke.modifiers.alt => {
-                key.to_string()
-            }
-            _ => return,
-        };
-        // A locked context box takes no text, so the keys act as anywhere else.
-        let locked = self.mode.session().status.context_locked;
-        let context_focused = self.context.read(cx).focus_handle(cx).is_focused(window);
-        if context_focused && !locked {
-            // The context box takes every key but Escape and Tab.
-            match name.as_str() {
-                "escape" => self.set_focus(Focus::Transcript, window, cx),
-                "ctrl-q" => self.press(&name, window, cx),
-                _ => return,
-            }
-            cx.stop_propagation();
+        let modifiers = &keystroke.modifiers;
+        if modifiers.platform || modifiers.control || modifiers.alt {
             return;
         }
-        cx.stop_propagation();
-        self.press(&name, window, cx);
+        let key = match (modifiers.shift, keystroke.key.as_str()) {
+            (true, "tab") => "shift-tab",
+            (_, key) => key,
+        };
+        let locked = self.mode.session().status.context_locked;
+        let in_context = self.context.read(cx).focus_handle(cx).is_focused(window);
+        let in_title = self.title_focused(window, cx);
+        if (in_context && !locked) || in_title {
+            if key == "escape" {
+                self.leave_field(in_title, window, cx);
+                cx.stop_propagation();
+            }
+            return;
+        }
+        let handled = match key {
+            "space" if self.is_record() => {
+                self.toggle_pause(window, cx);
+                true
+            }
+            "tab" => {
+                self.move_focus(1, window, cx);
+                true
+            }
+            "shift-tab" => {
+                self.move_focus(-1, window, cx);
+                true
+            }
+            _ if self.focus == Focus::Speakers => self.speaker_key(key, window, cx),
+            _ => false,
+        };
+        if handled {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Escape: the title drops what was typed; the context keeps it.
+    fn leave_field(&mut self, in_title: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if in_title {
+            let label = shown_title(&self.mode.session().label);
+            self.title
+                .update(cx, |title, cx| title.set_value(label, window, cx));
+        }
+        self.set_focus(Focus::Transcript, window, cx);
+    }
+}
+
+/// The label as the title shows it: the folder name's underscores are spaces.
+fn shown_title(label: &str) -> String {
+    label.replace('_', " ")
+}
+
+/// A toolbar icon outside the kit's default set; `icons.rs` embeds it.
+fn extra_icon(name: &'static str) -> Icon {
+    Icon::default().path(format!("icons/{name}.svg"))
+}
+
+/// A small heading over a column, as the sidebar's group titles.
+fn heading(title: &'static str, cx: &App) -> Div {
+    div()
+        .flex_none()
+        .px_4()
+        .pt_3()
+        .pb_1()
+        .text_xs()
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(cx.theme().muted_foreground)
+        .child(title)
+}
+
+/// A toolbar button: an icon and a word, flat until the pointer is over it.
+fn tool(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> Button {
+    Button::new(id).ghost().small().icon(icon).label(label)
+}
+
+/// A pill in the status strip.
+fn badge(text: impl Into<SharedString>, background: Hsla, foreground: Hsla) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_1()
+        .px_2()
+        .rounded(px(4.))
+        .bg(background)
+        .text_color(foreground)
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(text.into())
+}
+
+impl SessionView {
+    /// The title field, the template's name, then the commands.
+    fn render_title_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let template = &self.mode.session().controller.template().metadata.name;
+        let theme = cx.theme();
+        let (muted, hover) = (theme.muted_foreground, theme.foreground.opacity(0.06));
+        title_strip("session-title", &self.drag)
+            .gap_2()
+            .px_4()
+            .child(
+                // A press in the field selects text; it must not move the window.
+                div()
+                    .id("title-field")
+                    .w(px(360.))
+                    .min_w(px(120.))
+                    .flex_shrink(1.)
+                    .px_1()
+                    .rounded(px(6.))
+                    .hover(|field| field.bg(hover))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .tooltip(|window, cx| Tooltip::new("Rename").build(window, cx))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(Input::new(&self.title).appearance(false)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_xs()
+                    .text_color(muted)
+                    .child(template.clone()),
+            )
+            .child(self.render_toolbar(cx))
+    }
+
+    fn render_toolbar(&self, cx: &mut Context<Self>) -> Div {
+        let active = self.active();
+        let paused = self.state() == "paused";
+        let muted = self.status.mic_muted;
+        let finishing = self.mode.session().flow.pending_quit;
+        let mut tools = div().flex().flex_none().items_center().gap_1();
+        if self.is_record() && active {
+            let (icon, label) = match paused {
+                true => (IconName::Play, "Resume"),
+                false => (IconName::Pause, "Pause"),
+            };
+            tools =
+                tools
+                    .child(tool("pause", icon, label).on_click(
+                        cx.listener(|view, _, window, cx| view.toggle_pause(window, cx)),
+                    ));
+            let (icon, label) = match muted {
+                true => (extra_icon("mic-off"), "Unmute"),
+                false => (Icon::new(IconName::Mic), "Mute"),
+            };
+            tools = tools.child(
+                tool("mute", icon, label)
+                    .toggled(muted)
+                    .disabled(paused)
+                    .on_click(cx.listener(|view, _, window, cx| view.toggle_mute(window, cx))),
+            );
+        }
+        tools = match active {
+            true => tools.child(
+                Button::new("stop")
+                    .small()
+                    .icon(extra_icon("square-stop"))
+                    .label("Stop")
+                    .on_click(cx.listener(|view, _, window, cx| view.stop(window, cx))),
+            ),
+            false => tools.child(
+                Button::new("finish")
+                    .primary()
+                    .small()
+                    .label(if finishing { "Finishing…" } else { "Finish" })
+                    .loading(finishing)
+                    .tooltip("Write the final digest and save")
+                    .on_click(cx.listener(|view, _, window, cx| view.finish(window, cx))),
+            ),
+        };
+        tools
+            .child(div().w(px(1.)).h(px(18.)).mx_1().bg(cx.theme().border))
+            .child(
+                tool("digest", extra_icon("sparkles"), "Digest Now")
+                    .on_click(cx.listener(|view, _, window, cx| view.digest_now(window, cx))),
+            )
+            .children(self.render_quick_actions())
+            .child(
+                Button::new("finder")
+                    .ghost()
+                    .small()
+                    .icon(IconName::FolderOpen)
+                    .tooltip("Show in Finder")
+                    .on_click(cx.listener(|view, _, _, cx| view.show_in_finder(cx))),
+            )
+    }
+
+    /// The template's quick actions, in one menu.
+    fn render_quick_actions(&self) -> Option<impl IntoElement> {
+        let labels: Vec<String> = self
+            .mode
+            .session()
+            .controller
+            .template()
+            .quick_actions
+            .iter()
+            .map(|action| action.label.clone())
+            .collect();
+        if labels.is_empty() {
+            return None;
+        }
+        let handle = self.focus_handle.clone();
+        let button = tool("quick-actions", extra_icon("zap"), "Quick Actions");
+        Some(button.dropdown_menu(move |menu, _, _| {
+            let mut menu = menu.action_context(handle.clone());
+            for (index, label) in labels.iter().enumerate() {
+                if let Some(action) = quick_action(index) {
+                    menu = menu.menu(label.clone(), action);
+                }
+            }
+            menu
+        }))
+    }
+
+    /// A column heading with a Copy button at its end.
+    fn heading_with_copy(
+        &self,
+        title: &'static str,
+        copied: Copied,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        heading(title, cx)
+            .flex()
+            .items_center()
+            .justify_between()
+            .child(
+                Button::new(title)
+                    .ghost()
+                    .xsmall()
+                    .icon(IconName::Copy)
+                    .label("Copy")
+                    .on_click(
+                        cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)),
+                    ),
+            )
     }
 
     fn render_transcript(&self, cx: &mut Context<Self>) -> Div {
-        let highlight = self.selected_speaker.map(|speaker| {
+        let marked_speaker = self.hovered_speaker.or(match self.focus {
+            Focus::Speakers => self.selected_speaker,
+            _ => None,
+        });
+        let highlight = marked_speaker.map(|speaker| {
             let session = self.mode.session();
             let name = session
                 .controller
@@ -713,8 +1007,8 @@ impl SessionView {
                 .unwrap_or_else(|| format!("S{speaker}"));
             format!("{name}: ")
         });
-        let marked = tinted(cx, "background", "primary", 0.35);
-        let muted = color(cx, "text-muted");
+        let marked = cx.theme().primary.opacity(0.12);
+        let muted = cx.theme().muted_foreground;
         let list = list(
             self.transcript.clone(),
             cx.processor(move |view: &mut Self, index: usize, _, _| {
@@ -727,29 +1021,43 @@ impl SessionView {
                 div()
                     .w_full()
                     .flex()
-                    .gap_2()
-                    .px_1()
-                    .py(px(1.))
+                    .gap_3()
+                    .px_2()
+                    .py(px(3.))
+                    .rounded(px(4.))
                     .when(mine, |row| row.bg(marked))
-                    .child(div().flex_none().text_color(muted).child(line.time.clone()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .text_xs()
+                            .pt(px(1.))
+                            .text_color(muted)
+                            .child(line.time.clone()),
+                    )
                     .child(div().flex_1().min_w_0().child(line.text.clone()))
                     .into_any_element()
             }),
         )
         .size_full();
-        panel("Transcript", self.focus == Focus::Transcript, cx)
+        div()
+            .flex()
+            .flex_col()
             .flex_1()
+            .min_w_0()
+            .child(self.heading_with_copy("Transcript", Copied::Transcript, cx))
             .child(
                 div()
                     .id("transcript")
                     .flex_1()
                     .min_h_0()
+                    .px_2()
                     .on_click(cx.listener(|view, _, window, cx| {
                         view.selected_speaker = None;
                         view.set_focus(Focus::Transcript, window, cx);
                     }))
                     .child(list),
             )
+            .children(self.render_speakers(cx))
     }
 
     fn render_speakers(&self, cx: &mut Context<Self>) -> Option<Div> {
@@ -758,20 +1066,16 @@ impl SessionView {
             return None;
         }
         let focused = self.focus == Focus::Speakers;
+        let theme = cx.theme();
+        let (chosen, chosen_text) = (theme.primary, theme.primary_foreground);
+        let (plain, plain_text) = (theme.secondary, theme.secondary_foreground);
+        let hover = theme.secondary_hover;
         let items = chips.into_iter().map(|(speaker, name, seconds)| {
-            let selected = self.selected_speaker == Some(speaker);
-            let (background, text) = if selected && focused {
-                (
-                    color(cx, "block-cursor-background"),
-                    on(cx, "block-cursor-foreground", "block-cursor-background"),
-                )
-            } else if selected {
-                (
-                    color(cx, "block-cursor-blurred-background"),
-                    color(cx, "foreground"),
-                )
-            } else {
-                (color(cx, "surface"), on(cx, "foreground", "surface"))
+            // The keys choose a speaker only while the chips have the focus.
+            let selected = focused && self.selected_speaker == Some(speaker);
+            let (background, text) = match selected {
+                true => (chosen, chosen_text),
+                false => (plain, plain_text),
             };
             let shown = if name.is_empty() {
                 format!("S{speaker}")
@@ -782,80 +1086,203 @@ impl SessionView {
                 .id(("speaker", speaker as usize))
                 .px_2()
                 .py(px(2.))
-                .rounded(px(10.))
+                .rounded_full()
                 .bg(background)
                 .text_color(text)
-                .text_sm()
+                .text_xs()
                 .cursor_pointer()
+                .when(!selected, |chip| chip.hover(|chip| chip.bg(hover)))
+                .tooltip(|window, cx| Tooltip::new("Name this speaker").build(window, cx))
                 .child(format!(
                     "{shown}  {}",
                     crate::app::session::format_spoken_time(seconds)
                 ))
+                .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
+                    let now = hovered.then_some(speaker);
+                    if *hovered || view.hovered_speaker == Some(speaker) {
+                        view.hovered_speaker = now;
+                        cx.notify();
+                    }
+                }))
                 .on_click(
                     cx.listener(move |view, _, window, cx| view.click_speaker(speaker, window, cx)),
                 )
         });
-        Some(div().flex().flex_wrap().gap_2().pt_2().children(items))
+        Some(
+            div()
+                .flex()
+                .flex_wrap()
+                .flex_none()
+                .gap_2()
+                .px_4()
+                .py_2()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .children(items),
+        )
+    }
+
+    fn render_notes(&self, cx: &mut Context<Self>) -> Div {
+        let context_focused = self.focus == Focus::Context;
+        let border = cx.theme().border;
+        let background = cx.theme().background;
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .child(self.heading_with_copy("Digest", Copied::Digest, cx))
+            .child(
+                div()
+                    .id("digest")
+                    .flex_1()
+                    .min_h_0()
+                    .px_4()
+                    .pb_2()
+                    .overflow_y_scroll()
+                    .child(TextView::new(&self.digest).selectable(true)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .border_t_1()
+                    .border_color(border)
+                    .when(context_focused, |column| column.h(relative(0.45)))
+                    .when(!context_focused, |column| column.h(CONTEXT_HEIGHT))
+                    .child(heading("Session Context", cx))
+                    .child(
+                        div().flex_1().min_h_0().px_2().pb_2().child(
+                            Textarea::new(&self.context)
+                                .bordered(false)
+                                .h_full()
+                                .bg(background),
+                        ),
+                    ),
+            )
+    }
+
+    /// The state with its color, as the strip's first item.
+    fn state_label(&self, cx: &App) -> (String, Hsla) {
+        let status = &self.status;
+        let theme = cx.theme();
+        if status.stopped {
+            ("Stopped".into(), theme.muted_foreground)
+        } else if status.paused {
+            ("Paused".into(), theme.warning)
+        } else if status.recording && self.is_record() {
+            ("Recording".into(), theme.danger)
+        } else if status.recording {
+            ("Transcribing".into(), theme.primary)
+        } else if status.download_percent >= 0 {
+            let text = format!(
+                "Downloading {} ({}%)",
+                status.download_model, status.download_percent
+            );
+            (text, theme.primary)
+        } else if status.audio_status == "loading_model" {
+            ("Loading the speech model".into(), theme.primary)
+        } else if status.audio_status == "error" {
+            ("Error".into(), theme.danger)
+        } else {
+            ("Idle".into(), theme.muted_foreground)
+        }
+    }
+
+    /// The input level, one bar per recent reading. Flat means silence.
+    fn render_meter(&self, cx: &App) -> Div {
+        let theme = cx.theme();
+        let (quiet, loud) = (theme.muted_foreground.opacity(0.4), theme.success);
+        let bars = self.status.level_steps().into_iter().map(move |step| {
+            let height = 3. + 11. * step as f32 / LEVEL_TOP as f32;
+            div()
+                .w(px(3.))
+                .h(px(height))
+                .rounded(px(1.))
+                .bg(if step == 0 { quiet } else { loud })
+        });
+        div()
+            .flex()
+            .items_end()
+            .gap(px(2.))
+            .h(px(14.))
+            .children(bars)
     }
 
     fn render_status(&self, cx: &App) -> Div {
-        let separator = || div().text_color(color(cx, "text-muted")).child("│");
-        let mut parts = Vec::new();
-        for (index, (text, alert)) in self.status.parts(Instant::now()).into_iter().enumerate() {
-            if index > 0 {
-                parts.push(separator());
+        let theme = cx.theme();
+        let status = &self.status;
+        let now = Instant::now();
+        let (state, dot) = self.state_label(cx);
+        let mut left = div()
+            .flex()
+            .items_center()
+            .gap_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .child(div().size(px(8.)).rounded_full().bg(dot))
+                    .child(div().text_color(theme.foreground).child(state)),
+            )
+            .child(div().font_family("Menlo").child(status.format_elapsed(now)));
+        if status.recording && self.is_record() {
+            left = left.child(self.render_meter(cx));
+        }
+        if !status.audio_alert.is_empty() {
+            left = left.child(badge(
+                status.audio_alert.clone(),
+                theme.danger,
+                theme.danger_foreground,
+            ));
+        }
+        if status.mic_muted {
+            left = left.child(
+                badge("Mic muted", theme.secondary, theme.secondary_foreground)
+                    .child(extra_icon("mic-off").size_3()),
+            );
+        }
+        let mut right = div().flex().items_center().gap_3();
+        for (busy, text) in [
+            (status.transcribing, "Transcribing…".to_string()),
+            (status.labeling_speakers, "Labeling speakers…".into()),
+            (!status.activity.is_empty(), format!("{}…", status.activity)),
+        ] {
+            if busy {
+                right = right.child(text);
             }
-            let part = div().child(text);
-            parts.push(if alert {
-                part.px_1()
-                    .bg(color(cx, "error"))
-                    .text_color(on(cx, "text", "error"))
-                    .font_weight(FontWeight::BOLD)
-            } else {
-                part
+        }
+        right = right.child(match status.ai_notes {
+            true => format!(
+                "Next digest: {} of {} lines",
+                status.buf_count, status.buf_max
+            ),
+            false => "AI notes off".into(),
+        });
+        if let Some(last) = status.last_digest_time {
+            let since = (now - last).as_secs();
+            right = right.child(match since {
+                0..60 => format!("Last digest {since}s ago"),
+                _ => format!("Last digest {}m ago", since / 60),
             });
         }
         div()
             .flex()
             .flex_none()
             .items_center()
-            .gap_2()
-            .h(px(26.))
-            .px_3()
-            .bg(color(cx, "surface"))
-            .text_color(on(cx, "text", "surface"))
-            .text_sm()
-            .font_family("Menlo")
-            .children(parts)
+            .justify_between()
+            .gap_3()
+            .h(STATUS_HEIGHT)
+            .px_4()
+            .border_t_1()
+            .border_color(theme.border)
+            .text_xs()
+            .text_color(theme.muted_foreground)
+            .child(left)
+            .child(right)
     }
-
-    /// The key hints for this state, then the quick actions.
-    fn footer_hints(&self) -> Vec<Hint> {
-        let mut hints = parse_hints(self.hints());
-        let actions = &self.mode.session().controller.template().quick_actions;
-        for (index, action) in actions.iter().enumerate().take(QUICK_KEYS.len()) {
-            let key = QUICK_KEYS[index];
-            hints.push(hint(key, action.label.clone(), key));
-        }
-        hints
-    }
-}
-
-/// `[Space] pause  [s] stop` as footer hints. The key name is the bracket
-/// text in lower case, as the TUI names keys.
-fn parse_hints(text: &'static str) -> Vec<Hint> {
-    text.split("  ")
-        .filter_map(|item| {
-            let rest = item.trim().strip_prefix('[')?;
-            let (key, label) = rest.split_once("] ")?;
-            let name = match key {
-                "Space" => "space",
-                "Tab" => "tab",
-                key => key,
-            };
-            Some(hint(key, label.to_string(), name))
-        })
-        .collect()
 }
 
 /// The recording notice, until the user stops it for good.
@@ -897,84 +1324,89 @@ impl Focusable for SessionView {
 
 impl Render for SessionView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let session = self.mode.session();
-        let metadata = &session.controller.template().metadata;
-        let title = texts::header_text(
-            &metadata.name,
-            &metadata.description,
-            &metadata.locale,
-            &session.label,
-        );
-        let context_focused = self.focus == Focus::Context;
-        let transcript = self.render_transcript(cx);
-        let speakers = self.render_speakers(cx);
-        let digest =
-            panel("Digest", self.focus == Focus::Digest, cx)
-                .flex_1()
-                .child(
-                    div()
-                        .id("digest")
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_y_scroll()
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.set_focus(Focus::Digest, window, cx)
-                        }))
-                        .child(TextView::new(&self.digest).selectable(true)),
-                );
-        let context = panel("Session Context", context_focused, cx)
-            .when(context_focused, |panel| panel.h(relative(0.4)))
-            .when(!context_focused, |panel| panel.h(px(130.)))
-            .flex_none()
-            .child(
-                Textarea::new(&self.context)
-                    .bordered(false)
-                    .h_full()
-                    .bg(color(cx, "background")),
-            );
-        let entity = cx.entity().downgrade();
-        let on_press = Rc::new(
-            move |name: &'static str, window: &mut Window, cx: &mut App| {
-                let _ = entity.update(cx, |view, cx| view.press(name, window, cx));
-            },
-        );
+        let record = self.is_record();
+        let active = self.active();
+        let recording = self.state() == "recording";
+        // A quick action the template lacks stays off in the menu.
+        let quick = self.mode.session().quick_action_count();
+        let border = cx.theme().border;
         div()
-            .key_context("Session")
+            .key_context(SESSION_CONTEXT)
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key))
+            // A command shows in the menu bar only while it applies.
+            .when(record && active, |root| {
+                root.on_action(
+                    cx.listener(|view, _: &TogglePause, window, cx| view.toggle_pause(window, cx)),
+                )
+            })
+            .when(record && recording, |root| {
+                root.on_action(
+                    cx.listener(|view, _: &ToggleMute, window, cx| view.toggle_mute(window, cx)),
+                )
+            })
+            .when(active, |root| {
+                root.on_action(
+                    cx.listener(|view, _: &StopSession, window, cx| view.stop(window, cx)),
+                )
+            })
+            .when(!active, |root| {
+                root.on_action(
+                    cx.listener(|view, _: &FinishSession, window, cx| view.finish(window, cx)),
+                )
+            })
+            .on_action(cx.listener(|view, _: &DigestNow, window, cx| view.digest_now(window, cx)))
+            .when(quick >= 1, |root| {
+                root.on_action(cx.listener(|view, _: &QuickAction1, window, cx| {
+                    view.quick_action(0, window, cx)
+                }))
+            })
+            .when(quick >= 2, |root| {
+                root.on_action(cx.listener(|view, _: &QuickAction2, window, cx| {
+                    view.quick_action(1, window, cx)
+                }))
+            })
+            .when(quick >= 3, |root| {
+                root.on_action(cx.listener(|view, _: &QuickAction3, window, cx| {
+                    view.quick_action(2, window, cx)
+                }))
+            })
+            .when(quick >= 4, |root| {
+                root.on_action(cx.listener(|view, _: &QuickAction4, window, cx| {
+                    view.quick_action(3, window, cx)
+                }))
+            })
+            .when(quick >= 5, |root| {
+                root.on_action(cx.listener(|view, _: &QuickAction5, window, cx| {
+                    view.quick_action(4, window, cx)
+                }))
+            })
+            .on_action(cx.listener(|view, _: &CopyTranscript, window, cx| {
+                view.copy(Copied::Transcript, window, cx)
+            }))
+            .on_action(
+                cx.listener(|view, _: &CopyDigest, window, cx| {
+                    view.copy(Copied::Digest, window, cx)
+                }),
+            )
+            .on_action(cx.listener(|view, _: &RenameSession, window, cx| view.rename(window, cx)))
+            .on_action(cx.listener(|view, _: &ShowInFinder, _, cx| view.show_in_finder(cx)))
+            .on_action(cx.listener(|view, _: &ShowHelp, window, cx| view.show_help(window, cx)))
             .size_full()
             .flex()
             .flex_col()
-            .child(header(title, cx))
+            .child(self.render_title_row(cx))
             .child(
                 div()
+                    .flex()
                     .flex_1()
                     .min_h_0()
-                    .flex()
-                    .gap_3()
-                    .p_3()
-                    .pt_4()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(transcript)
-                            .children(speakers),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap_4()
-                            .child(digest)
-                            .child(context),
-                    ),
+                    .border_t_1()
+                    .border_color(border)
+                    .child(self.render_transcript(cx))
+                    .child(div().w(px(1.)).h_full().bg(border))
+                    .child(self.render_notes(cx)),
             )
             .child(self.render_status(cx))
-            .child(footer(self.footer_hints(), on_press, cx))
     }
 }

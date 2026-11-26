@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{ActiveTheme, Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use tracing::error;
+use tracing::{error, info};
 
 use crate::adapters::paths::Paths;
 use crate::adapters::session_reader::{SessionInfo, list_sessions};
@@ -31,8 +32,9 @@ use crate::app::template_builder::{TemplateBuilderRuntime, config_setup};
 use crate::domain::template::SessionTemplate;
 use crate::gui::bridge::notify;
 use crate::gui::builder::{BuilderEvent, BuilderView};
+use crate::gui::dialogs;
 use crate::gui::preflight::{PreflightEvent, PreflightView};
-use crate::gui::session::{SessionEvent, SessionView};
+use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
 use crate::gui::settings::{SettingsEvent, SettingsView};
 use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
@@ -452,10 +454,12 @@ impl Shell {
     ) {
         match event {
             SessionEvent::Closed => {
+                info!(target: "ltn.app", "the session closed");
                 let dir = self.live_dir.clone();
                 self.finished(dir, window, cx);
             }
             SessionEvent::Exit => {
+                info!(target: "ltn.app", "the session ended the app");
                 self.finished(None, window, cx);
                 cx.quit();
             }
@@ -825,6 +829,7 @@ impl Shell {
             )
     }
 
+    /// The mascot, and the two ways to start.
     fn empty_state(&self, cx: &Context<Self>) -> AnyElement {
         div()
             .size_full()
@@ -837,15 +842,33 @@ impl Shell {
             .child(brand(px(22.)))
             .child(
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
-                    .child("Start a recording with ⌘N, or transcribe a file with ⌘O."),
+                    .flex()
+                    .gap_2()
+                    .pt_2()
+                    .child(
+                        Button::new("start-recording")
+                            .primary()
+                            .icon(IconName::Mic)
+                            .label("New Recording")
+                            .on_click(cx.listener(|shell, _, window, cx| {
+                                shell.start(Flow::Record, window, cx)
+                            })),
+                    )
+                    .child(
+                        Button::new("start-transcribe")
+                            .icon(IconName::File)
+                            .label("Transcribe File…")
+                            .on_click(cx.listener(|shell, _, window, cx| {
+                                shell.start(Flow::Transcribe, window, cx)
+                            })),
+                    ),
             )
             .into_any_element()
     }
 
-    /// The pane's title and its body.
-    fn pane(&self, cx: &Context<Self>) -> (SharedString, AnyElement) {
+    /// The pane's title and its body. A body with no title draws its own
+    /// title bar row.
+    fn pane(&self, cx: &Context<Self>) -> (Option<SharedString>, AnyElement) {
         let muted = |text: &'static str| {
             div()
                 .size_full()
@@ -857,41 +880,40 @@ impl Shell {
                 .into_any_element()
         };
         match &self.detail {
-            Detail::Empty => ("".into(), self.empty_state(cx)),
+            Detail::Empty => (Some("".into()), self.empty_state(cx)),
             Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
-                Some((Stage::TemplatePicker(view), _)) => {
-                    ("Choose a Template".into(), view.clone().into_any_element())
-                }
-                Some((Stage::Builder(view), _)) => {
-                    ("New Template".into(), view.clone().into_any_element())
-                }
-                Some((Stage::Preflight(view), _)) => (
-                    "Checking Your Setup".into(),
+                Some((Stage::TemplatePicker(view), _)) => (
+                    Some("Choose a Template".into()),
                     view.clone().into_any_element(),
                 ),
-                Some((Stage::Checking, Flow::Transcribe)) => {
-                    ("Transcribe File".into(), muted("Checking the AI provider…"))
+                Some((Stage::Builder(view), _)) => {
+                    (Some("New Template".into()), view.clone().into_any_element())
                 }
-                Some((Stage::Checking, Flow::Record)) => ("New Recording".into(), muted("")),
-                Some((Stage::Session(view), flow)) => {
-                    let title = match flow {
-                        Flow::Record => "Recording",
-                        Flow::Transcribe => "Transcription",
-                    };
-                    (title.into(), view.clone().into_any_element())
-                }
-                None => ("".into(), self.empty_state(cx)),
+                Some((Stage::Preflight(view), _)) => (
+                    Some("Checking Your Setup".into()),
+                    view.clone().into_any_element(),
+                ),
+                Some((Stage::Checking, Flow::Transcribe)) => (
+                    Some("Transcribe File".into()),
+                    muted("Checking the AI provider…"),
+                ),
+                Some((Stage::Checking, Flow::Record)) => (Some("New Recording".into()), muted("")),
+                Some((Stage::Session(view), _)) => (None, view.clone().into_any_element()),
+                None => (Some("".into()), self.empty_state(cx)),
             },
             Detail::Saved(view, dir) => {
                 let name = dir
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                (title(&name).into(), view.clone().into_any_element())
+                (Some(title(&name).into()), view.clone().into_any_element())
             }
-            Detail::Templates(view) => ("Templates".into(), view.clone().into_any_element()),
-            Detail::Builder(view) => ("Template Builder".into(), view.clone().into_any_element()),
-            Detail::Settings(view) => ("Settings".into(), view.clone().into_any_element()),
+            Detail::Templates(view) => (Some("Templates".into()), view.clone().into_any_element()),
+            Detail::Builder(view) => (
+                Some("Template Builder".into()),
+                view.clone().into_any_element(),
+            ),
+            Detail::Settings(view) => (Some("Settings".into()), view.clone().into_any_element()),
         }
     }
 }
@@ -914,12 +936,14 @@ impl Render for Shell {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .child(
-                        title_strip("pane-title", &self.pane_drag)
-                            .px_4()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(div().truncate().child(title)),
-                    )
+                    .when_some(title, |pane, title| {
+                        pane.child(
+                            title_strip("pane-title", &self.pane_drag)
+                                .px_4()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(div().truncate().child(title)),
+                        )
+                    })
                     .child(div().flex_1().min_h_0().child(body)),
             )
     }
@@ -936,7 +960,11 @@ pub fn watch_close(handle: AnyWindowHandle, shell: Entity<Shell>, cx: &mut App) 
                 .unwrap_or(true)
         });
     });
-    cx.on_window_closed(|cx, _| cx.quit()).detach();
+    cx.on_window_closed(|cx, _| {
+        info!(target: "ltn.app", "the window closed");
+        cx.quit()
+    })
+    .detach();
 }
 
 /// Run `f` on the shell, for a menu or key command.
@@ -962,12 +990,20 @@ pub fn transcribe_file(cx: &mut App) {
     });
 }
 
+/// The keys, when no live session pane shows its own help.
+pub fn show_help(cx: &mut App) {
+    with_shell(cx, |_, window, cx| {
+        dialogs::markdown(window, cx, "Help", SHORTCUTS, "primary", None, None)
+    });
+}
+
 pub fn open_settings(cx: &mut App) {
     with_shell(cx, |shell, window, cx| shell.open_settings(window, cx));
 }
 
 /// Cmd-Q and Cmd-W: the same way out as the close button.
 pub fn request_quit(cx: &mut App) {
+    info!(target: "ltn.app", "quit requested");
     let Some(ShellHandle(shell, handle)) = cx.try_global::<ShellHandle>() else {
         cx.quit();
         return;

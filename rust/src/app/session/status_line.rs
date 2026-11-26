@@ -9,17 +9,25 @@ const WAVE_CHARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', 
 const DB_FLOOR: f64 = -60.0;
 const DB_RANGE: f64 = 49.0;
 
-/// Anything the speech gate counts as silent shows as silent too.
-pub fn rms_to_char(rms: f64, silence_threshold: f64) -> char {
+/// The highest step of the level meter.
+pub const LEVEL_TOP: usize = WAVE_CHARS.len() - 1;
+
+/// The meter step of a level, 0 (silent) to `LEVEL_TOP`. Anything the speech
+/// gate counts as silent shows as silent too.
+pub fn level_step(rms: f64, silence_threshold: f64) -> usize {
     if rms.is_nan() || rms < silence_threshold.max(1e-7) {
-        return WAVE_CHARS[0];
+        return 0;
     }
     if rms.is_infinite() {
-        return WAVE_CHARS[7];
+        return LEVEL_TOP;
     }
     let db = 20.0 * rms.log10();
-    let index = ((db - DB_FLOOR) / DB_RANGE * 7.0) as i64;
-    WAVE_CHARS[index.clamp(0, 7) as usize]
+    let index = ((db - DB_FLOOR) / DB_RANGE * LEVEL_TOP as f64) as i64;
+    index.clamp(0, LEVEL_TOP as i64) as usize
+}
+
+pub fn rms_to_char(rms: f64, silence_threshold: f64) -> char {
+    WAVE_CHARS[level_step(rms, silence_threshold)]
 }
 
 pub struct StatusLine {
@@ -148,6 +156,14 @@ impl StatusLine {
         }
     }
 
+    /// The meter step of each recent level, oldest first.
+    pub fn level_steps(&self) -> Vec<usize> {
+        self.levels
+            .iter()
+            .map(|level| level_step(*level, self.silence_threshold))
+            .collect()
+    }
+
     fn recording_elapsed(&self, now: Instant) -> f64 {
         let Some(start) = self.start else {
             return 0.0;
@@ -261,5 +277,17 @@ mod tests {
         assert_eq!(rms_to_char(0.3, 0.0), '█');
         // -40 dB: (20 / 49 * 7) = 2.86 -> index 2.
         assert_eq!(rms_to_char(0.01, 0.0), '▃');
+    }
+
+    #[test]
+    fn the_steps_keep_the_last_six_levels_in_order() {
+        let mut status = StatusLine::default();
+        for rms in [0.0, 0.01, 0.3, f64::NAN, 0.01, 0.3, 0.3] {
+            status.push_level(rms);
+        }
+        assert_eq!(
+            status.level_steps(),
+            vec![2, LEVEL_TOP, 0, 2, LEVEL_TOP, LEVEL_TOP]
+        );
     }
 }

@@ -5,6 +5,7 @@ use gpui_kit::component::{ActiveTheme, Theme};
 use gpui_kit::*;
 
 use crate::app::theme::Rgb;
+use crate::gui::widgets::TITLE_BAR_HEIGHT;
 
 pub fn hsla(color: Rgb) -> Hsla {
     rgb((u32::from(color.0) << 16) | (u32::from(color.1) << 8) | u32::from(color.2)).into()
@@ -22,7 +23,11 @@ const FONT_SIZE: Pixels = px(13.);
 
 fn sync(window: &mut Window, cx: &mut App) {
     Theme::sync_system_appearance(Some(window), cx);
-    Theme::update(cx, |theme| theme.font_size = FONT_SIZE);
+    Theme::update(cx, |theme| {
+        theme.font_size = FONT_SIZE;
+        // Toasts start below the title bar row, where the toolbar is.
+        theme.notification.margins.top = TITLE_BAR_HEIGHT + px(8.);
+    });
 }
 
 /// The system color for a Textual variable name. The views from the terminal
@@ -55,10 +60,4 @@ pub fn on(cx: &App, variable: &str, background: &str) -> Hsla {
 /// A background, always painted.
 pub fn fill(cx: &App, variable: &str) -> Option<Hsla> {
     Some(color(cx, variable))
-}
-
-/// `variable` with a little of `toward` over it.
-pub fn tinted(cx: &App, variable: &str, toward: &str, alpha: f64) -> Hsla {
-    let base = color(cx, variable);
-    base.blend(color(cx, toward).opacity(alpha as f32))
 }
