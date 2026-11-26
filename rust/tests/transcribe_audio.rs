@@ -190,6 +190,26 @@ mod speech_gate {
         assert!(approx(voiced_seconds(&speech(5.0), 0.01), 4.0, 0.2));
     }
 
+    /// 10 s of a tone that grows from silence to 0.05, as rumble from wind or traffic does.
+    fn swelling_tone(hz: f64) -> Vec<f32> {
+        (0..SR * 10)
+            .map(|index| {
+                let t = index as f64 / SR as f64;
+                (0.05 * (t / 10.0) * (2.0 * std::f64::consts::PI * hz * t).sin()) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rumble_below_the_speech_band_is_not_speech() {
+        assert_eq!(voiced_seconds(&swelling_tone(30.0), 0.01), 0.0);
+    }
+
+    #[test]
+    fn a_tone_in_the_speech_band_at_the_same_level_counts() {
+        assert!(voiced_seconds(&swelling_tone(1000.0), 0.01) > 5.0);
+    }
+
     #[test]
     fn a_click_in_silence_is_not_sent() {
         let mut audio = vec![0.0; SR * 10];

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 import numpy as np
@@ -16,6 +17,10 @@ from lazy_take_notes.l2_use_cases.ports.transcriber import Transcriber
 # the silence threshold and twice the chunk's quietest tenth.
 MIN_VOICED_S = 1.0
 _FRAME = SAMPLE_RATE // 10
+# Rumble (wind, handling, traffic, a desk knock) carries no speech but can pass
+# the gate on loudness alone, and it raises the noise floor under quiet speech.
+# The gate measures loudness above this frequency. Whisper still gets every sample.
+_HIGH_PASS_HZ = 100.0
 # A line that is only an annotation (*clap*, [music], (laughs), ♪) or only punctuation.
 _NOT_SPEECH = re.compile(r'\s*(?:[*\[(♪][^\]*)♪]*[*\])♪]\s*|[\W_]*)')
 # Hold back a cut chunk's last segment only when another one is sent; one long segment is sent as is.
@@ -25,12 +30,38 @@ _LOOP_REPEATS = 3
 _LOOP = re.compile(rf'(\S.{{8,}}?)(?:\s*\1){{{_LOOP_REPEATS - 1},}}')
 
 
+def _high_pass_coefficients() -> tuple[float, float, float, float, float]:
+    """A 2nd-order Butterworth high-pass (the RBJ audio EQ cookbook), normalized by a0."""
+    w0 = 2 * math.pi * _HIGH_PASS_HZ / SAMPLE_RATE
+    alpha = math.sin(w0) / math.sqrt(2)
+    cos_w0 = math.cos(w0)
+    a0 = 1 + alpha
+    b0 = (1 + cos_w0) / 2 / a0
+    return b0, -2 * b0, b0, -2 * cos_w0 / a0, (1 - alpha) / a0
+
+
+_HIGH_PASS = _high_pass_coefficients()
+
+
+def high_pass(audio: np.ndarray) -> np.ndarray:
+    """*audio* without its content below _HIGH_PASS_HZ, from a silent start."""
+    b0, b1, b2, a1, a2 = _HIGH_PASS
+    out = [0.0] * len(audio)
+    x1 = x2 = y1 = y2 = 0.0
+    for index, x0 in enumerate(audio.tolist()):
+        y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2, x1, y2, y1 = x1, x0, y1, y0
+        out[index] = y0
+    return np.asarray(out)
+
+
 def voiced_frames(audio: np.ndarray, silence_threshold: float) -> np.ndarray:
     """One flag per 0.1 s frame: clearly louder than both the threshold and the chunk's noise floor."""
     count = len(audio) // _FRAME
     if count == 0:
         return np.zeros(0, dtype=bool)
-    rms = np.sqrt(np.mean(audio[: count * _FRAME].reshape(count, _FRAME) ** 2, axis=1))
+    filtered = high_pass(audio[: count * _FRAME])
+    rms = np.sqrt(np.mean(filtered.reshape(count, _FRAME) ** 2, axis=1))
     floor = float(np.percentile(rms, 10))
     return rms >= max(silence_threshold, 2 * floor)
 

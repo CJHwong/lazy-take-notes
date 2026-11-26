@@ -379,6 +379,18 @@ class TestSpeechGate:
     def test_speech_over_a_quiet_floor_counts(self):
         assert voiced_seconds(speech_like(SAMPLE_RATE * 5), 0.01) == pytest.approx(4.0, abs=0.2)
 
+    @staticmethod
+    def _swelling_tone(hz: float) -> np.ndarray:
+        """10 s of a tone that grows from silence to 0.05, as rumble from wind or traffic does."""
+        t = np.arange(SAMPLE_RATE * 10) / SAMPLE_RATE
+        return (0.05 * (t / 10) * np.sin(2 * np.pi * hz * t)).astype(np.float32)
+
+    def test_rumble_below_the_speech_band_is_not_speech(self):
+        assert voiced_seconds(self._swelling_tone(30.0), 0.01) == 0.0
+
+    def test_a_tone_in_the_speech_band_at_the_same_level_counts(self):
+        assert voiced_seconds(self._swelling_tone(1000.0), 0.01) > 5.0
+
     def test_a_click_in_silence_is_not_sent(self):
         audio = np.zeros(SAMPLE_RATE * 10, dtype=np.float32)
         audio[SAMPLE_RATE * 5 : SAMPLE_RATE * 5 + 4000] = 0.5  # 0.25 s click

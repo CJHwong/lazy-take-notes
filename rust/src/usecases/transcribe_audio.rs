@@ -18,6 +18,10 @@ use crate::ports::transcriber::{TranscribeError, Transcriber};
 /// audio clearly above its own noise floor.
 pub const MIN_VOICED_S: f64 = 1.0;
 const FRAME: usize = SAMPLE_RATE / 10;
+/// Rumble (wind, handling, traffic, a desk knock) carries no speech but can pass
+/// the gate on loudness alone, and it raises the noise floor under quiet speech.
+/// The gate measures loudness above this frequency. Whisper still gets every sample.
+const HIGH_PASS_HZ: f64 = 100.0;
 /// Hold back a cut chunk's last segment only when another one is sent. One long segment is sent as is.
 const MIN_SEGMENTS_TO_HOLD: usize = 2;
 /// Audio a buffer needs before a pause can end it, and before a flush sends it.
@@ -31,9 +35,31 @@ static NOT_SPEECH: LazyLock<Regex> = LazyLock::new(|| {
 static LOOP: LazyLock<BacktrackingRegex> =
     LazyLock::new(|| BacktrackingRegex::new(r"(\S.{8,}?)(?:\s*\1){2,}").expect("valid regex"));
 
+/// `audio` without its content below `HIGH_PASS_HZ`, from a silent start: a
+/// 2nd-order Butterworth high-pass (the RBJ audio EQ cookbook).
+pub fn high_pass(audio: &[f32]) -> Vec<f32> {
+    let w0 = 2.0 * std::f64::consts::PI * HIGH_PASS_HZ / SAMPLE_RATE as f64;
+    let alpha = w0.sin() / 2f64.sqrt();
+    let a0 = 1.0 + alpha;
+    let b0 = (1.0 + w0.cos()) / 2.0 / a0;
+    let (b1, b2) = (-2.0 * b0, b0);
+    let (a1, a2) = (-2.0 * w0.cos() / a0, (1.0 - alpha) / a0);
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
+    audio
+        .iter()
+        .map(|sample| {
+            let x0 = f64::from(*sample);
+            let y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            (x2, x1, y2, y1) = (x1, x0, y1, y0);
+            y0 as f32
+        })
+        .collect()
+}
+
 /// One flag per 0.1 s frame: louder than both the threshold and twice the chunk's quietest tenth.
 pub fn voiced_frames(audio: &[f32], silence_threshold: f64) -> Vec<bool> {
-    let levels: Vec<f64> = audio
+    let whole = audio.len() / FRAME * FRAME;
+    let levels: Vec<f64> = high_pass(&audio[..whole])
         .as_chunks::<FRAME>()
         .0
         .iter()
