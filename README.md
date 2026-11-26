@@ -28,7 +28,7 @@ On a Mac with Apple silicon, you can also install the window app, Lazy Take Note
 brew install --cask CJHwong/tap/lazy-take-notes
 ```
 
-The app has no Apple Developer ID signature. The cask removes the download mark that Homebrew adds, so macOS opens the app without a warning. Install it only if you trust this tap.
+The app has no Apple Developer ID signature. The cask removes the download mark that Homebrew adds, so macOS opens the app without a warning. Install it only if you trust this tap. Each release is signed with the same certificate, so the microphone and system audio permissions carry over to the next version.
 
 On a Mac with Apple silicon, the app is a native build. Other systems run the Python version. See [Rust and Python versions](docs/explain_rust_and_python.md).
 
