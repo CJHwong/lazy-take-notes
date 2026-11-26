@@ -15,6 +15,10 @@ use gpui_kit::*;
 pub mod space {
     use gpui_kit::{Pixels, px};
     pub const NONE: Pixels = px(0.);
+    /// How far a button's icon sits below the center of its box. Text sits
+    /// low in its line, to leave room under it, so a centered icon looks
+    /// high beside a label.
+    pub const ICON_DROP: Pixels = px(0.75);
     /// Between the bars of a meter.
     pub const XXS: Pixels = px(2.);
     /// Between an icon and its label, or between two chips.
@@ -159,8 +163,10 @@ pub mod tint {
     pub const FAINT: f32 = 0.4;
     /// The fill of a Settings card over the window background.
     pub const CARD: f32 = 0.025;
-    /// The fill of a speaker's turn in the transcript.
+    /// The fill of a turn with no known speaker in the transcript.
     pub const BLOCK: f32 = 0.05;
+    /// The fill of a known speaker's turn, over the speaker's color.
+    pub const TURN: f32 = 0.12;
 }
 
 /// The macOS accent colors, light then dark, as `AppleAccentColor` numbers
@@ -251,6 +257,29 @@ fn apply_dark(theme: &mut Theme) {
     theme.scrollbar_thumb_hover = white().opacity(dark::SECONDARY_LABEL);
 }
 
+/// The speakers' colors, light then dark: the macOS system colors, as
+/// Messages and Calendar use them. Neighbors in the list sit far apart on
+/// the color wheel, so the first speakers never look alike. The accent blue
+/// is left out: it marks the speaker the pointer is on.
+const SPEAKERS: [(u32, u32); 7] = [
+    (0xAF52DE, 0xBF5AF2), // purple
+    (0xFF9500, 0xFF9F0A), // orange
+    (0x34C759, 0x30D158), // green
+    (0xFF2D55, 0xFF375F), // pink
+    (0x30B0C7, 0x40C8E0), // teal
+    (0xA2845E, 0xAC8E68), // brown
+    (0x5856D6, 0x5E5CE6), // indigo
+];
+
+/// The block fill of a speaker's turns. `order` is the speaker's place in
+/// the speaker list, so the first speakers take the colors that differ
+/// most, and a rename keeps the color.
+pub fn speaker_fill(order: usize, dark: bool) -> Hsla {
+    let (light, night) = SPEAKERS[order % SPEAKERS.len()];
+    let color: Hsla = rgb(if dark { night } else { light }).into();
+    color.opacity(tint::TURN)
+}
+
 /// Yellow is the one accent too light for white text.
 const YELLOW: i32 = 2;
 
@@ -329,6 +358,14 @@ mod tests {
     #[test]
     fn an_unknown_accent_number_falls_back_to_blue() {
         assert_eq!(accent(42, false), accent(BLUE, false));
+    }
+
+    #[test]
+    fn speakers_next_to_each_other_differ_and_the_colors_repeat() {
+        use super::speaker_fill;
+        assert_ne!(speaker_fill(0, false), speaker_fill(1, false));
+        assert_eq!(speaker_fill(0, false), speaker_fill(7, false));
+        assert_ne!(speaker_fill(0, false), speaker_fill(0, true));
     }
 
     #[test]

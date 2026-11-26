@@ -29,7 +29,7 @@ use crate::app::session_start::{FileStart, RecordStart};
 use crate::app::tasks::Payload;
 use crate::domain::transcript::format_wall_time;
 use crate::gui::bridge::{Bridge, GuiIo, Incoming, notify};
-use crate::gui::design::{control, radius, size, space, text, tint};
+use crate::gui::design::{control, radius, size, space, speaker_fill, text, tint};
 use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::widgets::{
@@ -988,6 +988,17 @@ impl SessionView {
         let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
         let fill = cx.theme().foreground.opacity(tint::BLOCK);
+        let dark = cx.theme().is_dark();
+        // A line names its speaker by label; the color follows the
+        // speaker's place in the speaker list.
+        let labels: Vec<String> = self
+            .speakers()
+            .into_iter()
+            .map(|(speaker, name, _)| match name.is_empty() {
+                true => format!("S{speaker}"),
+                false => name,
+            })
+            .collect();
         let list = list(
             self.transcript.clone(),
             cx.processor(move |view: &mut Self, index: usize, _, _| {
@@ -1009,8 +1020,12 @@ impl SessionView {
                     first: !same(before),
                     last: !same(view.lines.get(index + 1)),
                 };
+                let order = line
+                    .speaker
+                    .as_ref()
+                    .and_then(|label| labels.iter().position(|name| name == label.as_ref()));
                 let colors = TurnColors {
-                    fill,
+                    fill: order.map_or(fill, |order| speaker_fill(order, dark)),
                     marked: mine.then_some(marked),
                     muted,
                 };

@@ -19,7 +19,7 @@ use crate::app::saved_session::{self, SavedSession, split_line, spoken_by};
 use crate::app::session::{Severity, format_spoken_time};
 use crate::app::session_list::title;
 use crate::gui::bridge::notify;
-use crate::gui::design::{size, space, text, tint};
+use crate::gui::design::{size, space, speaker_fill, text, tint};
 use crate::gui::dialogs;
 use crate::gui::icons;
 use crate::gui::widgets::{
@@ -293,6 +293,7 @@ impl SessionReader {
         let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
         let fill = cx.theme().foreground.opacity(tint::BLOCK);
+        let dark = cx.theme().is_dark();
         let labels: Vec<String> = self
             .session
             .speakers
@@ -332,8 +333,10 @@ impl SessionReader {
                     first: !same(index.checked_sub(1).and_then(speaker_of)),
                     last: !same(speaker_of(index + 1)),
                 };
+                // `labels` follows the speaker list, so a place is a color.
+                let order = speaker.and_then(|name| labels.iter().position(|label| label == name));
                 let colors = TurnColors {
-                    fill,
+                    fill: order.map_or(fill, |order| speaker_fill(order, dark)),
                     marked: mine.then_some(marked),
                     muted,
                 };

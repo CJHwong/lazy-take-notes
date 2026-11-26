@@ -895,7 +895,6 @@ impl Shell {
                 .w_full()
                 .icon(IconName::Plus)
                 .label("New Session")
-                .tooltip("Choose a note type, then record or import audio")
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     shell.leave_page_then(start.clone(), window, cx)
                 })),
