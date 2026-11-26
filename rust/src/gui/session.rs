@@ -1078,11 +1078,6 @@ impl SessionView {
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
-        let context_focused = self.focus == Focus::Context;
-        // An empty context folds to its header; a click opens it.
-        let context_open = context_focused || !self.context.read(cx).value().is_empty();
-        let border = cx.theme().border;
-        let background = cx.theme().background;
         div()
             .flex()
             .flex_col()
@@ -1118,44 +1113,67 @@ impl SessionView {
                         false => column.child(self.digest_empty(cx)),
                     }),
             )
+            .child(self.render_context(cx))
+    }
+
+    /// Background for AI: always open, on an accent tint, so it reads as
+    /// the place to tell the AI who and what the meeting is about.
+    fn render_context(&self, cx: &mut Context<Self>) -> Div {
+        let focused = self.focus == Focus::Context;
+        let theme = cx.theme();
+        let (accent, border, background) = (theme.primary, theme.border, theme.background);
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .h(size::CONTEXT_PANEL)
+            .when(focused, |panel| panel.h(relative(0.45)))
+            .border_t(size::HAIRLINE)
+            .border_color(border)
+            .bg(accent.opacity(tint::SUBTLE))
             .child(
                 div()
+                    .id("context-header")
                     .flex()
-                    .flex_col()
                     .flex_none()
-                    .border_t(size::HAIRLINE)
-                    .border_color(border)
-                    .when(context_focused, |column| column.h(relative(0.45)))
-                    .when(!context_focused && context_open, |column| {
-                        column.h(size::CONTEXT_PANEL)
-                    })
+                    .items_center()
+                    .gap(space::XS)
+                    .h(size::COLUMN_HEADER)
+                    .px(space::LG)
+                    .text_color(accent)
+                    .cursor_pointer()
+                    .on_click(
+                        cx.listener(|view, _, window, cx| {
+                            view.set_focus(Focus::Context, window, cx)
+                        }),
+                    )
+                    .child(Icon::new(IconName::Bot).size(size::ICON_SM))
                     .child(
                         div()
-                            .id("context-header")
-                            .cursor_pointer()
-                            .on_click(cx.listener(|view, _, window, cx| {
-                                view.set_focus(Focus::Context, window, cx)
-                            }))
-                            .child(
-                                column_header("Background for AI", cx).child(
-                                    Icon::new(match context_open {
-                                        true => IconName::ChevronDown,
-                                        false => IconName::ChevronRight,
-                                    })
-                                    .size(size::ICON_SM),
-                                ),
-                            ),
-                    )
-                    .when(context_open, |column| {
-                        column.child(
-                            div().flex_1().min_h_0().px(space::SM).pb(space::SM).child(
-                                Textarea::new(&self.context)
-                                    .bordered(false)
-                                    .h_full()
-                                    .bg(background),
-                            ),
-                        )
-                    }),
+                            .text_size(text::CAPTION)
+                            .font_weight(text::STRONG)
+                            .child("Background for AI"),
+                    ),
+            )
+            .child(
+                div().flex_1().min_h_0().px(space::LG).pb(space::MD).child(
+                    div()
+                        .size_full()
+                        .rounded(radius::MD)
+                        .border(size::HAIRLINE)
+                        .border_color(match focused {
+                            true => accent,
+                            false => border,
+                        })
+                        .bg(background)
+                        .overflow_hidden()
+                        .child(
+                            Textarea::new(&self.context)
+                                .bordered(false)
+                                .h_full()
+                                .bg(background),
+                        ),
+                ),
             )
     }
 
