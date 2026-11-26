@@ -916,9 +916,7 @@ impl Shell {
                     };
                     (Some(title.into()), view.clone().into_any_element())
                 }
-                Some((Stage::Builder(view), _)) => {
-                    (Some("New Template".into()), view.clone().into_any_element())
-                }
+                Some((Stage::Builder(view), _)) => (None, view.clone().into_any_element()),
                 Some((Stage::Checking, Flow::Transcribe)) => (
                     Some("Transcribe File".into()),
                     muted("Checking the AI provider…"),
@@ -935,10 +933,7 @@ impl Shell {
                 (Some(title(&name).into()), view.clone().into_any_element())
             }
             Detail::Templates(view) => (Some("Templates".into()), view.clone().into_any_element()),
-            Detail::Builder(view) => (
-                Some("Template Builder".into()),
-                view.clone().into_any_element(),
-            ),
+            Detail::Builder(view) => (None, view.clone().into_any_element()),
             Detail::Settings(view) => (Some("Settings".into()), view.clone().into_any_element()),
         }
     }
