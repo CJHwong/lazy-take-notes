@@ -48,4 +48,6 @@ scripts/package.sh                          # build dist/lazy-take-notes-<arch>-
    Commit `src/lazy_take_notes/rust_release.py`, push the branch, and run `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@<branch> take-note --version`.
 5. Merge the branch. Users of the Python launcher get the release when the pin reaches `main`.
 
+The release job signs the `.app` with a self-signed certificate from the `MACOS_SIGN_P12` and `MACOS_SIGN_P12_PASSWORD` secrets, and a tag fails without them. macOS keeps an app's privacy permissions (microphone, system audio, Documents) for its bundle id and certificate. Keep the same certificate: a new one makes every user grant the permissions again. A local build of `rust/scripts/package_app.sh` is signed ad hoc, unless `LTN_SIGN_IDENTITY` (and `LTN_SIGN_KEYCHAIN`) name an identity.
+
 Never move a tag that a pin uses. The pin holds the package's SHA-256, so a rebuilt package fails the check. Release a new tag instead.

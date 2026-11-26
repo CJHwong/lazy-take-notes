@@ -6,6 +6,10 @@
 #   rust/scripts/package_app.sh          -> rust/target/app/Lazy Take Notes.app
 #   rust/scripts/package_app.sh --run    build, then open the app
 #
+# Signing: LTN_SIGN_IDENTITY names a code signing identity, and
+# LTN_SIGN_KEYCHAIN the keychain that holds it (default: the search list).
+# Without an identity the app is signed ad hoc.
+#
 # The helper is the one the Python package ships. If it is missing, this runs
 # scripts/build_native.sh, which needs the Xcode Command Line Tools.
 
@@ -95,10 +99,16 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 PLIST
 plutil -lint "$APP/Contents/Info.plist" >/dev/null
 
-# An ad-hoc signature, so macOS keeps the microphone permission between
-# builds of the same bundle id. scripts/release.sh signs a release properly.
-codesign --force --sign - "$APP/Contents/MacOS/coreaudio-tap"
-codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+# macOS keeps a privacy permission (microphone, system audio, Documents) for
+# the app's designated requirement. An ad hoc signature makes that the hash
+# of this one build, so every build asks again. A certificate makes it the
+# bundle id and the certificate, which stay the same from build to build.
+SIGN=(--force --sign "${LTN_SIGN_IDENTITY:--}")
+if [ -n "${LTN_SIGN_KEYCHAIN:-}" ]; then
+    SIGN+=(--keychain "$LTN_SIGN_KEYCHAIN")
+fi
+codesign "${SIGN[@]}" "$APP/Contents/MacOS/coreaudio-tap"
+codesign "${SIGN[@]}" --identifier "$BUNDLE_ID" "$APP"
 codesign --verify --strict "$APP"
 
 echo "$APP"

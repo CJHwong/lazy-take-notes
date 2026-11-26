@@ -31,6 +31,34 @@ jobs:
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --version
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --help
           test -x "$RUNNER_TEMP/lazy-take-notes-arm64-macos/coreaudio-tap"
+      # The app is signed with a self-signed certificate. macOS then keeps
+      # its privacy permissions from one release to the next, which an ad hoc
+      # signature does not. A tag must have the certificate; a dry run
+      # without it signs ad hoc.
+      - name: Import the signing certificate
+        env:
+          SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          SIGN_P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+        run: |
+          if [ -z "$SIGN_P12" ]; then
+            if [ "$GITHUB_REF_TYPE" = tag ]; then
+              echo "::error::MACOS_SIGN_P12 is not set, so a release would lose the users' permissions"
+              exit 1
+            fi
+            echo "MACOS_SIGN_P12 is not set: this dry run signs ad hoc"
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/sign.keychain-db"
+          keychain_password=$(openssl rand -hex 16)
+          echo "$SIGN_P12" | base64 --decode > "$RUNNER_TEMP/sign.p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/sign.p12" -k "$keychain" -P "$SIGN_P12_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" > /dev/null
+          rm "$RUNNER_TEMP/sign.p12"
+          echo "LTN_SIGN_IDENTITY=Lazy Take Notes Code Signing" >> "$GITHUB_ENV"
+          echo "LTN_SIGN_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - name: Build the app
         run: |
           bash rust/scripts/package_app.sh
@@ -40,6 +68,9 @@ jobs:
           ditto -x -k rust/dist/Lazy-Take-Notes-arm64-macos.zip "$RUNNER_TEMP/app"
           app="$RUNNER_TEMP/app/Lazy Take Notes.app"
           codesign --verify --strict "$app"
+          if [ -n "${LTN_SIGN_IDENTITY:-}" ]; then
+            codesign -d -r- "$app" 2>&1 | grep 'certificate leaf'
+          fi
           test -f "$app/Contents/Resources/AppIcon.icns"
           test -x "$app/Contents/MacOS/coreaudio-tap"
           "$app/Contents/MacOS/lazy-take-notes" --version
