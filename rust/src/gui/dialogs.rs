@@ -203,27 +203,40 @@ pub fn buttons(
     danger: bool,
     on_action: impl Fn(&mut Window, &mut App) -> bool + 'static,
 ) -> DialogFooter {
-    let button = Button::new("dialog-action")
-        .with_size(control::CONTROL)
-        .label(action)
-        .on_click(move |_, window, cx| {
-            if on_action(window, cx) {
-                window.close_dialog(cx);
-            }
-        });
-    let button = match danger {
-        true => button.danger(),
-        false => button.primary(),
+    let kind = match danger {
+        true => Kind::Danger,
+        false => Kind::Primary,
     };
     DialogFooter::new()
         .justify_end()
         .child(
-            Button::new("dialog-cancel")
-                .with_size(control::CONTROL)
-                .label("Cancel")
+            button("dialog-cancel", "Cancel", Kind::Plain)
                 .on_click(|_, window, cx| window.close_dialog(cx)),
         )
-        .child(button)
+        .child(
+            button("dialog-action", action, kind).on_click(move |_, window, cx| {
+                if on_action(window, cx) {
+                    window.close_dialog(cx);
+                }
+            }),
+        )
+}
+
+/// How a dialog button reads: Cancel, the action, or a destructive action.
+pub enum Kind {
+    Plain,
+    Primary,
+    Danger,
+}
+
+/// A footer button at the control size, as wide as its label.
+pub fn button(id: &'static str, label: impl Into<SharedString>, kind: Kind) -> Button {
+    let button = Button::new(id).with_size(control::CONTROL).label(label);
+    match kind {
+        Kind::Plain => button,
+        Kind::Primary => button.primary(),
+        Kind::Danger => button.danger(),
+    }
 }
 
 /// A dialog title is plain text, or the warning color for a warning.

@@ -174,8 +174,12 @@ pub fn run() -> i32 {
                 }),
                 // The panes draw the title bar row and move the window themselves.
                 app_owns_titlebar_drag: true,
-                window_bounds: Some(WindowBounds::centered(None, size(px(1200.), px(800.)), cx)),
-                window_min_size: Some(size(px(760.), px(520.))),
+                window_bounds: Some(WindowBounds::centered(
+                    None,
+                    size(design::size::WINDOW_W, design::size::WINDOW_H),
+                    cx,
+                )),
+                window_min_size: Some(size(design::size::WINDOW_MIN_W, design::size::WINDOW_MIN_H)),
                 ..Default::default()
             };
             let opened = open_window(options, cx, |window, cx| {

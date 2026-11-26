@@ -54,7 +54,7 @@ pub fn brand(size: Pixels) -> Div {
     div()
         .flex()
         .text_size(size)
-        .font_weight(FontWeight::BOLD)
+        .font_weight(text::BRAND)
         .child(div().text_color(hsla(logo::PIG)).child("lazy-"))
         .child(div().text_color(hsla(logo::TEAL)).child("take-notes"))
 }

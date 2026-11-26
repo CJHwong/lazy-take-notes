@@ -70,7 +70,7 @@ The Rust app in `rust/` keeps the same four layers under role names:
 | `l3_interface_adapters` | `adapters/`, `config.rs` |
 | `l4_frameworks_and_drivers` | `app/` (no UI), then `tui/` and `gui/`, then `cli/` |
 
-Each layer imports only the layers above it in the table. `app/` comes before `tui/`, `gui/` and `cli/`. `tui/` and `gui/` share a rank and never import each other. ratatui and crossterm stay in `tui/` and `cli/`. gpui and gpui_kit stay in `gui/`. `rust/scripts/check_layers.py` enforces these rules in prek.
+Each layer imports only the layers above it in the table. `app/` comes before `tui/`, `gui/` and `cli/`. `tui/` and `gui/` share a rank and never import each other. ratatui and crossterm stay in `tui/` and `cli/`. gpui and gpui_kit stay in `gui/`. `rust/scripts/check_layers.py` enforces these rules in prek. Every size, space, radius, type size, tint and weight in `gui/` comes from `gui/design.rs`; `rust/scripts/check_design.py` fails on a literal anywhere else in `gui/`, in prek and CI.
 
 `gui/` is the native macOS window, built only with the Cargo feature `gui` (`lazy-take-notes-gui`, packaged by `rust/scripts/package_app.sh`). Each of its screens is a view over the same `app/` runtime that a TUI screen drives, so a fix to session, preflight, settings or builder behavior goes in `app/` and both front ends get it. The window is driven by the pointer first: every command is a labeled control on screen, and keyboard shortcuts show only in the menu bar and Help.
 

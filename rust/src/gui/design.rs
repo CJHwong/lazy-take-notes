@@ -99,6 +99,11 @@ pub mod size {
     pub const DIALOG_WIDE: Pixels = px(640.);
     /// The tallest a dialog's text grows before it scrolls.
     pub const DIALOG_BODY: Pixels = px(480.);
+    /// The window at first launch, and the smallest it gets.
+    pub const WINDOW_W: Pixels = px(1200.);
+    pub const WINDOW_H: Pixels = px(800.);
+    pub const WINDOW_MIN_W: Pixels = px(760.);
+    pub const WINDOW_MIN_H: Pixels = px(520.);
     /// How far a long list draws past its visible part.
     pub const LIST_OVERDRAW: Pixels = px(400.);
 }
@@ -133,6 +138,8 @@ pub mod text {
     /// Clocks and timestamps: fixed-width digits, so columns stay put.
     pub const MONO: &str = "Menlo";
     pub const STRONG: FontWeight = FontWeight::SEMIBOLD;
+    /// The brand name on the empty window.
+    pub const BRAND: FontWeight = FontWeight::BOLD;
     /// Markdown heading sizes, h1 to h6: a step over the reading text each,
     /// and never up to the page heading.
     pub const MARKDOWN_HEADINGS: [Pixels; 6] =
