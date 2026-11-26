@@ -4,9 +4,9 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use crate::app::session::Step;
 use crate::app::session::record::RecordRuntime;
 pub use crate::app::session::record::{DiarizationLauncher, RecordWorkers};
+use crate::app::session::{Step, texts};
 use crate::tui::host::{Action, Ctx, MouseInput, Msg, Payload, Screen};
 use crate::tui::keys::{Binding, action_for, bind};
 use crate::tui::screens::modals::MarkdownModal;
@@ -27,35 +27,6 @@ pub const RECORD_BINDINGS: [Binding; 12] = [
     bind("m", "toggle_mic", "Mute mic").hidden(),
 ];
 
-const HELP_ROWS: [&str; 13] = [
-    "| Key | Action |",
-    "|-----|--------|",
-    "| `Space` | Pause / Resume |",
-    "| `s` | Stop recording |",
-    "| `d` | Force digest now |",
-    "| `m` | Mute / Unmute mic |",
-    "| `c` | Copy focused panel |",
-    "| `Tab` | Switch panel focus |",
-    "| `←` `→` `Enter` | On the speaker bar: choose a speaker, name it |",
-    "| `l` | Rename session |",
-    "| `o` | Open session directory |",
-    "| `h` | Toggle this help |",
-    "| `q` | Quit |",
-];
-
-const QUIT_HINT: &str =
-    "Press s to stop and save, then q for the final notes. ctrl+q saves and quits without them.";
-
-fn hints(state: &str) -> &'static str {
-    match state {
-        "recording" => {
-            "[Space] pause  [s] stop  [d] digest  [m] mute mic  [c] copy  [l] label  [h] help"
-        }
-        "paused" => "[Space] resume  [s] stop  [c] copy  [l] label  [h] help",
-        _ => "[c] copy  [l] label  [o] open  [h] help  [q] quit",
-    }
-}
-
 pub struct RecordScreen {
     runtime: RecordRuntime,
     view: SessionView,
@@ -66,8 +37,8 @@ impl RecordScreen {
         let mut view = session.view;
         view.status.mode_label = "Record".into();
         view.status.silence_threshold = silence_threshold;
-        view.hints = hints;
-        view.help_rows = &HELP_ROWS;
+        view.hints = texts::record_hints;
+        view.help_rows = &texts::RECORD_HELP_ROWS;
         Self {
             runtime: RecordRuntime::new(session.runtime, workers),
             view,
@@ -200,6 +171,6 @@ impl Screen for RecordScreen {
     fn quit_hint(&self) -> Option<String> {
         self.runtime
             .recording_or_paused()
-            .then(|| QUIT_HINT.to_string())
+            .then(|| texts::QUIT_HINT.to_string())
     }
 }

@@ -12,38 +12,17 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
 use super::form::{Custom, FormEvent, spans_at};
-use crate::adapters::model_catalog::{asset_for_model, expand_model_alias};
-use crate::app::download_progress::{describe, megabytes};
-use crate::domain::model_asset::{AssetProgress, AssetState, AssetStatus, ModelAsset};
+use crate::app::download_progress::megabytes;
+use crate::app::settings::form::model_uri;
+use crate::app::settings::rows::{
+    language_choices, row_actions, row_detail, row_status, status_color,
+};
+use crate::app::settings::{ModelRow, SpeakerStatus};
+use crate::domain::model_asset::{AssetStatus, ModelAsset};
 use crate::tui::text::{str_width, truncate};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::select::{Select, SelectKey, compact_button_width, draw_compact_button};
-
-/// The canonical `hf://` URI of a cataloged asset.
-pub fn model_uri(asset: &ModelAsset) -> String {
-    format!("hf://{}/{}", asset.hf_repo, asset.entry)
-}
-
-fn status_text(status: AssetStatus) -> &'static str {
-    match status {
-        AssetStatus::Ready => "Ready",
-        AssetStatus::Missing => "Missing",
-        AssetStatus::Downloading | AssetStatus::Busy => "Downloading",
-        AssetStatus::Corrupt => "Damaged",
-        AssetStatus::Unsupported => "Unsupported",
-    }
-}
-
-fn status_color(status: AssetStatus) -> Option<&'static str> {
-    match status {
-        AssetStatus::Ready => Some("success"),
-        AssetStatus::Missing => Some("warning"),
-        AssetStatus::Corrupt => Some("error"),
-        AssetStatus::Downloading | AssetStatus::Busy => Some("accent"),
-        AssetStatus::Unsupported => None,
-    }
-}
 
 fn text_style(theme: &Theme, color: Option<&str>) -> Style {
     Style::default()
@@ -113,19 +92,10 @@ fn draw_progress(frame: &mut Frame, area: Rect, done: u64, total: u64, theme: &T
     );
 }
 
-#[derive(Clone)]
-struct RowState {
-    status: AssetStatus,
-    progress: Option<AssetProgress>,
-    /// Bytes kept after a cancel; the status then reads "Paused".
-    kept: u64,
-    paused: bool,
-}
-
 /// The speech model rows. The marked row is the default model.
 pub struct ModelChooser {
     assets: Vec<ModelAsset>,
-    states: HashMap<&'static str, RowState>,
+    states: HashMap<&'static str, ModelRow>,
     selected: Option<&'static str>,
     /// Each focus stop at the last draw.
     hits: Vec<(Rect, usize)>,
@@ -142,7 +112,7 @@ impl ModelChooser {
             .map(|asset| {
                 (
                     asset.id,
-                    RowState {
+                    ModelRow {
                         status: AssetStatus::Missing,
                         progress: None,
                         kept: 0,
@@ -173,81 +143,26 @@ impl ModelChooser {
         }
     }
 
-    pub fn set_state(&mut self, state: &AssetState) {
-        if let Some(row) = self.states.get_mut(state.asset.id) {
-            row.status = state.status;
-            row.paused = false;
-            if state.status != AssetStatus::Downloading {
-                row.progress = None;
+    /// Show the rows as the runtime has them.
+    pub fn show_rows(&mut self, rows: &HashMap<&'static str, ModelRow>) {
+        for (id, row) in &mut self.states {
+            if let Some(shown) = rows.get(id) {
+                *row = shown.clone();
             }
-        }
-    }
-
-    pub fn mark_downloading(&mut self, asset_id: &str) {
-        if let Some(row) = self.states.get_mut(asset_id) {
-            row.kept = 0;
-            row.status = AssetStatus::Downloading;
-            row.progress = None;
-            row.paused = false;
-        }
-    }
-
-    pub fn set_progress(&mut self, asset_id: &str, progress: AssetProgress) {
-        let size = self
-            .assets
-            .iter()
-            .find(|a| a.id == asset_id)
-            .map_or(1, |a| a.size.max(1));
-        if let Some(row) = self.states.get_mut(asset_id) {
-            let total = if progress.total > 0 {
-                progress.total
-            } else {
-                size
-            };
-            row.progress = Some(AssetProgress { total, ..progress });
-            row.kept = progress.downloaded;
-        }
-    }
-
-    /// After Cancel: the `.part` stays, and Download continues from it.
-    pub fn mark_paused(&mut self, asset_id: &str) {
-        if let Some(row) = self.states.get_mut(asset_id) {
-            row.paused = row.kept > 0;
         }
     }
 
     /// The buttons a row shows, by its state.
     fn actions(&self, asset: &ModelAsset) -> Vec<(&'static str, &'static str)> {
-        let status = self.states[asset.id].status;
-        let mut actions = Vec::new();
-        if matches!(
-            status,
-            AssetStatus::Missing | AssetStatus::Corrupt | AssetStatus::Busy
-        ) {
-            actions.push(("download", "Download"));
-        }
-        if matches!(status, AssetStatus::Ready | AssetStatus::Corrupt) {
-            actions.push(("remove", "Remove"));
-        }
-        if status == AssetStatus::Downloading {
-            actions.push(("cancel", "Cancel"));
-        }
-        actions
+        row_actions(self.states[asset.id].status)
+            .into_iter()
+            .map(|action| (action.id(), action.label()))
+            .collect()
     }
 
     /// The detail under a row: the download's progress, or why it waits.
     fn detail(&self, asset: &ModelAsset) -> String {
-        let row = &self.states[asset.id];
-        if row.paused {
-            format!(
-                "{} kept. Download continues from there.",
-                megabytes(row.kept)
-            )
-        } else if row.status == AssetStatus::Busy {
-            "In another window. Press Download to follow it.".into()
-        } else {
-            row.progress.as_ref().map(describe).unwrap_or_default()
-        }
+        row_detail(&self.states[asset.id])
     }
 
     /// Rows a model takes: its line, and a detail line when it has one.
@@ -328,10 +243,7 @@ impl Custom for ModelChooser {
                 // The row takes the focus; Enter or a click marks it.
                 label_style = label_style.add_modifier(Modifier::REVERSED);
             }
-            let status = match row.paused {
-                true => "Paused",
-                false => status_text(row.status),
-            };
+            let status = row_status(row);
             let line = vec![
                 cell(mark, 2, text_style(theme, Some("accent"))),
                 cell(asset.label, 30, label_style),
@@ -453,24 +365,7 @@ impl LanguageEditor {
     }
 
     fn make_row(&self, locale: &str, uri: &str) -> LanguageRow {
-        let uri = match uri.is_empty() {
-            true => String::new(),
-            false => asset_for_model(&expand_model_alias(uri), &self.assets)
-                .map(model_uri)
-                .unwrap_or_else(|| uri.to_string()),
-        };
-        let mut choices: Vec<(String, String)> = self
-            .assets
-            .iter()
-            .map(|asset| (asset.label.to_string(), model_uri(asset)))
-            .collect();
-        if !uri.is_empty() && !choices.iter().any(|(_, value)| *value == uri) {
-            choices.push((uri.clone(), uri.clone()));
-        }
-        let value = match uri.is_empty() {
-            true => choices.first().map(|(_, v)| v.clone()).unwrap_or_default(),
-            false => uri,
-        };
+        let (choices, value) = language_choices(&self.assets, uri);
         let mut input = Input::new("zh");
         input.compact = Some(("surface-lighten-1", "surface-lighten-2"));
         input.set_value(locale);
@@ -668,6 +563,14 @@ pub struct SpeakerState {
 }
 
 impl SpeakerState {
+    /// Show the row as the runtime has it.
+    pub fn show(&mut self, speaker: &SpeakerStatus) {
+        self.status = speaker.status.clone();
+        self.install = speaker.install;
+        self.remove = speaker.remove;
+        self.cancel = speaker.cancel;
+    }
+
     fn buttons(&self) -> Vec<(&'static str, &'static str)> {
         let mut list = Vec::new();
         if self.install {

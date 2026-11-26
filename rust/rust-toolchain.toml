@@ -1,5 +1,5 @@
 # One toolchain for local builds, CI and release builds. A new stable adds
 # clippy lints that would fail CI; move this pin on purpose, not by surprise.
 [toolchain]
-channel = "1.93.0"
+channel = "1.98.0"
 components = ["rustfmt", "clippy"]

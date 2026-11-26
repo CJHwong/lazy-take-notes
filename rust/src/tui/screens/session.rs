@@ -12,7 +12,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::adapters::session_controller::SessionController;
-use crate::app::session::{SessionRuntime, Step};
+use crate::app::session::texts;
+pub use crate::app::session::texts::header_text;
+use crate::app::session::{SessionRuntime, Step, format_spoken_time};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload};
 use crate::tui::keys::{Binding, SCREEN_BASE, bind};
@@ -35,29 +37,6 @@ pub const SESSION_BINDINGS: [Binding; 8] = [
     bind("o", "open_session_dir", "Open").hidden(),
     bind("h", "show_help", "Help").priority(),
 ];
-
-/// The header text. Textual reads `[` plus a letter, `#`, `/` or `@` as a
-/// markup tag and drops it, so a locale like ` [en]` never shows.
-pub fn header_text(name: &str, description: &str, locale: &str, label: &str) -> String {
-    let mut text = format!("  lazy-take-notes | {name}");
-    if !description.is_empty() {
-        text.push_str(&format!(" - {description}"));
-    }
-    let tag_like = locale
-        .chars()
-        .next()
-        .is_some_and(|c| c.is_alphabetic() || matches!(c, '#' | '/' | '@'));
-    // The space before the tag stays.
-    match (locale.is_empty(), tag_like) {
-        (true, _) => {}
-        (false, true) => text.push(' '),
-        (false, false) => text.push_str(&format!(" [{locale}]")),
-    }
-    if !label.is_empty() {
-        text.push_str(&format!(" \u{2014} {label}"));
-    }
-    text
-}
 
 /// Which panel has the focus, in Textual's tab order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -173,18 +152,6 @@ impl Default for SessionView {
     }
 }
 
-/// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
-pub fn format_spoken_time(seconds: f64) -> String {
-    let total = seconds.max(0.0) as u64;
-    if total >= 3600 {
-        return format!("{}h{}m", total / 3600, (total % 3600) / 60);
-    }
-    if total >= 60 {
-        return format!("{}m{}s", total / 60, total % 60);
-    }
-    format!("{total}s")
-}
-
 impl SessionView {
     fn header_text(&self, rt: &SessionRuntime) -> String {
         let metadata = &rt.controller.template().metadata;
@@ -210,15 +177,8 @@ impl SessionView {
         self.status.buf_max = rt.controller.config().digest.min_lines;
         self.status.ai_notes = rt.missing_digest.is_empty();
         if !rt.missing_digest.is_empty() {
-            let pulls: Vec<String> = rt
-                .missing_digest
-                .iter()
-                .map(|model| format!("`ollama pull {model}`"))
-                .collect();
-            self.digest.update_digest(&format!(
-                "**LLM model unavailable**\n\nDigests are disabled. To enable:\n\n{}\n\nThen restart.",
-                pulls.join("\n\n")
-            ));
+            self.digest
+                .update_digest(&texts::missing_models_notice(&rt.missing_digest));
         }
         self.sync(rt);
     }
@@ -227,23 +187,7 @@ impl SessionView {
     pub fn sync(&mut self, rt: &mut SessionRuntime) {
         let state = &mut rt.status;
         let bar = &mut self.status;
-        // Paused first: stopping while paused leaves the pause out of the timer.
-        bar.set_paused(state.paused);
-        bar.set_recording(state.recording);
-        bar.set_stopped(state.stopped);
-        bar.audio_status = state.audio_status.clone();
-        bar.mic_muted = state.mic_muted;
-        bar.audio_alert = state.audio_alert.clone();
-        bar.transcribing = state.transcribing;
-        bar.labeling_speakers = state.labeling_speakers;
-        bar.activity = state.activity.clone();
-        bar.download_percent = state.download_percent;
-        bar.download_model = state.download_model.clone();
-        bar.buf_count = state.buf_count;
-        bar.last_digest_time = state.last_digest_at;
-        for rms in std::mem::take(&mut state.levels) {
-            bar.push_level(rms);
-        }
+        bar.sync_from(state);
         if state.state != self.shown_state {
             self.shown_state = state.state;
             bar.keybinding_hints = (self.hints)(state.state).into();
@@ -297,7 +241,7 @@ impl SessionView {
         header(frame, top, &self.header_text(rt), theme);
         let left = body.width / 2;
         // The speaker bar is `height: auto`: one row once a speaker is heard.
-        let chips = speaker_chips(rt);
+        let chips = rt.speaker_chips();
         let chip_rows = wrap_chips(&chips, body.width / 2);
         let bar_rows = (chip_rows.len() as u16).min(body.height / 2);
         let transcript_area = Rect::new(body.x, body.y, left, body.height - bar_rows);
@@ -530,46 +474,16 @@ impl SessionView {
     }
 
     fn show_help(&self, rt: &SessionRuntime) -> Action {
-        let metadata = &rt.controller.template().metadata;
-        let mut lines: Vec<String> = Vec::new();
-        if !metadata.name.is_empty() {
-            lines.push(format!("**Template:** {}\n", metadata.name));
-        }
-        if !metadata.description.is_empty() {
-            lines.push(format!("**Description:** {}\n", metadata.description));
-        }
-        if !metadata.locale.is_empty() {
-            lines.push(format!("**Locale:** {}\n", metadata.locale));
-        }
-        if !lines.is_empty() {
-            lines.push(String::new());
-        }
-        let min_lines = rt.controller.config().digest.min_lines;
-        lines.extend([
-            "### Status Bar".to_string(),
-            "| Indicator | Meaning |".into(),
-            "|-----------|---------|".into(),
-            "| `\u{25cf} Rec` `\u{275a}\u{275a} Paused` `\u{25a0} Stopped` `\u{25cb} Idle` | Recording state |".into(),
-            format!("| `buf N/{min_lines}` | Lines buffered toward next digest (fires at {min_lines}) |"),
-            "| `00:00:00` | Recording time, pauses excluded |".into(),
-            "| `last Xs ago` | Time elapsed since the last digest |".into(),
-            "| `\u{2581}\u{2582}\u{2584}\u{2588}\u{2584}\u{2582}` | Mic input level \u{2014} flat means silence detected |".into(),
-            "| `\u{27f3} Transcribing\u{2026}` | Speech-to-text in progress |".into(),
-            "| `\u{27f3} Digesting\u{2026}` | LLM digest cycle in progress |".into(),
-            String::new(),
-            "### Keybindings".into(),
-        ]);
-        lines.extend(self.help_rows.iter().map(|row| row.to_string()));
-        Action::Push(Box::new(MarkdownModal::help(&lines.join("\n"))))
+        Action::Push(Box::new(MarkdownModal::help(&texts::help_markdown(
+            rt,
+            self.help_rows,
+        ))))
     }
 
     /// One transcript line: `[hh:mm:ss]` dim, then the text.
     fn append_line(&mut self, segment: &TranscriptSegment, label: Option<&str>) {
         let timestamp = format_wall_time(segment.wall_start);
-        let plain = match label {
-            Some(label) => format!("{label}: {}", segment.text),
-            None => segment.text.clone(),
-        };
+        let plain = texts::spoken_text(segment, label);
         self.transcript
             .all_text
             .push(format!("[{timestamp}] {plain}"));
@@ -625,27 +539,8 @@ impl SessionView {
 }
 
 /// Each speaker heard so far: number, name, and seconds of speech.
-fn speaker_chips(rt: &SessionRuntime) -> Vec<(u32, String, f64)> {
-    let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
-    for turn in &rt.controller.speaker_turns {
-        *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
-    }
-    speech
-        .into_iter()
-        .map(|(speaker, seconds)| {
-            let name = rt
-                .controller
-                .speaker_names
-                .get(&speaker)
-                .cloned()
-                .unwrap_or_default();
-            (speaker, name, seconds)
-        })
-        .collect()
-}
-
 fn speaker_order(rt: &SessionRuntime) -> Vec<u32> {
-    speaker_chips(rt).iter().map(|chip| chip.0).collect()
+    rt.speaker_chips().iter().map(|chip| chip.0).collect()
 }
 
 /// One chip per speaker: `padding: 0 1` on the bar, and each chip `padding: 0 1`,

@@ -34,12 +34,7 @@ fn file_name(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// Python's `UnicodeDecodeError` text for the first bad byte.
-pub fn utf8_error(error: &std::string::FromUtf8Error) -> String {
-    let at = error.utf8_error().valid_up_to();
-    let byte = error.as_bytes()[at];
-    format!("'utf-8' codec can't decode byte 0x{byte:02x} in position {at}: invalid start byte")
-}
+use crate::app::saved_session::utf8_error;
 
 /// The preview of one session, in Markdown.
 pub fn session_preview(session_dir: &Path) -> String {

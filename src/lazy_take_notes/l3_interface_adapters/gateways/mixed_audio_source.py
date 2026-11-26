@@ -76,6 +76,10 @@ class MixedAudioSource:
         self._system_generation = 0
         self._seen_system_generation = 0
         self._dropped_system_frames = 0
+        # Blocks read, and blocks the limiter scaled down. A high share means a
+        # gain upstream is too hot; the log gets both at close.
+        self._blocks = 0
+        self._limited_blocks = 0
         self._last_system_drop_log = 0.0
         # When True, mic audio is zeroed before mixing — system audio only.
         # Written by main thread, read by audio worker thread; bool assignment is
@@ -427,10 +431,12 @@ class MixedAudioSource:
         self._sys_buf = np.array([], dtype=np.float32)
         return system
 
-    @staticmethod
-    def _limit_peak(samples: np.ndarray) -> np.ndarray:
+    def _limit_peak(self, samples: np.ndarray) -> np.ndarray:
+        """Scale a block down when its peak passes 0.99, so the mix never clips."""
+        self._blocks += 1
         peak = max(float(samples.max()), float(-samples.min()))
         if peak > 0.99:
+            self._limited_blocks += 1
             samples = samples * (0.99 / peak)
         return samples
 
@@ -476,6 +482,9 @@ class MixedAudioSource:
         self._discard(self._mic_q)
         self._discard(self._sys_q)
         self._sys_buf = np.array([], dtype=np.float32)
+        if self._blocks:
+            log.info('limiter scaled %d of %d blocks', self._limited_blocks, self._blocks)
+        self._blocks = self._limited_blocks = 0
         if errors:
             raise errors[0]
 

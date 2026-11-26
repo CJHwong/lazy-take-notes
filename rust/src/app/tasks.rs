@@ -56,6 +56,12 @@ impl Tasks {
         }
     }
 
+    /// Hand `payload` to `on_result` now. A thread that reports more than once
+    /// keeps a clone of this `Tasks` and posts each report.
+    pub fn post<T: Send + 'static>(&self, payload: T) {
+        (self.on_result)(Box::new(payload));
+    }
+
     /// Run `future` on the runtime; its output goes to `on_result`.
     pub fn spawn<T, F>(&self, future: F) -> tokio::task::AbortHandle
     where

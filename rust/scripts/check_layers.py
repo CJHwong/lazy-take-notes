@@ -4,8 +4,10 @@
 """Fail when a Rust module imports a layer above its own.
 
 Layers, lowest first. Each one may import only the layers before it:
-domain, ports, usecases, adapters (with config.rs), app, tui, cli.
-ratatui and crossterm belong to tui and cli only. tests/ is out of scope.
+domain, ports, usecases, adapters (with config.rs), app, then the two front
+ends tui and gui, then cli. tui and gui share a rank and never import each
+other. ratatui and crossterm belong to tui and cli only; gpui and gpui_kit
+belong to gui only. tests/ is out of scope.
 """
 
 import re
@@ -13,11 +15,15 @@ import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent.parent / 'src'
-ORDER = ['domain', 'ports', 'usecases', 'adapters', 'app', 'tui', 'cli']
+RANK = {'domain': 0, 'ports': 1, 'usecases': 2, 'adapters': 3, 'app': 4, 'tui': 5, 'gui': 5, 'cli': 6}
 # Top-level modules that sit in a layer under another name.
 ALIASES = {'config': 'adapters'}
 CRATE_PATH = re.compile(r'\bcrate::([a-z_]+)')
-TERMINAL_USE = re.compile(r'\b(ratatui|crossterm)\b')
+# Each front-end crate, and the layers allowed to name it.
+UI_CRATES = [
+    (re.compile(r'\b(ratatui|crossterm)\b'), {'tui', 'cli'}, 'a terminal crate'),
+    (re.compile(r'\b(gpui|gpui_kit)\b'), {'gui'}, 'a GPUI crate'),
+]
 CRATE_GROUP = re.compile(r'\bcrate::\{')
 # Line comments, so a doc example never counts. Keeps the newline for line numbers.
 COMMENT = re.compile(r'//[^\n]*')
@@ -25,7 +31,7 @@ COMMENT = re.compile(r'//[^\n]*')
 
 def layer_of(module: str) -> str | None:
     module = ALIASES.get(module, module)
-    return module if module in ORDER else None
+    return module if module in RANK else None
 
 
 def group_modules(text: str, start: int) -> list[str]:
@@ -65,17 +71,20 @@ def violations(path: Path) -> list[str]:
     own = layer_of(relative.parts[0].removesuffix('.rs'))
     if own is None:
         return []
-    rank = ORDER.index(own)
     text = COMMENT.sub('', path.read_text(encoding='utf-8'))
     found = []
     for number, module in imported_modules(text):
         target = layer_of(module)
-        if target is not None and ORDER.index(target) > rank:
+        if target is None or target == own:
+            continue
+        if RANK[target] >= RANK[own]:
             found.append(f'{relative}:{number}: {own} imports {target}')
-    if rank < ORDER.index('tui'):
-        for match in TERMINAL_USE.finditer(text):
+    for pattern, allowed, what in UI_CRATES:
+        if own in allowed:
+            continue
+        for match in pattern.finditer(text):
             number = text.count('\n', 0, match.start()) + 1
-            found.append(f'{relative}:{number}: {own} uses a terminal crate')
+            found.append(f'{relative}:{number}: {own} uses {what}')
     return found
 
 
@@ -84,7 +93,8 @@ def main() -> int:
     for violation in found:
         print(violation)
     if found:
-        print(f'{len(found)} layer violations. Order, lowest first: {", ".join(ORDER)}.')
+        order = ', '.join(sorted(RANK, key=lambda name: RANK[name]))
+        print(f'{len(found)} layer violations. Order, lowest first: {order}.')
         return 1
     return 0
 

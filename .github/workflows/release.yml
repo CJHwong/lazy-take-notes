@@ -1,9 +1,11 @@
 name: Release
 
-# A tag v* builds the Rust app and publishes it as a GitHub Release. The Python
-# launcher runs a release only after scripts/pin_rust_release.py pins it.
-# A manual run (workflow_dispatch) is a dry run: it builds and checks the
-# package and uploads it as an artifact, but publishes nothing.
+# A tag v* builds the Rust app and the macOS .app, and publishes both as a
+# GitHub Release. The Python launcher runs a release only after
+# scripts/pin_rust_release.py pins it. A release tag without a hyphen also
+# writes the Homebrew cask to CJHwong/homebrew-tap, when HOMEBREW_TAP_KEY is
+# set. A manual run (workflow_dispatch) is a dry run: it builds and checks the
+# packages and uploads them as artifacts, but publishes nothing.
 on:
   push:
     tags: ['v*']
@@ -29,12 +31,26 @@ jobs:
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --version
           "$RUNNER_TEMP/lazy-take-notes-arm64-macos/lazy-take-notes" --help
           test -x "$RUNNER_TEMP/lazy-take-notes-arm64-macos/coreaudio-tap"
-      - name: Keep the dry-run package
+      - name: Build the app
+        run: |
+          bash rust/scripts/package_app.sh
+          ditto -c -k --keepParent "rust/target/app/Lazy Take Notes.app" rust/dist/Lazy-Take-Notes-arm64-macos.zip
+      - name: Check that the app starts
+        run: |
+          ditto -x -k rust/dist/Lazy-Take-Notes-arm64-macos.zip "$RUNNER_TEMP/app"
+          app="$RUNNER_TEMP/app/Lazy Take Notes.app"
+          codesign --verify --strict "$app"
+          test -f "$app/Contents/Resources/AppIcon.icns"
+          test -x "$app/Contents/MacOS/coreaudio-tap"
+          "$app/Contents/MacOS/lazy-take-notes" --version
+      - name: Keep the dry-run packages
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: lazy-take-notes-arm64-macos
-          path: rust/dist/lazy-take-notes-arm64-macos.tar.gz
+          path: |
+            rust/dist/lazy-take-notes-arm64-macos.tar.gz
+            rust/dist/Lazy-Take-Notes-arm64-macos.zip
       - name: Publish the release
         if: github.event_name == 'push'
         env:
@@ -42,9 +58,47 @@ jobs:
         run: |
           cd rust/dist
           shasum -a 256 lazy-take-notes-arm64-macos.tar.gz > lazy-take-notes-arm64-macos.tar.gz.sha256
+          shasum -a 256 Lazy-Take-Notes-arm64-macos.zip > Lazy-Take-Notes-arm64-macos.zip.sha256
           prerelease=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
             --title "lazy-take-notes $GITHUB_REF_NAME" \
-            --notes "The Rust build for macOS on Apple silicon. The Python launcher downloads it once the tag is pinned in src/lazy_take_notes/rust_release.py." \
-            lazy-take-notes-arm64-macos.tar.gz lazy-take-notes-arm64-macos.tar.gz.sha256
+            --notes "The Rust build for macOS on Apple silicon: the terminal app, and the window app as Lazy Take Notes.app. The Python launcher downloads the terminal app once the tag is pinned in src/lazy_take_notes/rust_release.py. Homebrew: brew install --cask CJHwong/tap/lazy-take-notes" \
+            lazy-take-notes-arm64-macos.tar.gz lazy-take-notes-arm64-macos.tar.gz.sha256 \
+            Lazy-Take-Notes-arm64-macos.zip Lazy-Take-Notes-arm64-macos.zip.sha256
+
+  homebrew:
+    name: Update the Homebrew cask
+    needs: macos-arm64
+    # A prerelease (a tag with a hyphen) leaves the cask alone.
+    if: github.event_name == 'push' && !contains(github.ref_name, '-')
+    runs-on: ubuntu-24.04
+    env:
+      # The private half of a deploy key that can write to CJHwong/homebrew-tap only.
+      TAP_KEY: ${{ secrets.HOMEBREW_TAP_KEY }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check for the tap key
+        if: env.TAP_KEY == ''
+        run: echo "::warning::HOMEBREW_TAP_KEY is not set. Write Casks/lazy-take-notes.rb with rust/scripts/homebrew_cask.sh by hand."
+      - uses: actions/checkout@v4
+        if: env.TAP_KEY != ''
+      - name: Write the cask
+        if: env.TAP_KEY != ''
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release download "$GITHUB_REF_NAME" --pattern 'Lazy-Take-Notes-arm64-macos.zip.sha256' --dir "$RUNNER_TEMP"
+          sha256=$(cut -d ' ' -f 1 "$RUNNER_TEMP/Lazy-Take-Notes-arm64-macos.zip.sha256")
+          key="$RUNNER_TEMP/tap_key"
+          printf '%s\n' "$TAP_KEY" > "$key"
+          chmod 600 "$key"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:CJHwong/homebrew-tap.git tap
+          mkdir -p tap/Casks
+          sh rust/scripts/homebrew_cask.sh "$version" "$sha256" > tap/Casks/lazy-take-notes.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/lazy-take-notes.rb
+          git commit -m "lazy-take-notes ${version}"
+          git push

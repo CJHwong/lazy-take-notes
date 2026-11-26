@@ -116,6 +116,10 @@ struct MixState {
     boost: MicBoost,
     dropped_system_frames: u64,
     last_drop_log: Option<Instant>,
+    /// Blocks read, and blocks the limiter scaled down. A high share means a
+    /// gain upstream is too hot; the log gets both at close.
+    blocks: u64,
+    limited_blocks: u64,
 }
 
 struct Inner {
@@ -185,6 +189,8 @@ impl MixedAudioSource {
             seen_generation: 0,
             boost: MicBoost::new(silence_threshold * 5.0, max_mic_gain, sample_rate),
             dropped_system_frames: 0,
+            blocks: 0,
+            limited_blocks: 0,
             last_drop_log: None,
         };
         Self {
@@ -276,9 +282,11 @@ impl MixedAudioSource {
 }
 
 /// A block scaled down when its peak passes 0.99, so the mix never clips.
-fn limit_peak(mut samples: Vec<f32>) -> Vec<f32> {
+fn limit_peak(mut samples: Vec<f32>, mix: &mut MixState) -> Vec<f32> {
+    mix.blocks += 1;
     let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
     if peak > 0.99 {
+        mix.limited_blocks += 1;
         let scale = 0.99 / peak;
         samples.iter_mut().for_each(|s| *s *= scale);
     }
@@ -637,7 +645,8 @@ impl AudioSource for MixedAudioSource {
             if mix.system_buffer.is_empty() {
                 return Ok(None);
             }
-            return Ok(Some(limit_peak(std::mem::take(&mut mix.system_buffer))));
+            let system = std::mem::take(&mut mix.system_buffer);
+            return Ok(Some(limit_peak(system, &mut mix)));
         };
         *self.inner.last_mic_rms.lock().expect("rms lock") = rms(&mic);
         // Exactly the mic's length of system audio, zero-padded, so both cover the same time.
@@ -655,10 +664,11 @@ impl AudioSource for MixedAudioSource {
         if self.inner.mic_muted.load(Ordering::Relaxed) {
             mic.iter_mut().for_each(|s| *s *= 0.0);
         }
-        Ok(Some(match system {
-            None => limit_peak(mic),
-            Some(system) => limit_peak(mic.iter().zip(&system).map(|(m, s)| m + s).collect()),
-        }))
+        let mixed = match system {
+            None => mic,
+            Some(system) => mic.iter().zip(&system).map(|(m, s)| m + s).collect(),
+        };
+        Ok(Some(limit_peak(mixed, &mut mix)))
     }
 
     fn drain(&self) {
@@ -678,7 +688,13 @@ impl AudioSource for MixedAudioSource {
         errors.extend(self.join_readers());
         self.inner.mic_queue.clear();
         self.inner.system_queue.clear();
-        self.mix.lock().expect("mix lock").system_buffer.clear();
+        let mut mix = self.mix.lock().expect("mix lock");
+        mix.system_buffer.clear();
+        if mix.blocks > 0 {
+            info!(target: "ltn.audio.mixed", "limiter scaled {} of {} blocks", mix.limited_blocks, mix.blocks);
+        }
+        (mix.blocks, mix.limited_blocks) = (0, 0);
+        drop(mix);
         errors.into_iter().next().map_or(Ok(()), Err)
     }
 
@@ -753,6 +769,13 @@ impl AudioSource for MixedAudioSource {
 }
 
 impl MixedAudioSource {
+    /// Blocks read and blocks limited since the last close.
+    #[cfg(test)]
+    pub(super) fn limiter_counts(&self) -> (u64, u64) {
+        let mix = self.mix.lock().expect("mix lock");
+        (mix.blocks, mix.limited_blocks)
+    }
+
     fn drain_buffers(&self) {
         self.inner.mic_queue.clear();
         self.inner.system_queue.clear();

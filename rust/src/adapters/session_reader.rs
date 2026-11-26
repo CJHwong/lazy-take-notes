@@ -6,7 +6,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::domain::session_files::{NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
+use crate::domain::session_files::{NOTES, SPEAKER_TRANSCRIPT, TEMPLATE, TRANSCRIPT};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionInfo {
@@ -14,6 +14,15 @@ pub struct SessionInfo {
     pub name: String,
     pub has_notes: bool,
     pub has_transcript: bool,
+    /// The note type the session ran with. Sessions before it was saved have none.
+    pub template: Option<String>,
+}
+
+/// The note type a session ran with, from its `template.txt`.
+pub fn template_name(dir: &Path) -> Option<String> {
+    let text = fs::read_to_string(dir.join(TEMPLATE)).ok()?;
+    let name = text.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// Sessions under `base_dir`, newest first. A session is a folder with a transcript
@@ -39,6 +48,7 @@ pub fn list_sessions(base_dir: &Path) -> Vec<SessionInfo> {
                 name: dir.file_name()?.to_string_lossy().into_owned(),
                 has_notes: NOTES.resolve(&dir).is_some(),
                 has_transcript,
+                template: template_name(&dir),
                 dir,
             })
         })
@@ -115,6 +125,20 @@ mod tests {
             "2026-01-04_090000"
         );
         assert!(list_sessions(&dir.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn a_session_names_its_note_type_once_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(template_name(dir.path()), None, "older sessions have none");
+        fs::write(dir.path().join("template.txt"), "  \n").unwrap();
+        assert_eq!(
+            template_name(dir.path()),
+            None,
+            "a blank file names nothing"
+        );
+        fs::write(dir.path().join("template.txt"), "Lecture Notes\n").unwrap();
+        assert_eq!(template_name(dir.path()).as_deref(), Some("Lecture Notes"));
     }
 
     #[test]

@@ -22,6 +22,14 @@ If you already have uv, you can skip the script. This runs the app straight from
 uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes
 ```
 
+On a Mac with Apple silicon, you can also install the window app, Lazy Take Notes.app, with [Homebrew](https://brew.sh). It puts the `lazy-take-notes` command on your PATH too:
+
+```bash
+brew install --cask CJHwong/tap/lazy-take-notes
+```
+
+The app has no Apple Developer ID signature. The cask removes the download mark that Homebrew adds, so macOS opens the app without a warning. Install it only if you trust this tap.
+
 On a Mac with Apple silicon, the app is a native build. Other systems run the Python version. See [Rust and Python versions](docs/explain_rust_and_python.md).
 
 ## First run

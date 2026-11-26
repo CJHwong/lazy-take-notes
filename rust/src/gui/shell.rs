@@ -1,0 +1,1062 @@
+//! The window's root: a sidebar with the commands and the saved sessions, and
+//! a detail pane on the right. One recording or transcription runs at a time,
+//! and it keeps running while the pane shows something else. The shell builds
+//! each session from `app/`; the views hold no navigation.
+
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::Duration;
+
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable as _};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+use tracing::{error, info};
+
+use crate::adapters::paths::Paths;
+use crate::adapters::session_reader::{SessionInfo, list_sessions};
+use crate::adapters::templates::YamlTemplates;
+use crate::adapters::whisper::transcriber::SubprocessWhisperTranscriber;
+use crate::app::container::{Loaded, check_transcription_provider, load_config, resolve_base_dir};
+use crate::app::headless_run::load_template_key;
+use crate::app::keep_awake::{KeepAwake, keep_awake};
+use crate::app::logging::close_file_logging;
+use crate::app::preflight::Reload;
+use crate::app::preflight_runtime::PreflightRuntime;
+use crate::app::session::Severity;
+use crate::app::session_list::{Entry, grouped};
+use crate::app::session_start::{
+    TranscribeSource, TranscribeStart, build_plan, preflight_llm, record_start,
+};
+use crate::app::template_builder::{TemplateBuilderRuntime, config_setup};
+use crate::domain::template::SessionTemplate;
+use crate::gui::bridge::notify;
+use crate::gui::builder::{BuilderEvent, BuilderView};
+use crate::gui::design::{control, size, space, text};
+use crate::gui::dialogs;
+use crate::gui::preflight::{PreflightEvent, PreflightView};
+use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
+use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
+use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
+use crate::gui::view::{ReaderEvent, SessionReader};
+use crate::gui::widgets::{
+    DragArm, app_icon, brand, caption, empty_state, pane_header, pane_title, source_row,
+    title_strip,
+};
+
+const START_ERROR_TIMEOUT: Duration = Duration::from_secs(12);
+/// The traffic lights sit in the sidebar's title strip, at the pane inset.
+pub const TRAFFIC_LIGHTS: Point<Pixels> = Point {
+    x: space::LG,
+    y: size::TRAFFIC_LIGHTS_Y,
+};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flow {
+    Record,
+    Transcribe,
+}
+
+/// The step a recording or transcription is at.
+enum Stage {
+    TemplatePicker(Entity<TemplatePickerView>),
+    Builder(Entity<BuilderView>),
+    /// The AI check of a transcription runs.
+    Checking,
+    Session(Entity<SessionView>),
+}
+
+/// The one recording or transcription, from its template choice to its end.
+struct Live {
+    /// Set when the user picks Record or Transcribe File in the picker.
+    flow: Option<Flow>,
+    stage: Stage,
+    _subscription: Option<Subscription>,
+    /// The setup checks inside the template picker, while they show.
+    _checks: Option<Subscription>,
+}
+
+/// What the detail pane shows.
+enum Detail {
+    Empty,
+    Live,
+    Saved(Entity<SessionReader>, PathBuf),
+    Templates(Entity<TemplatePickerView>),
+    Builder(Entity<BuilderView>),
+    Settings(Entity<SettingsView>),
+}
+
+pub struct Shell {
+    live: Option<Live>,
+    detail: Detail,
+    sessions: Vec<SessionInfo>,
+    /// Why the session list is empty, when config.yaml did not load.
+    list_error: Option<String>,
+    /// The live session's folder, as last seen: a rename moves it.
+    live_dir: Option<PathBuf>,
+    /// The config the current flow loaded.
+    loaded: Option<Loaded>,
+    template: Option<SessionTemplate>,
+    audio_path: Option<PathBuf>,
+    /// Held while a recording runs.
+    awake: Option<KeepAwake>,
+    /// `debug.log` is open for a session.
+    logging: bool,
+    sidebar_drag: DragArm,
+    pane_drag: DragArm,
+    _detail_subscription: Option<Subscription>,
+    _live_observer: Option<Subscription>,
+    _appearance: Subscription,
+}
+
+/// The shell of the one window, for the app-level actions.
+struct ShellHandle(WeakEntity<Shell>, AnyWindowHandle);
+
+impl Global for ShellHandle {}
+
+/// LTN_OUTPUT_DIR, which the app sets when nothing else does.
+fn output_dir() -> Option<String> {
+    std::env::var("LTN_OUTPUT_DIR").ok()
+}
+
+impl Shell {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let appearance = crate::gui::theme::follow_system(window, cx);
+        let mut shell = Self {
+            live: None,
+            detail: Detail::Empty,
+            sessions: Vec::new(),
+            list_error: None,
+            live_dir: None,
+            loaded: None,
+            template: None,
+            audio_path: None,
+            awake: None,
+            logging: false,
+            sidebar_drag: DragArm::default(),
+            pane_drag: DragArm::default(),
+            _detail_subscription: None,
+            _live_observer: None,
+            _appearance: appearance,
+        };
+        shell.refresh_sessions();
+        shell
+    }
+
+    fn refresh_sessions(&mut self) {
+        match self.load() {
+            Ok(loaded) => {
+                let base = resolve_base_dir(&loaded.paths, output_dir().as_deref(), &loaded.config);
+                self.sessions = list_sessions(&base);
+                self.list_error = None;
+            }
+            Err(e) => {
+                self.sessions.clear();
+                self.list_error = Some(e);
+            }
+        }
+    }
+
+    fn load(&self) -> Result<Loaded, String> {
+        load_config(None, output_dir().as_deref())
+    }
+
+    fn show_detail(
+        &mut self,
+        detail: Detail,
+        subscription: Option<Subscription>,
+        cx: &mut Context<Self>,
+    ) {
+        self.detail = detail;
+        self._detail_subscription = subscription;
+        cx.notify();
+    }
+
+    /// Run `next` once the pane may change. An unsaved template on the
+    /// builder page, or unsaved settings, ask first, as their own Close does.
+    fn leave_page_then(&mut self, next: OnClick, window: &mut Window, cx: &mut Context<Self>) {
+        let builder = match &self.detail {
+            Detail::Builder(builder) if builder.read(cx).unsaved() => builder.clone(),
+            Detail::Settings(settings) if settings.read(cx).has_unsaved_changes(cx) => {
+                let shell = cx.entity().downgrade();
+                return ask_discard(window, cx, move |window, cx| {
+                    let _ = shell.update(cx, |shell, cx| next(shell, window, cx));
+                });
+            }
+            _ => return next(self, window, cx),
+        };
+        let shell = cx.entity().downgrade();
+        dialogs::confirm(
+            window,
+            cx,
+            "You have an unsaved note type. Discard it?",
+            "Discard",
+            true,
+            move |window, cx| {
+                builder.update(cx, |builder, _| builder.discard());
+                let _ = shell.update(cx, |shell, cx| next(shell, window, cx));
+            },
+        );
+    }
+
+    fn set_stage(&mut self, stage: Stage, subscription: Subscription, cx: &mut Context<Self>) {
+        if let Some(live) = self.live.as_mut() {
+            live.stage = stage;
+            live._subscription = Some(subscription);
+        }
+        self.show_detail(Detail::Live, None, cx);
+    }
+
+    /// The live flow ended: release what it held, and show `next`.
+    fn finished(&mut self, next: Option<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        self.live = None;
+        self.live_dir = None;
+        self._live_observer = None;
+        self.awake = None;
+        if std::mem::take(&mut self.logging) {
+            close_file_logging();
+        }
+        self.refresh_sessions();
+        match next {
+            Some(dir) if dir.is_dir() => self.open_saved(&dir, window, cx),
+            _ if matches!(self.detail, Detail::Live) => self.show_detail(Detail::Empty, None, cx),
+            _ => cx.notify(),
+        }
+    }
+
+    fn failed(&mut self, step: &str, message: &str, window: &mut Window, cx: &mut Context<Self>) {
+        error!(target: "ltn.app", "{step} failed: {message}");
+        notify(
+            window,
+            cx,
+            format!("Could not start: {message}"),
+            Severity::Error,
+            START_ERROR_TIMEOUT,
+        );
+        self.finished(None, window, cx);
+    }
+
+    /// New Session: the template picker, whose title bar starts a recording
+    /// or a transcription. With a flow running, the pane shows it instead.
+    fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.live.is_some() {
+            return self.show_detail(Detail::Live, None, cx);
+        }
+        self.live = Some(Live {
+            flow: None,
+            stage: Stage::Checking,
+            _subscription: None,
+            _checks: None,
+        });
+        self.open_picker(window, cx);
+    }
+
+    fn set_flow(&mut self, flow: Flow) {
+        if let Some(live) = self.live.as_mut() {
+            live.flow = Some(flow);
+        }
+    }
+
+    /// The system's file dialog, then the transcription. A cancelled dialog
+    /// leaves the picker as it was.
+    fn choose_audio(
+        &mut self,
+        template: SessionTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import".into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let picked = match paths.await {
+                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                _ => None,
+            };
+            let _ = this.update_in(cx, |shell, window, cx| {
+                let Some(path) = picked else {
+                    return;
+                };
+                shell.audio_path = Some(path);
+                shell.set_flow(Flow::Transcribe);
+                shell.start_transcribe(&template, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Load config.yaml again and show the template picker.
+    fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let loaded = match self.load() {
+            Ok(loaded) => loaded,
+            Err(e) => return self.failed("open_picker", &e, window, cx),
+        };
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, true, window, cx));
+        self.loaded = Some(loaded);
+        let subscription = cx.subscribe_in(&picker, window, Self::on_template);
+        self.set_stage(Stage::TemplatePicker(picker), subscription, cx);
+    }
+
+    fn on_template(
+        &mut self,
+        _: &Entity<TemplatePickerView>,
+        event: &TemplatePickerEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(loaded) = self.loaded.as_ref() else {
+            return self.failed("on_template", "no config loaded", window, cx);
+        };
+        let templates = YamlTemplates::new(&loaded.paths);
+        let (key, flow) = match event {
+            TemplatePickerEvent::Cancelled => return self.finished(None, window, cx),
+            TemplatePickerEvent::Create => return self.open_flow_builder(None, window, cx),
+            TemplatePickerEvent::EditWithAi(key) => {
+                return match load_template_key(&templates, key) {
+                    Ok(base) => self.open_flow_builder(Some((base, key.clone())), window, cx),
+                    Err(e) => self.failed("on_template", &e, window, cx),
+                };
+            }
+            TemplatePickerEvent::Record(key) => (key, Flow::Record),
+            TemplatePickerEvent::Transcribe(key) => (key, Flow::Transcribe),
+        };
+        match (load_template_key(&templates, key), flow) {
+            (Ok(template), Flow::Record) => {
+                self.set_flow(Flow::Record);
+                self.start_record(template, window, cx)
+            }
+            (Ok(template), Flow::Transcribe) => self.choose_audio(template, window, cx),
+            (Err(e), _) => self.failed("on_template", &e, window, cx),
+        }
+    }
+
+    fn builder(
+        &mut self,
+        base: Option<(SessionTemplate, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<Entity<BuilderView>, String> {
+        let paths = self.load()?.paths;
+        let runtime = TemplateBuilderRuntime::new(
+            config_setup(&paths, None),
+            YamlTemplates::new(&paths),
+            base,
+        );
+        Ok(cx.new(|cx| BuilderView::new(runtime, window, cx)))
+    }
+
+    /// The builder inside a flow: it goes back to the flow's template picker.
+    fn open_flow_builder(
+        &mut self,
+        base: Option<(SessionTemplate, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let builder = match self.builder(base, window, cx) {
+            Ok(builder) => builder,
+            Err(e) => return self.failed("open_template_builder", &e, window, cx),
+        };
+        let subscription = cx.subscribe_in(&builder, window, |shell, _, event, window, cx| {
+            let BuilderEvent::Closed = event;
+            shell.open_picker(window, cx);
+        });
+        self.set_stage(Stage::Builder(builder), subscription, cx);
+    }
+
+    fn start_record(
+        &mut self,
+        template: SessionTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(loaded) = self.loaded.as_ref() else {
+            return self.failed("start_record", "no config loaded", window, cx);
+        };
+        let runtime = match preflight_runtime(loaded, &template) {
+            Ok(runtime) => runtime,
+            Err(e) => return self.failed("start_record", &e, window, cx),
+        };
+        let Some(picker) = self.picker() else {
+            return self.failed("start_record", "no template picker", window, cx);
+        };
+        self.template = Some(template);
+        let preflight = cx.new(|cx| PreflightView::new(runtime, window, cx));
+        let subscription = cx.subscribe_in(&preflight, window, Self::on_preflight);
+        if let Some(live) = self.live.as_mut() {
+            live._checks = Some(subscription);
+        }
+        picker.update(cx, |picker, cx| picker.show_checks(preflight.clone(), cx));
+    }
+
+    /// The template picker of the flow, while it shows.
+    fn picker(&self) -> Option<Entity<TemplatePickerView>> {
+        match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::TemplatePicker(picker)) => Some(picker.clone()),
+            _ => None,
+        }
+    }
+
+    fn on_preflight(
+        &mut self,
+        view: &Entity<PreflightView>,
+        event: &PreflightEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let PreflightEvent::Back = event {
+            if let Some(picker) = self.picker() {
+                picker.update(cx, |picker, cx| picker.close_checks(window, cx));
+            }
+            return;
+        }
+        let Some(outcome) = view.update(cx, |view, _| view.take_outcome()) else {
+            return self.finished(None, window, cx);
+        };
+        let Some(paths) = self.loaded.as_ref().map(|loaded| loaded.paths.clone()) else {
+            return self.failed("after_preflight", "no config loaded", window, cx);
+        };
+        match record_start(outcome, &paths, None, false) {
+            Ok(start) => {
+                self.logging = true;
+                self.awake = Some(keep_awake());
+                let session = cx.new(|cx| SessionView::record(start, window, cx));
+                self.show_session(session, window, cx);
+            }
+            Err(e) => self.failed("after_preflight", &e, window, cx),
+        }
+    }
+
+    fn start_transcribe(
+        &mut self,
+        template: &SessionTemplate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(loaded) = self.loaded.as_ref() else {
+            return self.failed("start_transcribe", "no config loaded", window, cx);
+        };
+        let start = match TranscribeStart::new(loaded, template, output_dir().as_deref(), None) {
+            Ok(start) => start,
+            Err(e) => return self.failed("start_transcribe", &e, window, cx),
+        };
+        if let Some(live) = self.live.as_mut() {
+            live.stage = Stage::Checking;
+            live._subscription = None;
+        }
+        cx.notify();
+        let checks = crate::gui::runtime().spawn(async move {
+            // The window has no console: the warning goes to the log.
+            let warn = |line: &str| tracing::warn!(target: "ltn.app", "{line}");
+            let missing = preflight_llm(start.llm.as_ref(), &start.config, warn).await;
+            (start, missing)
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let done = checks.await;
+            let _ = this.update_in(cx, |shell, window, cx| match done {
+                Ok((start, missing)) => shell.after_checks(start, missing, window, cx),
+                Err(e) => shell.failed("start_transcribe", &e.to_string(), window, cx),
+            });
+        })
+        .detach();
+    }
+
+    fn after_checks(
+        &mut self,
+        start: TranscribeStart,
+        missing: (Vec<String>, Vec<String>),
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(audio_path) = self.audio_path.clone() else {
+            return self.failed("start_transcribe", "no audio file", window, cx);
+        };
+        match start.start(&TranscribeSource::Audio(audio_path), missing) {
+            Ok(start) => {
+                self.logging = true;
+                let session = cx.new(|cx| SessionView::file(start, window, cx));
+                self.show_session(session, window, cx);
+            }
+            Err(e) => self.failed("start_transcribe", &e, window, cx),
+        }
+    }
+
+    /// The session runs: the sidebar lists its folder, and follows a rename.
+    fn show_session(
+        &mut self,
+        session: Entity<SessionView>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.live_dir = Some(session.read(cx).output_dir().to_path_buf());
+        self.refresh_sessions();
+        self._live_observer = Some(cx.observe(&session, |shell, session, cx| {
+            let dir = session.read(cx).output_dir().to_path_buf();
+            if shell.live_dir.as_ref() != Some(&dir) {
+                shell.live_dir = Some(dir);
+                shell.refresh_sessions();
+                cx.notify();
+            }
+        }));
+        let subscription = cx.subscribe_in(&session, window, Self::on_session);
+        self.set_stage(Stage::Session(session), subscription, cx);
+    }
+
+    fn on_session(
+        &mut self,
+        _: &Entity<SessionView>,
+        event: &SessionEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            SessionEvent::Closed => {
+                info!(target: "ltn.app", "the session closed");
+                let dir = self.live_dir.clone();
+                self.finished(dir, window, cx);
+            }
+            SessionEvent::Exit => {
+                info!(target: "ltn.app", "the session ended the app");
+                self.finished(None, window, cx);
+                cx.quit();
+            }
+        }
+    }
+
+    fn open_saved(&mut self, dir: &Path, window: &mut Window, cx: &mut Context<Self>) {
+        if self.live_dir.as_deref() == Some(dir) {
+            return self.show_detail(Detail::Live, None, cx);
+        }
+        let reader = cx.new(|cx| SessionReader::new(dir.to_path_buf(), window, cx));
+        let subscription = cx.subscribe_in(&reader, window, |shell, _, event, _, cx| match event {
+            ReaderEvent::Closed => shell.show_detail(Detail::Empty, None, cx),
+            ReaderEvent::Renamed(moved) => {
+                // The sidebar marks the open session by its folder.
+                if let Detail::Saved(_, dir) = &mut shell.detail {
+                    *dir = moved.clone();
+                }
+                shell.refresh_sessions();
+                cx.notify();
+            }
+        });
+        self.show_detail(
+            Detail::Saved(reader, dir.to_path_buf()),
+            Some(subscription),
+            cx,
+        );
+    }
+
+    fn open_templates(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let loaded = match self.load() {
+            Ok(loaded) => loaded,
+            Err(e) => return self.failed("open_templates", &e, window, cx),
+        };
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, false, window, cx));
+        let subscription = cx.subscribe_in(&picker, window, move |shell, _, event, window, cx| {
+            let base = match event {
+                TemplatePickerEvent::Cancelled => {
+                    return shell.show_detail(Detail::Empty, None, cx);
+                }
+                // The page browses; a session starts from the sidebar.
+                TemplatePickerEvent::Record(_) | TemplatePickerEvent::Transcribe(_) => return,
+                TemplatePickerEvent::Create => None,
+                TemplatePickerEvent::EditWithAi(key) => {
+                    match shell.load().and_then(|loaded| {
+                        load_template_key(&YamlTemplates::new(&loaded.paths), key)
+                    }) {
+                        Ok(base) => Some((base, key.clone())),
+                        Err(e) => return shell.failed("open_templates", &e, window, cx),
+                    }
+                }
+            };
+            shell.open_page_builder(base, window, cx);
+        });
+        self.show_detail(Detail::Templates(picker), Some(subscription), cx);
+    }
+
+    /// The builder from the Templates page: it goes back to that page.
+    fn open_page_builder(
+        &mut self,
+        base: Option<(SessionTemplate, String)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let builder = match self.builder(base, window, cx) {
+            Ok(builder) => builder,
+            Err(e) => return self.failed("open_template_builder", &e, window, cx),
+        };
+        let subscription = cx.subscribe_in(&builder, window, |shell, _, event, window, cx| {
+            let BuilderEvent::Closed = event;
+            shell.open_templates(window, cx);
+        });
+        self.show_detail(Detail::Builder(builder), Some(subscription), cx);
+    }
+
+    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.detail, Detail::Settings(_)) {
+            return;
+        }
+        let Some(paths) = Paths::for_user() else {
+            return self.failed("open_config", "no home folder", window, cx);
+        };
+        let settings = cx.new(|cx| SettingsView::new(paths, None, window, cx));
+        let subscription = cx.subscribe_in(&settings, window, |shell, _, event, _, cx| {
+            // A save can move the output folder, so the session list reads it again.
+            shell.refresh_sessions();
+            match event {
+                SettingsEvent::Closed => shell.show_detail(Detail::Empty, None, cx),
+                SettingsEvent::Saved => cx.notify(),
+            }
+        });
+        self.show_detail(Detail::Settings(settings), Some(subscription), cx);
+    }
+
+    /// The window may close now. Otherwise the live session starts its way
+    /// out (stop the recording, wait for the audio flush) and closes the app
+    /// after. What the pane shows does not matter.
+    fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::Session(session)) => {
+                let session = session.clone();
+                self.show_detail(Detail::Live, None, cx);
+                session.update(cx, |view, cx| view.should_close(window, cx))
+            }
+            _ => true,
+        }
+    }
+}
+
+/// The preflight for `template`, with a reload that reads config.yaml again on Retry.
+fn preflight_runtime(
+    loaded: &Loaded,
+    template: &SessionTemplate,
+) -> Result<PreflightRuntime, String> {
+    check_transcription_provider(&loaded.infra)?;
+    let runtime = crate::gui::runtime();
+    let plan = build_plan(
+        loaded,
+        template,
+        output_dir().as_deref(),
+        runtime.clone(),
+        false,
+    )?;
+    let transcriber = SubprocessWhisperTranscriber::new().map_err(|e| e.to_string())?;
+    let template = template.clone();
+    let reload: Reload = Box::new(move || {
+        let output_dir = output_dir();
+        let loaded = load_config(None, output_dir.as_deref())?;
+        build_plan(
+            &loaded,
+            &template,
+            output_dir.as_deref(),
+            runtime.clone(),
+            false,
+        )
+    });
+    Ok(PreflightRuntime::new(
+        plan,
+        Box::new(transcriber),
+        Some(reload),
+    ))
+}
+
+/// What a sidebar click runs.
+type OnClick = Rc<dyn Fn(&mut Shell, &mut Window, &mut Context<Shell>)>;
+
+/// How one sidebar row looks.
+struct NavRow {
+    id: ElementId,
+    icon: Option<IconName>,
+    title: SharedString,
+    detail: Option<SharedString>,
+    selected: bool,
+    /// The live session's mark.
+    dot: Option<Hsla>,
+    /// Shown on hover: the session's note type.
+    tooltip: Option<SharedString>,
+}
+
+fn nav(id: impl Into<ElementId>, title: impl Into<SharedString>) -> NavRow {
+    NavRow {
+        id: id.into(),
+        icon: None,
+        title: title.into(),
+        detail: None,
+        selected: false,
+        dot: None,
+        tooltip: None,
+    }
+}
+
+impl Shell {
+    /// One sidebar row: an icon or a dot, the title, and a muted detail.
+    fn nav_row(&self, row: NavRow, on_click: OnClick, cx: &mut Context<Self>) -> Stateful<Div> {
+        let NavRow {
+            id,
+            icon,
+            title,
+            detail,
+            selected,
+            dot,
+            tooltip,
+        } = row;
+        let theme = cx.theme();
+        let muted = theme.muted_foreground;
+        source_row(id, selected, cx)
+            .mx(space::SM)
+            .when_some(icon, |row, icon| {
+                row.child(Icon::new(icon).size(size::ICON).text_color(theme.primary))
+            })
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            // The live dot and the time sit at the end, so every title lines up.
+            .when_some(dot, |row, dot| {
+                row.child(div().flex_none().size(size::DOT).rounded_full().bg(dot))
+            })
+            .when_some(detail, |row, detail| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .font_family(text::MONO)
+                        .text_size(text::CAPTION)
+                        .text_color(muted)
+                        .child(detail),
+                )
+            })
+            .when_some(tooltip, |row, tooltip| {
+                row.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+            })
+            .on_click(cx.listener(move |shell, _, window, cx| {
+                // A click on the open page's own row keeps it as it is.
+                if selected {
+                    return on_click(shell, window, cx);
+                }
+                shell.leave_page_then(on_click.clone(), window, cx)
+            }))
+    }
+
+    fn session_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut sessions = self.sessions.clone();
+        // A session that just started may have no file the list counts yet.
+        if let Some(dir) = &self.live_dir
+            && !sessions.iter().any(|s| &s.dir == dir)
+            && let Some(name) = dir.file_name()
+        {
+            sessions.insert(
+                0,
+                SessionInfo {
+                    dir: dir.clone(),
+                    name: name.to_string_lossy().into_owned(),
+                    has_notes: false,
+                    has_transcript: false,
+                    template: None,
+                },
+            );
+        }
+        let today = chrono::Local::now().date_naive();
+        let live_dir = self.live_dir.clone();
+        let recording = match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::Session(session)) => session.read(cx).is_recording(),
+            _ => false,
+        };
+        let shown = match &self.detail {
+            Detail::Saved(_, dir) => Some(dir.clone()),
+            Detail::Live => live_dir.clone(),
+            _ => None,
+        };
+        let mut rows = Vec::new();
+        for (group, entries) in grouped(sessions, today) {
+            rows.push(
+                div()
+                    .px(space::LG)
+                    .pt(space::MD)
+                    .pb(space::XS)
+                    .text_size(text::CAPTION)
+                    .font_weight(text::STRONG)
+                    .text_color(cx.theme().muted_foreground)
+                    .child(group.title())
+                    .into_any_element(),
+            );
+            for Entry {
+                info, title, when, ..
+            } in entries
+            {
+                let is_live = live_dir.as_ref() == Some(&info.dir);
+                let dot = is_live.then(|| {
+                    if recording {
+                        cx.theme().danger
+                    } else {
+                        cx.theme().primary
+                    }
+                });
+                let selected = shown.as_ref() == Some(&info.dir);
+                let dir = info.dir.clone();
+                let on_click: OnClick =
+                    Rc::new(move |shell, window, cx| shell.open_saved(&dir, window, cx));
+                let id = ElementId::Name(info.dir.to_string_lossy().into_owned().into());
+                let tooltip = info
+                    .template
+                    .as_ref()
+                    .map(|name| SharedString::from(format!("Note type: {name}")));
+                let row = NavRow {
+                    detail: Some(when.into()),
+                    tooltip,
+                    selected,
+                    dot,
+                    ..nav(id, title)
+                };
+                rows.push(self.nav_row(row, on_click, cx).into_any_element());
+            }
+        }
+        if rows.is_empty() {
+            let note = self
+                .list_error
+                .clone()
+                .unwrap_or_else(|| "No saved sessions yet.".into());
+            rows.push(
+                caption(note, cx)
+                    .px(space::LG)
+                    .pt(space::MD)
+                    .into_any_element(),
+            );
+        }
+        rows
+    }
+
+    fn sidebar(&self, cx: &mut Context<Self>) -> Div {
+        let start: OnClick = Rc::new(|shell, window, cx| shell.start(window, cx));
+        let templates: OnClick = Rc::new(|shell, window, cx| shell.open_templates(window, cx));
+        let settings: OnClick = Rc::new(|shell, window, cx| shell.open_settings(window, cx));
+        let on_templates = matches!(self.detail, Detail::Templates(_) | Detail::Builder(_));
+        let on_settings = matches!(self.detail, Detail::Settings(_));
+        let theme = cx.theme();
+        let (background, border) = (theme.sidebar, theme.sidebar_border);
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(size::SIDEBAR)
+            .h_full()
+            .bg(background)
+            .border_r_1()
+            .border_color(border)
+            .child(title_strip("sidebar-title", &self.sidebar_drag).w_full())
+            .child(self.start_button(start, cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .id("sessions")
+                    .pb(space::SM)
+                    .children(self.session_rows(cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::XS / 2.)
+                    .py(space::SM)
+                    .border_t(size::HAIRLINE)
+                    .border_color(border)
+                    .child(self.nav_row(
+                        NavRow {
+                            icon: Some(IconName::BookOpen),
+                            selected: on_templates,
+                            ..nav("templates", "Note Types")
+                        },
+                        templates,
+                        cx,
+                    ))
+                    .child(self.nav_row(
+                        NavRow {
+                            icon: Some(IconName::Settings),
+                            selected: on_settings,
+                            ..nav("settings", "Settings")
+                        },
+                        settings,
+                        cx,
+                    )),
+            )
+    }
+
+    /// The two ways to start, over the session list. Recording is the app's
+    /// main act, so it is the one red, full-width button in the window.
+    /// New Session: the one way in. Record and Transcribe File come after
+    /// the template, in the picker's title bar.
+    fn start_button(&self, start: OnClick, cx: &mut Context<Self>) -> Div {
+        div().flex().flex_none().px(space::SM).pb(space::MD).child(
+            Button::new("new-session")
+                .primary()
+                .with_size(control::HERO)
+                .w_full()
+                .icon(IconName::Plus)
+                .label("New Session")
+                .tooltip("Choose a note type, then record or import audio")
+                .on_click(cx.listener(move |shell, _, window, cx| {
+                    shell.leave_page_then(start.clone(), window, cx)
+                })),
+        )
+    }
+
+    /// The app icon, and the way to start.
+    fn empty_state(&self, cx: &Context<Self>) -> AnyElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .justify_center()
+            .gap(space::LG)
+            .child(app_icon(size::LOGO))
+            .child(brand(text::LARGE_TITLE))
+            .child(
+                div().pt(space::SM).child(
+                    Button::new("start-session")
+                        .primary()
+                        .with_size(control::HERO)
+                        .icon(IconName::Plus)
+                        .label("New Session")
+                        .on_click(cx.listener(|shell, _, window, cx| shell.start(window, cx))),
+                ),
+            )
+            .into_any_element()
+    }
+
+    /// The pane's title and its body. A body with no title draws its own
+    /// title bar row.
+    fn pane(&self, cx: &Context<Self>) -> (Option<SharedString>, AnyElement) {
+        let muted =
+            |line: &'static str| empty_state(IconName::LoaderCircle, line, cx).into_any_element();
+        match &self.detail {
+            Detail::Empty => (Some("".into()), self.empty_state(cx)),
+            Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
+                Some((Stage::Checking, Some(Flow::Transcribe))) => (
+                    Some("Import Audio".into()),
+                    muted("Checking the AI provider…"),
+                ),
+                Some((Stage::Checking, _)) => (Some("New Session".into()), muted("")),
+                // The picker draws its own title bar, with the start button.
+                Some((Stage::TemplatePicker(view), _)) => (None, view.clone().into_any_element()),
+                Some((Stage::Builder(view), _)) => (None, view.clone().into_any_element()),
+                Some((Stage::Session(view), _)) => (None, view.clone().into_any_element()),
+                None => (Some("".into()), self.empty_state(cx)),
+            },
+            Detail::Saved(view, _) => (None, view.clone().into_any_element()),
+            Detail::Templates(view) => (Some("Note Types".into()), view.clone().into_any_element()),
+            Detail::Builder(view) => (None, view.clone().into_any_element()),
+            // Settings draws its own title bar, with Revert and Save.
+            Detail::Settings(view) => (None, view.clone().into_any_element()),
+        }
+    }
+}
+
+impl Render for Shell {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (title, body) = self.pane(cx);
+        let theme = cx.theme();
+        let (background, foreground) = (theme.background, theme.foreground);
+        div()
+            .size_full()
+            .flex()
+            .bg(background)
+            .text_color(foreground)
+            .child(self.sidebar(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    // The empty window keeps a bare strip to drag by: no title,
+                    // so no line under it.
+                    .when_some(title, |pane, title| match title.is_empty() {
+                        true => pane.child(title_strip("pane-title", &self.pane_drag)),
+                        false => pane.child(
+                            pane_header("pane-title", &self.pane_drag, cx).child(pane_title(title)),
+                        ),
+                    })
+                    .child(div().flex_1().min_h_0().child(body)),
+            )
+    }
+}
+
+/// Route the window's close button through `Shell::should_close`, and quit
+/// the app when the window is gone.
+pub fn watch_close(handle: AnyWindowHandle, shell: Entity<Shell>, cx: &mut App) {
+    cx.set_global(ShellHandle(shell.downgrade(), handle));
+    let weak = shell.downgrade();
+    let _ = handle.update(cx, |_, window, cx| {
+        window.on_window_should_close(cx, move |window, cx| {
+            weak.update(cx, |shell, cx| shell.should_close(window, cx))
+                .unwrap_or(true)
+        });
+    });
+    cx.on_window_closed(|cx, _| {
+        info!(target: "ltn.app", "the window closed");
+        cx.quit()
+    })
+    .detach();
+}
+
+/// Run `f` on the shell, for a menu or key command.
+fn with_shell(cx: &mut App, f: impl FnOnce(&mut Shell, &mut Window, &mut Context<Shell>)) {
+    let Some(ShellHandle(shell, handle)) = cx.try_global::<ShellHandle>() else {
+        return;
+    };
+    let (shell, handle) = (shell.clone(), *handle);
+    let _ = handle.update(cx, |_, window, cx| {
+        let _ = shell.update(cx, |shell, cx| f(shell, window, cx));
+    });
+}
+
+pub fn new_session(cx: &mut App) {
+    with_shell(cx, |shell, window, cx| {
+        shell.leave_page_then(
+            Rc::new(|shell, window, cx| shell.start(window, cx)),
+            window,
+            cx,
+        )
+    });
+}
+
+/// The keys, when no live session pane shows its own help.
+pub fn show_help(cx: &mut App) {
+    with_shell(cx, |_, window, cx| {
+        dialogs::markdown(window, cx, "Help", SHORTCUTS, "primary", None, None)
+    });
+}
+
+pub fn open_settings(cx: &mut App) {
+    with_shell(cx, |shell, window, cx| {
+        shell.leave_page_then(
+            Rc::new(|shell, window, cx| shell.open_settings(window, cx)),
+            window,
+            cx,
+        )
+    });
+}
+
+/// Cmd-Q and Cmd-W: the same way out as the close button.
+pub fn request_quit(cx: &mut App) {
+    info!(target: "ltn.app", "quit requested");
+    let Some(ShellHandle(shell, handle)) = cx.try_global::<ShellHandle>() else {
+        cx.quit();
+        return;
+    };
+    let (shell, handle) = (shell.clone(), *handle);
+    let closes = handle
+        .update(cx, |_, window, cx| {
+            shell
+                .update(cx, |shell, cx| shell.should_close(window, cx))
+                .unwrap_or(true)
+        })
+        .unwrap_or(true);
+    if closes {
+        cx.quit();
+    }
+}

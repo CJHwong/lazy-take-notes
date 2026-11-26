@@ -40,6 +40,7 @@ pub struct SessionController {
     pub speaker_turns: Vec<SpeakerTurn>,
     pub speaker_names: HashMap<u32, String>,
     persist_error: Option<String>,
+    template_saved: bool,
 }
 
 impl SessionController {
@@ -62,6 +63,7 @@ impl SessionController {
             speaker_turns: Vec::new(),
             speaker_names: HashMap::new(),
             persist_error: None,
+            template_saved: false,
         }
     }
 
@@ -173,6 +175,13 @@ impl SessionController {
             self.digest_state.all_lines.push(segment.text.clone());
         }
         self.persist("transcript", |p| p.save_transcript_lines(segments, true));
+        // With the first lines, not at start: a session cancelled before any
+        // speech must not leave a folder that looks like a session.
+        if !self.template_saved {
+            self.template_saved = true;
+            let name = self.template.metadata.name.clone();
+            self.persist("template name", |p| p.save_template_name(&name));
+        }
         let digest = &self.config.digest;
         digest::should_trigger_digest(
             &self.digest_state,

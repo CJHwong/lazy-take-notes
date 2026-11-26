@@ -1,7 +1,7 @@
 //! The template builder against a fake model, through a real host.
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -9,7 +9,9 @@ use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEven
 
 use super::*;
 use crate::adapters::paths::Paths;
-use crate::ports::llm::ChatResponse;
+use crate::app::template_builder::{BuilderSetup, error_text, preview_markdown, slugify};
+use crate::domain::chat::ChatMessage;
+use crate::ports::llm::{ChatResponse, LlmClient, LlmError};
 use crate::tui::host::Host;
 
 /// Replies in order; an `Err` reply fails the call, and one of kind `panic!` panics.

@@ -163,6 +163,18 @@ fn both_sources_mix_under_the_peak_limit() {
 }
 
 #[test]
+fn the_limiter_counts_the_blocks_it_scales_until_close() {
+    let mic = Arc::new(FakeSource::blocks(vec![vec![0.8, 0.9]]));
+    let system = Arc::new(FakeSource::blocks(vec![vec![0.8, 0.9]]));
+    let source = mixer(&mic, &system, None, fast());
+    source.open(16_000, 1).unwrap();
+    read_after_readers(&source).unwrap();
+    assert_eq!(source.limiter_counts(), (1, 1));
+    source.close().unwrap();
+    assert_eq!(source.limiter_counts(), (0, 0));
+}
+
+#[test]
 fn only_the_mic_has_data() {
     let mic = Arc::new(FakeSource::blocks(vec![vec![0.3, 0.4]]));
     let source = mixer(&mic, &Arc::new(FakeSource::idle()), None, fast());

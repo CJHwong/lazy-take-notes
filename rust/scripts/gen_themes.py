@@ -14,7 +14,7 @@ from pathlib import Path
 
 from textual.theme import BUILTIN_THEMES
 
-OUT = Path(__file__).resolve().parent.parent / 'src' / 'tui' / 'themes.json'
+OUT = Path(__file__).resolve().parent.parent / 'src' / 'app' / 'themes.json'
 
 
 def main() -> None:

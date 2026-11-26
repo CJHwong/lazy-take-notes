@@ -7,7 +7,7 @@ use std::time::Duration;
 use crate::app::events::{Cancel, Event, WorkerState};
 use crate::app::headless::Launcher;
 use crate::app::logging::see_debug_log;
-use crate::app::session::{SessionIo, SessionRuntime, Step, Worker};
+use crate::app::session::{SessionIo, SessionRuntime, Step, Text, Worker};
 use crate::app::tasks::Payload;
 
 pub struct FileMode {
@@ -73,7 +73,8 @@ impl FileRuntime {
                 session.status.recording = true;
                 session.status.stopped = false;
                 session.status.state = "recording";
-                io.info("Press d to digest manually", Duration::from_secs(5));
+                let text = io.text(Text::ManualHint);
+                io.info(text, Duration::from_secs(5));
             }
             WorkerState::Stopped => {
                 session.status.recording = false;
@@ -129,7 +130,8 @@ impl FileRuntime {
         }
         self.cancel.cancel();
         if session.flow.digest_running {
-            io.info("Quitting when the digest finishes.", Duration::from_secs(4));
+            let text = io.text(Text::QuitAfterDigest);
+            io.info(text, Duration::from_secs(4));
         }
         session.flow.pending_quit = true;
         session.continue_pending_quit(&self.mode, io)

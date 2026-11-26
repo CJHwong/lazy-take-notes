@@ -9,6 +9,8 @@
 
 pub mod file;
 pub mod record;
+pub mod status_line;
+pub mod texts;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -55,6 +57,41 @@ pub trait SessionIo {
     fn tasks(&self) -> Tasks;
     /// End the app now.
     fn exit(&mut self);
+    /// The words for `text`. The terminal's name its keys; a front end with
+    /// other controls and other words overrides this.
+    fn text(&self, text: Text) -> &'static str {
+        text.terminal()
+    }
+}
+
+/// A notice or a status text whose words depend on the front end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Text {
+    FinalReady,
+    FinalFailed,
+    /// The status while a digest runs, and while the final one runs.
+    Digesting,
+    FinalDigesting,
+    ManualHint,
+    AlreadyDigesting,
+    NothingToDigest,
+    QuitAfterDigest,
+}
+
+impl Text {
+    /// The terminal app's words.
+    pub fn terminal(self) -> &'static str {
+        match self {
+            Text::FinalReady => "Final digest ready. Press q to quit.",
+            Text::FinalFailed => "Final digest failed. Press q to quit.",
+            Text::Digesting => "Digesting...",
+            Text::FinalDigesting => "Final digest...",
+            Text::ManualHint => "Press d to digest manually",
+            Text::AlreadyDigesting => "Digest already in progress",
+            Text::NothingToDigest => "Nothing in buffer to digest yet",
+            Text::QuitAfterDigest => "Quitting when the digest finishes.",
+        }
+    }
 }
 
 /// Shorthands for `notify`.
@@ -71,6 +108,21 @@ impl dyn SessionIo + '_ {
         self.notify(text.into(), Severity::Error, timeout);
     }
 }
+
+/// Readable speech total: 42s, 4m58s, 1h12m (Python's `format_spoken_time`).
+pub fn format_spoken_time(seconds: f64) -> String {
+    let total = seconds.max(0.0) as u64;
+    if total >= 3600 {
+        return format!("{}h{}m", total / 3600, (total % 3600) / 60);
+    }
+    if total >= 60 {
+        return format!("{}m{}s", total / 60, total % 60);
+    }
+    format!("{total}s")
+}
+
+/// How long a shutdown waits for the audio worker to flush its last chunk.
+pub const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
 
 /// What the front end shows next, besides notices.
 #[derive(Debug, PartialEq, Eq)]
@@ -277,6 +329,27 @@ impl SessionRuntime {
     }
 
     /// The user edited the session context.
+    /// One chip per speaker, in speaker order: the number, the name the user
+    /// gave (or empty), and the seconds of speech.
+    pub fn speaker_chips(&self) -> Vec<(u32, String, f64)> {
+        let mut speech: std::collections::BTreeMap<u32, f64> = std::collections::BTreeMap::new();
+        for turn in &self.controller.speaker_turns {
+            *speech.entry(turn.speaker).or_default() += turn.end - turn.start;
+        }
+        speech
+            .into_iter()
+            .map(|(speaker, seconds)| {
+                let name = self
+                    .controller
+                    .speaker_names
+                    .get(&speaker)
+                    .cloned()
+                    .unwrap_or_default();
+                (speaker, name, seconds)
+            })
+            .collect()
+    }
+
     pub fn set_user_context(&mut self, text: String) {
         self.controller.user_context = text;
     }
@@ -388,10 +461,11 @@ impl SessionRuntime {
 
     /// Start a digest. A running one is aborted and its prompt removed first.
     pub fn start_digest(&mut self, is_final: bool, io: &mut dyn SessionIo) {
-        self.status.activity = match is_final {
-            true => "Final digest...".into(),
-            false => "Digesting...".into(),
+        let text = match is_final {
+            true => Text::FinalDigesting,
+            false => Text::Digesting,
         };
+        self.status.activity = io.text(text).into();
         if let Some(old) = self.in_flight.take() {
             old.task.abort();
             self.controller.abandon_digest(&old.request);
@@ -472,10 +546,8 @@ impl SessionRuntime {
         match result {
             Ok(markdown) => {
                 if flight.is_final && !self.flow.pending_quit {
-                    io.info(
-                        "Final digest ready. Press q to quit.",
-                        Duration::from_secs(10),
-                    );
+                    let text = io.text(Text::FinalReady);
+                    io.info(text, Duration::from_secs(10));
                 }
                 self.digest_ready(&markdown, flight.is_final, worker, io)
             }
@@ -524,10 +596,8 @@ impl SessionRuntime {
         io: &mut dyn SessionIo,
     ) -> Step {
         if is_final && !self.flow.pending_quit {
-            io.error(
-                "Final digest failed. Press q to quit.",
-                Duration::from_secs(10),
-            );
+            let text = io.text(Text::FinalFailed);
+            io.error(text, Duration::from_secs(10));
         }
         // Allow a retry after a failed final.
         self.flow.final_started = false;
@@ -567,11 +637,13 @@ impl SessionRuntime {
             return;
         }
         if self.flow.digest_running {
-            io.warn("Digest already in progress", Duration::from_secs(3));
+            let text = io.text(Text::AlreadyDigesting);
+            io.warn(text, Duration::from_secs(3));
             return;
         }
         if self.controller.digest_state.buffer.is_empty() {
-            io.info("Nothing in buffer to digest yet", Duration::from_secs(3));
+            let text = io.text(Text::NothingToDigest);
+            io.info(text, Duration::from_secs(3));
             return;
         }
         self.start_digest(false, io);

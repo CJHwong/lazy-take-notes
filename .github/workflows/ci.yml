@@ -76,3 +76,6 @@ jobs:
       - name: Install ffmpeg
         run: brew install ffmpeg
       - run: cargo test --locked
+      # The .app window builds only with the gui feature, so lint and test it too.
+      - run: cargo clippy --features gui --all-targets --locked -- -D warnings
+      - run: cargo test --features gui --locked

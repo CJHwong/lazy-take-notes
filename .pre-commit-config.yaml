@@ -48,3 +48,9 @@ repos:
         pass_filenames: false
         language: system
         entry: uv run --script rust/scripts/check_layers.py
+    -   id: rust-design
+        name: Rust window design tokens
+        files: ^rust/(src/gui/.*\.rs|scripts/check_design\.py)$
+        pass_filenames: false
+        language: system
+        entry: uv run --script rust/scripts/check_design.py

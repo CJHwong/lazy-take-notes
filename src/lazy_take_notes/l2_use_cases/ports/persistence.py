@@ -26,3 +26,7 @@ class PersistenceGateway(Protocol):
     def save_session_context(self, context: str) -> Path:
         """Save session context to disk."""
         ...
+
+    def save_template_name(self, name: str) -> Path:
+        """Save the name of the template the session runs with."""
+        ...

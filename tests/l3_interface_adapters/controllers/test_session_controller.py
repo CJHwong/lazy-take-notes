@@ -48,6 +48,14 @@ class TestOnTranscriptSegments:
 
         assert len(fake_persist.transcript_calls) == 1
 
+    def test_saves_the_template_name_once_with_the_first_lines(self, controller):
+        ctrl, _, fake_persist = controller
+        assert fake_persist.template_calls == []
+        ctrl.on_transcript_segments([TranscriptSegment(text='One', wall_start=0.0, wall_end=1.0)])
+        ctrl.on_transcript_segments([TranscriptSegment(text='Two', wall_start=1.0, wall_end=2.0)])
+
+        assert fake_persist.template_calls == [YamlTemplateLoader().load('default_zh_tw').metadata.name]
+
     def test_returns_trigger_decision(self, controller):
         ctrl, _, _ = controller
         # Not enough lines for trigger (default min_lines=15)

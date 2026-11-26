@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -28,7 +28,7 @@ const TAIL_LINES: usize = 20;
 pub fn tap_binary() -> PathBuf {
     let beside = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent().map(|dir| dir.join("coreaudio-tap")))
+        .and_then(|exe| helper_beside(&exe))
         .unwrap_or_else(|| PathBuf::from("coreaudio-tap"));
     #[cfg(debug_assertions)]
     if !beside.exists() {
@@ -36,6 +36,13 @@ pub fn tap_binary() -> PathBuf {
             .join("../src/lazy_take_notes/_native/bin/coreaudio-tap");
     }
     beside
+}
+
+/// The helper beside the real executable. A link to it (Homebrew puts one on
+/// PATH) names the link's own folder, so the link is resolved first.
+fn helper_beside(exe: &Path) -> Option<PathBuf> {
+    let real = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    real.parent().map(|dir| dir.join("coreaudio-tap"))
 }
 
 /// State of one helper run. A new open makes a new one, so a late reader of
@@ -96,8 +103,10 @@ impl Run {
             return;
         }
         let samples: Vec<f32> = raw
-            .chunks_exact(BYTES_PER_SAMPLE)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<BYTES_PER_SAMPLE>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         if !self.signal_seen.load(Ordering::Relaxed) && samples.iter().any(|&s| s != 0.0) {
             self.signal_seen.store(true, Ordering::Relaxed);

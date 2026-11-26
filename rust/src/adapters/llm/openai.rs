@@ -59,6 +59,10 @@ impl OpenAiCompatClient {
 
     /// One API call with the SDK's retries: two more tries after a connection
     /// error, a timeout, or a 408, 409, 429 or 5xx answer.
+    #[expect(
+        clippy::result_large_err,
+        reason = "private, returned once per HTTP request; boxing adds an allocation for nothing"
+    )]
     async fn call(
         &self,
         method: reqwest::Method,

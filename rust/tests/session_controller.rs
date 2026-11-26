@@ -60,6 +60,18 @@ fn buffers_and_persists_segments() {
 }
 
 #[test]
+fn saves_the_template_name_once_with_the_first_lines() {
+    let Setup {
+        mut ctrl, saved, ..
+    } = controller();
+    assert!(saved.lock().unwrap().template.is_empty());
+    ctrl.on_transcript_segments(&[line("One", 0.0, 1.0)]);
+    ctrl.on_transcript_segments(&[line("Two", 1.0, 2.0)]);
+    let name = ctrl.template().metadata.name.clone();
+    assert_eq!(saved.lock().unwrap().template, [name]);
+}
+
+#[test]
 fn one_line_does_not_trigger_a_digest() {
     let Setup { mut ctrl, .. } = controller();
     assert!(!ctrl.on_transcript_segments(&[line("Line", 0.0, 1.0)]));

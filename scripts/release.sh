@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build, sign, notarize, and package the macOS app.
+# Build, sign, notarize, and package the macOS app (the native window that
+# rust/scripts/package_app.sh builds).
 #
 #   scripts/release.sh          build, sign when possible, zip
 #   scripts/release.sh --dmg    also produce a DMG
@@ -20,17 +21,9 @@ cd "$REPO_ROOT"
 
 APP_NAME="Lazy Take Notes"
 BUNDLE_ID="com.cjhwong.lazy-take-notes"
-RELEASE_DIR="$REPO_ROOT/trolley/release"
-
-case "$(uname -m)" in
-    arm64) TARGET="aarch64-macos" ;;
-    x86_64) TARGET="x86_64-macos" ;;
-    *)
-        printf 'ERROR: unsupported architecture: %s\n' "$(uname -m)" >&2
-        exit 1
-        ;;
-esac
-APP="$REPO_ROOT/trolley/build/$BUNDLE_ID/$TARGET/dist/$APP_NAME.app"
+RELEASE_DIR="$REPO_ROOT/rust/target/release-app"
+APP="$REPO_ROOT/rust/target/app/$APP_NAME.app"
+ENTITLEMENTS="$REPO_ROOT/rust/scripts/app.entitlements"
 
 WITH_DMG=0
 for argument in "$@"; do
@@ -62,31 +55,33 @@ detect_identity() {
 
 # --- Version -----------------------------------------------------------------
 PROJECT_VERSION=$(toml_value version "[project]" pyproject.toml)
-TROLLEY_VERSION=$(toml_value version "[app]" trolley.toml)
+RUST_VERSION=$(toml_value version "[package]" rust/Cargo.toml)
 [ -n "$PROJECT_VERSION" ] || die "could not read the version from pyproject.toml"
-[ -n "$TROLLEY_VERSION" ] || die "could not read the version from trolley.toml"
-[ "$PROJECT_VERSION" = "$TROLLEY_VERSION" ] \
-    || die "pyproject.toml says $PROJECT_VERSION but trolley.toml says $TROLLEY_VERSION"
+[ -n "$RUST_VERSION" ] || die "could not read the version from rust/Cargo.toml"
+[ "$PROJECT_VERSION" = "$RUST_VERSION" ] \
+    || die "pyproject.toml says $PROJECT_VERSION but rust/Cargo.toml says $RUST_VERSION"
 
 # --- Build -------------------------------------------------------------------
-# The build script packages the app and inserts the microphone usage
-# description. macOS denies microphone access without it.
-"$REPO_ROOT/scripts/trolley/build.sh"
-[ -d "$APP" ] || die "trolley finished but $APP is missing"
+"$REPO_ROOT/rust/scripts/package_app.sh"
+[ -d "$APP" ] || die "the build finished but $APP is missing"
+# macOS denies the microphone and the system audio, without a prompt, to an
+# app that lacks these strings.
+for key in NSMicrophoneUsageDescription NSAudioCaptureUsageDescription; do
+    plutil -extract "$key" raw "$APP/Contents/Info.plist" >/dev/null 2>&1 \
+        || die "$APP has no $key in its Info.plist"
+done
 
 # --- Sign --------------------------------------------------------------------
 IDENTITY="${LTN_SIGN_IDENTITY:-$(detect_identity)}"
 if [ -n "${IDENTITY:-}" ]; then
     step "Signing with $IDENTITY"
-    # Inside out. The launcher script has the executable bit, so codesign treats
-    # it as a subcomponent of the runtime and refuses while it is unsigned. Its
-    # signature lives in extended attributes, so ship the zip this script makes
-    # (ditto preserves them) rather than re-archiving the app with zip.
-    codesign --force --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/lazy-take-notes_core"
-    codesign --force --options runtime --timestamp --identifier "$BUNDLE_ID" \
-        --sign "$IDENTITY" "$APP/Contents/MacOS/lazy-take-notes_runtime"
-    codesign --force --options runtime --timestamp --identifier "$BUNDLE_ID" \
-        --sign "$IDENTITY" "$APP"
+    # Inside out: the bundle signature covers the helper, so the helper is
+    # signed first. The hardened runtime needs the audio-input entitlement, or
+    # macOS blocks the microphone.
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+        --sign "$IDENTITY" "$APP/Contents/MacOS/coreaudio-tap"
+    codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" \
+        --identifier "$BUNDLE_ID" --sign "$IDENTITY" "$APP"
     codesign --verify --strict "$APP"
 else
     printf 'No Developer ID Application identity found. The bundle stays unsigned.\n' >&2

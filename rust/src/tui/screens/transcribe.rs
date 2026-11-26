@@ -6,8 +6,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::app::headless::Launcher;
-use crate::app::session::Step;
 use crate::app::session::file::FileRuntime;
+use crate::app::session::{Step, texts};
 use crate::tui::host::{Action, Ctx, MouseInput, Msg, Payload, Screen};
 use crate::tui::keys::{Binding, action_for, bind};
 use crate::tui::screens::session::{Resumed, SESSION_BINDINGS, Session, SessionView};
@@ -25,27 +25,6 @@ pub const TRANSCRIBE_BINDINGS: [Binding; 10] = [
     bind("d", "force_digest", "Digest now").hidden(),
 ];
 
-const HELP_ROWS: [&str; 11] = [
-    "| Key | Action |",
-    "|-----|--------|",
-    "| `s` | Stop transcription |",
-    "| `d` | Force digest now |",
-    "| `c` | Copy focused panel |",
-    "| `Tab` | Switch panel focus |",
-    "| `←` `→` `Enter` | On the speaker bar: choose a speaker, name it |",
-    "| `l` | Rename session |",
-    "| `o` | Open session directory |",
-    "| `h` | Toggle this help |",
-    "| `q` | Quit |",
-];
-
-fn hints(state: &str) -> &'static str {
-    match state {
-        "recording" => "[s] stop  [d] digest  [c] copy  [l] label  [h] help",
-        _ => "[c] copy  [l] label  [o] open  [h] help  [q] quit",
-    }
-}
-
 pub struct TranscribeScreen {
     runtime: FileRuntime,
     view: SessionView,
@@ -57,8 +36,8 @@ impl TranscribeScreen {
         view.status.mode_label = "Transcribe".into();
         view.status.active_label = "● Transcribing".into();
         view.status.silence_threshold = silence_threshold;
-        view.hints = hints;
-        view.help_rows = &HELP_ROWS;
+        view.hints = texts::file_hints;
+        view.help_rows = &texts::FILE_HELP_ROWS;
         Self {
             runtime: FileRuntime::new(session.runtime, launcher),
             view,

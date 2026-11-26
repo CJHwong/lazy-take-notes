@@ -18,6 +18,8 @@ pub trait Persistence: Send {
         is_final: bool,
     ) -> io::Result<PathBuf>;
     fn save_session_context(&mut self, context: &str) -> io::Result<PathBuf>;
+    /// The name of the template the session runs with.
+    fn save_template_name(&mut self, name: &str) -> io::Result<PathBuf>;
 
     /// The session folder moved to `new_dir`. Only a folder-backed store cares.
     fn relocate(&mut self, _new_dir: PathBuf) {}

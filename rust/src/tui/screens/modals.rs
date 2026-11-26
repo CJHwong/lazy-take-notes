@@ -1,6 +1,7 @@
 //! The session's modals: help, a quick-action result, the label prompt and the
 //! model download notice.
 
+use crate::app::notices::{BUILTIN_NOTICE_BODY, CONSENT_NOTICE_BODY};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -194,23 +195,6 @@ impl MarkdownModal {
         Action::Pop(None)
     }
 }
-
-/// Python's `ConsentNotice.NOTICE_BODY`.
-const CONSENT_NOTICE_BODY: &str = "This session will **record audio** and generate a transcript.
-
-- **Inform all participants** that recording is active.
-- Recording without consent may violate local laws.
-- You are responsible for compliance.
-";
-
-const BUILTIN_NOTICE_BODY: &str =
-    "Built-in templates are **example sessions** for common use cases \
-(meetings, standups, lectures, podcasts, etc.).
-
-- Press **[n]** in the picker to **create your own** template.
-- To hide built-in templates, set `show_builtin_templates: false` \
-in settings or config.yaml.
-";
 
 impl Screen for MarkdownModal {
     fn render(&mut self, frame: &mut Frame, area: Rect, ctx: &Ctx) {
