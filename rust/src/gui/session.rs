@@ -518,8 +518,9 @@ impl SessionView {
         self.set_focus(ORDER[at as usize], window, cx);
     }
 
-    fn toggle_pause(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        info!(target: "ltn.app", "command: pause or resume");
+    /// `from` names the control, so the log tells a click from a key.
+    fn toggle_pause(&mut self, from: &str, window: &mut Window, cx: &mut Context<Self>) {
+        info!(target: "ltn.app", "command: pause or resume ({from})");
         self.run(window, cx, |mode, io| {
             if let Mode::Record(record) = mode {
                 record.toggle_pause(io);
@@ -771,7 +772,7 @@ impl SessionView {
         }
         let handled = match key {
             "space" if self.is_record() => {
-                self.toggle_pause(window, cx);
+                self.toggle_pause("space key", window, cx);
                 true
             }
             "tab" => {
@@ -890,11 +891,9 @@ impl SessionView {
                 true => (IconName::Play, "Resume"),
                 false => (IconName::Pause, "Pause"),
             };
-            tools =
-                tools
-                    .child(tool("pause", icon, label).on_click(
-                        cx.listener(|view, _, window, cx| view.toggle_pause(window, cx)),
-                    ));
+            tools = tools.child(tool("pause", icon, label).on_click(
+                cx.listener(|view, _, window, cx| view.toggle_pause("button", window, cx)),
+            ));
             let (icon, label) = match muted {
                 true => (extra_icon("mic-off"), "Unmute"),
                 false => (Icon::new(IconName::Mic), "Mute"),
@@ -1336,9 +1335,9 @@ impl Render for SessionView {
             .on_key_down(cx.listener(Self::on_key))
             // A command shows in the menu bar only while it applies.
             .when(record && active, |root| {
-                root.on_action(
-                    cx.listener(|view, _: &TogglePause, window, cx| view.toggle_pause(window, cx)),
-                )
+                root.on_action(cx.listener(|view, _: &TogglePause, window, cx| {
+                    view.toggle_pause("menu", window, cx)
+                }))
             })
             .when(record && recording, |root| {
                 root.on_action(
