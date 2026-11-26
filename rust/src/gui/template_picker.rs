@@ -72,7 +72,7 @@ impl TemplatePickerView {
         );
         let preview = cx.new(|cx| TextViewState::markdown("", cx));
         let list_focused = catalog.loaded.is_empty();
-        let placeholder = format!("Filter {} templates", catalog.loaded.len());
+        let placeholder = format!("Filter {} note types", catalog.loaded.len());
         let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
         let subscription = cx.subscribe_in(&search, window, Self::on_search);
         let mut view = Self {
@@ -177,7 +177,7 @@ impl TemplatePickerView {
                 .map(|template| template.system_prompt.clone())
                 .unwrap_or_default(),
             None if self.catalog.loaded.is_empty() => NO_TEMPLATES.to_string(),
-            None => "*No matching templates*".to_string(),
+            None => "*No matching note types*".to_string(),
         };
         self.preview
             .update(cx, |preview, cx| preview.set_text(&markdown, cx));
@@ -271,7 +271,7 @@ impl TemplatePickerView {
         let path = match self.catalog.templates.ensure_user_copy(&name) {
             Ok(path) => path,
             Err(e) => {
-                let text = format!("Cannot copy the template: {e}");
+                let text = format!("Cannot copy the note type: {e}");
                 notify(window, cx, text, Severity::Error, NOTICE_TIMEOUT);
                 return;
             }
@@ -297,7 +297,7 @@ impl TemplatePickerView {
 
     fn reload(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.catalog.reload(name).is_err() {
-            let text = format!("Template \"{name}\" has invalid YAML; changes ignored");
+            let text = format!("Note type \"{name}\" has invalid YAML; changes ignored");
             notify(window, cx, text, Severity::Warning, NOTICE_TIMEOUT);
             return;
         }
@@ -317,12 +317,12 @@ impl TemplatePickerView {
             return;
         };
         if !self.catalog.user_names.contains(&name) {
-            let text = "Only user templates can be deleted".to_string();
+            let text = "Only your own note types can be deleted".to_string();
             notify(window, cx, text, Severity::Warning, NOTICE_TIMEOUT);
             return;
         }
         let view = cx.entity().downgrade();
-        let message = format!("Delete user template \"{name}\"?");
+        let message = format!("Delete the note type \"{name}\"?");
         dialogs::confirm(window, cx, message, "Yes", true, move |window, cx| {
             let _ = view.update(cx, |view, cx| view.delete(&name, window, cx));
         });
@@ -330,13 +330,13 @@ impl TemplatePickerView {
 
     fn delete(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.catalog.delete(name).is_err() {
-            let text = format!("\"{name}\" is not a user template");
+            let text = format!("\"{name}\" is not your own note type");
             notify(window, cx, text, Severity::Error, NOTICE_TIMEOUT);
             return;
         }
         let query = self.query(cx);
         self.rebuild(&query, cx);
-        let text = format!("Deleted user template \"{name}\"");
+        let text = format!("Deleted the note type \"{name}\"");
         notify(window, cx, text, Severity::Information, NOTICE_TIMEOUT);
         cx.notify();
     }
@@ -465,7 +465,7 @@ impl TemplatePickerView {
         };
         let during = role(icons::extra("sparkles"), "During the meeting", cx).child(
             div().text_color(muted).child(format!(
-                "The Notes panel follows the instructions below and updates about every {} \
+                "The Notes panel follows the AI instructions below and updates about every {} \
                  lines while people talk. When the session ends, one last pass writes the \
                  full notes.",
                 self.digest_lines
@@ -489,25 +489,25 @@ impl TemplatePickerView {
                         .child(action.description.clone()),
                 )
         });
-        let ask = role(icons::extra("zap"), "Ask any time", cx)
+        let ask = role(icons::extra("zap"), "Ask AI", cx)
             .when(template.quick_actions.is_empty(), |card| {
                 card.child(
                     div()
                         .text_color(muted)
-                        .child("This template has no quick actions."),
+                        .child("This note type has no Ask AI questions."),
                 )
             })
             .when(!template.quick_actions.is_empty(), |card| {
                 card.child(
                     div()
                         .text_color(muted)
-                        .child("Quick Actions in the notes header answer from the meeting so far."),
+                        .child("Press one in the notes header at any time. The AI answers from the meeting so far."),
                 )
                 .children(asks)
             });
         let hints = template.recognition_hints.clone();
         let listens = (!hints.is_empty()).then(|| {
-            role(Icon::new(IconName::Mic), "Listens for", cx).child(
+            role(Icon::new(IconName::Mic), "Vocabulary", cx).child(
                 div()
                     .flex()
                     .flex_wrap()
@@ -530,7 +530,7 @@ impl TemplatePickerView {
                 })
                 .size(size::ICON_SM),
             )
-            .child(section_heading("Instructions"))
+            .child(section_heading("AI Instructions"))
             .child(caption("What the AI is told to do", cx))
             .on_click(cx.listener(|view, _, _, cx| {
                 view.instructions_open = !view.instructions_open;
@@ -556,7 +556,7 @@ impl TemplatePickerView {
             .with_size(control::HERO)
             .icon(IconName::Plus)
             .label("New")
-            .tooltip("Create a template with AI")
+            .tooltip("Create a note type with AI")
             .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Create)))
     }
 
@@ -570,8 +570,8 @@ impl TemplatePickerView {
             .items_center()
             .gap(space::XS)
             .child(
-                tool("edit-template", icons::extra("pencil"), "Edit")
-                    .tooltip("Open the template in your text editor")
+                tool("edit-template", icons::extra("pencil"), "Edit File")
+                    .tooltip("Open the note type's file in your text editor")
                     .on_click(cx.listener(|view, _, window, cx| view.edit(window, cx))),
             )
             .child(
@@ -584,9 +584,9 @@ impl TemplatePickerView {
                     .with_size(control::CONTROL)
                     .icon(icons::extra("trash"))
                     .tooltip(if user {
-                        "Delete this template"
+                        "Delete this note type"
                     } else {
-                        "Only your own templates can be deleted"
+                        "Only your own note types can be deleted"
                     })
                     .disabled(!user)
                     .on_click(cx.listener(|view, _, window, cx| view.ask_delete(window, cx))),
@@ -605,16 +605,20 @@ impl TemplatePickerView {
             .outline()
             .with_size(control::CONTROL)
             .icon(IconName::File)
-            .label("Transcribe File…")
-            .tooltip("Make notes from an audio file with this template")
+            .label("Import Audio…")
+            .tooltip("Make notes from an audio file with this note type")
             .disabled(idle)
             .on_click(cx.listener(|view, _, _, cx| view.transcribe(cx)));
         let record = Button::new("start-record")
             .danger()
             .with_size(control::CONTROL)
             .icon(IconName::Mic)
-            .label(if checking { "Checking…" } else { "Record" })
-            .tooltip("Record a meeting with this template")
+            .label(if checking {
+                "Checking…"
+            } else {
+                "Start Recording"
+            })
+            .tooltip("Record a meeting with this note type")
             .loading(checking)
             .disabled(idle)
             .on_click(cx.listener(|view, _, _, cx| view.pick(cx)));
@@ -651,7 +655,7 @@ fn builtin_notice(noticed: std::path::PathBuf, window: &mut Window, cx: &mut App
     dialogs::markdown(
         window,
         cx,
-        "Built-in Templates",
+        "Built-in Note Types",
         BUILTIN_NOTICE_BODY,
         "accent",
         Some(extra),

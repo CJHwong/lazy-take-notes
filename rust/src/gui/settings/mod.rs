@@ -56,7 +56,7 @@ pub enum Page {
 
 pub const PAGES: [(Page, &str); 4] = [
     (Page::Models, "Models"),
-    (Page::Digest, "Digest"),
+    (Page::Digest, "Notes"),
     (Page::Audio, "Audio"),
     (Page::Sessions, "Sessions"),
 ];

@@ -205,7 +205,7 @@ impl SettingsView {
             ))
             .child(Self::button(
                 "pull-interactive",
-                "Pull Quick Action Model",
+                "Pull Ask AI Model",
                 cx,
                 |view, window, cx| {
                     view.call(window, cx, |runtime, form, io| {
@@ -227,7 +227,7 @@ impl SettingsView {
             row("API key", key, "", cx).into_any_element(),
             self.field("cfg-digest-model", "Summary model", "", cx)
                 .into_any_element(),
-            self.field("cfg-interactive-model", "Quick action model", "", cx)
+            self.field("cfg-interactive-model", "Ask AI model", "", cx)
                 .into_any_element(),
             row("Installed models", note(models_text, cx), "", cx).into_any_element(),
             tools.into_any_element(),
@@ -463,7 +463,7 @@ impl SettingsView {
         row(
             "Runtime and model",
             controls,
-            "Speaker labels need these. They download once.",
+            "Who's Speaking needs these. They download once.",
             cx,
         )
     }
@@ -620,7 +620,7 @@ impl SettingsView {
             section("Input check", input_check, cx),
             section("Microphone", microphone, cx),
             section("Audio processing", processing, cx),
-            section("Speaker labels", speakers, cx),
+            section("Who's Speaking", speakers, cx),
         ]
     }
 
@@ -639,7 +639,7 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
-            self.switch("cfg-output-save-context", "Save session context", "", cx)
+            self.switch("cfg-output-save-context", "Save background for AI", "", cx)
                 .into_any_element(),
             self.switch("cfg-output-save-debug-log", "Save debug log", "", cx)
                 .into_any_element(),
@@ -663,7 +663,7 @@ impl SettingsView {
         let templates = vec![
             self.switch(
                 "cfg-show-builtin-templates",
-                "Show built-in templates",
+                "Show built-in note types",
                 "Bundled examples appear in the picker. Turn it off to see only your own.",
                 cx,
             )
@@ -672,7 +672,7 @@ impl SettingsView {
         vec![
             section("Session storage", storage, cx),
             section("Custom vocabulary", vocabulary, cx),
-            section("Templates", templates, cx),
+            section("Note Types", templates, cx),
         ]
     }
 

@@ -207,8 +207,8 @@ impl SessionReader {
         let (text, what, empty) = match copied {
             Copied::Digest => (
                 self.session.notes.clone(),
-                "Digest copied",
-                "No digest to copy",
+                "Notes copied",
+                "No notes to copy",
             ),
             Copied::Transcript => (
                 self.session.transcript.join("\n"),

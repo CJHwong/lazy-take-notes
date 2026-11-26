@@ -188,7 +188,7 @@ impl Shell {
         dialogs::confirm(
             window,
             cx,
-            "You have an unsaved template. Quit anyway?",
+            "You have an unsaved note type. Quit anyway?",
             "Quit",
             true,
             move |window, cx| {
@@ -268,7 +268,7 @@ impl Shell {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Transcribe".into()),
+            prompt: Some("Import".into()),
         });
         cx.spawn_in(window, async move |this, cx| {
             let picked = match paths.await {
@@ -850,7 +850,7 @@ impl Shell {
                         NavRow {
                             icon: Some(IconName::BookOpen),
                             selected: on_templates,
-                            ..nav("templates", "Templates")
+                            ..nav("templates", "Note Types")
                         },
                         templates,
                         cx,
@@ -879,7 +879,7 @@ impl Shell {
                 .w_full()
                 .icon(IconName::Plus)
                 .label("New Session")
-                .tooltip("Choose a template, then record or transcribe")
+                .tooltip("Choose a note type, then record or import audio")
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     shell.leave_page_then(start.clone(), window, cx)
                 })),
@@ -919,7 +919,7 @@ impl Shell {
             Detail::Empty => (Some("".into()), self.empty_state(cx)),
             Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
                 Some((Stage::Checking, Some(Flow::Transcribe))) => (
-                    Some("Transcribe File".into()),
+                    Some("Import Audio".into()),
                     muted("Checking the AI provider…"),
                 ),
                 Some((Stage::Checking, _)) => (Some("New Session".into()), muted("")),
@@ -930,7 +930,7 @@ impl Shell {
                 None => (Some("".into()), self.empty_state(cx)),
             },
             Detail::Saved(view, _) => (None, view.clone().into_any_element()),
-            Detail::Templates(view) => (Some("Templates".into()), view.clone().into_any_element()),
+            Detail::Templates(view) => (Some("Note Types".into()), view.clone().into_any_element()),
             Detail::Builder(view) => (None, view.clone().into_any_element()),
             // Settings draws its own title bar, with Revert and Save.
             Detail::Settings(view) => (None, view.clone().into_any_element()),

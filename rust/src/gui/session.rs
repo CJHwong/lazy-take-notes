@@ -61,7 +61,7 @@ pub const SHORTCUTS: &str = "\
 | `⇧⌘R` | Show the session folder in Finder |
 | `Tab` | Move between the transcript, the speakers and the session context |
 | `←` `→` `Return` | On the speakers: choose one, name it |
-| `⌘N` | New session: choose a template, then record or transcribe |
+| `⌘N` | New session: choose a note type, then record or import audio |
 | `⌘,` | Settings |
 | `⌘W` `⌘Q` | Close the window; a recording stops and saves first |";
 
@@ -661,7 +661,7 @@ impl SessionView {
         let metadata = &template.metadata;
         let mut lines = Vec::new();
         for (name, value) in [
-            ("Template", &metadata.name),
+            ("Note type", &metadata.name),
             ("Description", &metadata.description),
             ("Locale", &metadata.locale),
         ] {
@@ -670,7 +670,7 @@ impl SessionView {
             }
         }
         if !template.quick_actions.is_empty() {
-            lines.push("### Quick Actions".into());
+            lines.push("### Ask AI".into());
             for (index, action) in template.quick_actions.iter().enumerate() {
                 lines.push(format!("{}. {}", index + 1, action.label));
             }
@@ -694,7 +694,7 @@ impl SessionView {
         let (mut text, what, empty) = match copied {
             Copied::Digest => {
                 let digest = self.mode.session().status.digest.clone();
-                (digest, "Digest copied", "No digest to copy")
+                (digest, "Notes copied", "No notes to copy")
             }
             Copied::Transcript => {
                 let lines: Vec<String> = self
@@ -715,8 +715,8 @@ impl SessionView {
         }
         if !context.is_empty() {
             text.push_str(&match copied {
-                Copied::Digest => format!("\n\n---\n\n**Session Context**\n\n{context}"),
-                Copied::Transcript => format!("\n\n---\nSession Context:\n{context}"),
+                Copied::Digest => format!("\n\n---\n\n**Background for AI**\n\n{context}"),
+                Copied::Transcript => format!("\n\n---\nBackground for AI:\n{context}"),
             });
         }
         cx.write_to_clipboard(ClipboardItem::new_string(text));
@@ -928,7 +928,7 @@ impl SessionView {
                     .with_size(control::CONTROL)
                     .label(if finishing { "Finishing…" } else { "Finish" })
                     .loading(finishing)
-                    .tooltip("Write the final digest and save")
+                    .tooltip("Write the final notes and save")
                     .on_click(cx.listener(|view, _, window, cx| view.finish(window, cx))),
             ),
         }
@@ -949,7 +949,7 @@ impl SessionView {
             return None;
         }
         let handle = self.focus_handle.clone();
-        let button = inline_tool("quick-actions", icons::extra("zap"), "Quick Actions");
+        let button = inline_tool("quick-actions", icons::extra("zap"), "Ask AI");
         Some(button.dropdown_menu(move |menu, _, _| {
             let mut menu = menu.action_context(handle.clone());
             for (index, label) in labels.iter().enumerate() {
@@ -1095,9 +1095,10 @@ impl SessionView {
                         .items_center()
                         .gap(space::XS)
                         .child(
-                            inline_tool("digest", icons::extra("sparkles"), "Digest Now").on_click(
-                                cx.listener(|view, _, window, cx| view.digest_now(window, cx)),
-                            ),
+                            inline_tool("digest", icons::extra("sparkles"), "Update Notes")
+                                .on_click(
+                                    cx.listener(|view, _, window, cx| view.digest_now(window, cx)),
+                                ),
                         )
                         .children(self.render_quick_actions())
                         .child(self.copy_button("copy-digest", Copied::Digest, cx)),
@@ -1136,7 +1137,7 @@ impl SessionView {
                                 view.set_focus(Focus::Context, window, cx)
                             }))
                             .child(
-                                column_header("Session Context", cx).child(
+                                column_header("Background for AI", cx).child(
                                     Icon::new(match context_open {
                                         true => IconName::ChevronDown,
                                         false => IconName::ChevronRight,
@@ -1223,7 +1224,7 @@ impl SessionView {
     fn digest_empty(&self, cx: &App) -> Div {
         let line = match self.status.ai_notes {
             true => format!(
-                "Notes appear after {} lines, or when you press Digest Now.",
+                "Notes appear after {} lines, or when you press Update Notes.",
                 self.status.buf_max
             ),
             false => "AI notes are off for this session.".into(),
@@ -1254,7 +1255,7 @@ impl SessionView {
         }
         right = right.child(match status.ai_notes {
             true => format!(
-                "Next digest: {} of {} lines",
+                "Next update: {} of {} lines",
                 status.buf_count, status.buf_max
             ),
             false => "AI notes off".into(),
@@ -1262,8 +1263,8 @@ impl SessionView {
         if let Some(last) = status.last_digest_time {
             let since = (Instant::now() - last).as_secs();
             right = right.child(match since {
-                0..60 => format!("Last digest {since}s ago"),
-                _ => format!("Last digest {}m ago", since / 60),
+                0..60 => format!("Last update {since}s ago"),
+                _ => format!("Last update {}m ago", since / 60),
             });
         }
         let template = &self.mode.session().controller.template().metadata.name;

@@ -142,13 +142,13 @@ impl BuilderView {
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(suggestion) = self.runtime.save_suggestion() else {
-            let text = "No template to save. Generate one first.".to_string();
+            let text = "No note type to save. Generate one first.".to_string();
             notify(window, cx, text, Severity::Warning, NOTICE);
             return;
         };
         let file_name = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("template_name (no spaces)")
+                .placeholder("file_name (no spaces)")
                 .default_value(suggestion.file_name.clone())
         });
         let display_name = cx.new(|cx| {
@@ -192,7 +192,7 @@ impl BuilderView {
                 .title(
                     div()
                         .font_weight(FontWeight::SEMIBOLD)
-                        .child("Save Template"),
+                        .child("Save Note Type"),
                 )
                 .child(
                     div()
@@ -239,7 +239,7 @@ impl BuilderView {
                 notify(window, cx, text, Severity::Information, NOTICE);
             }
             Some(Err(e)) => {
-                let text = format!("Cannot save template: {e}");
+                let text = format!("Cannot save the note type: {e}");
                 notify(window, cx, text, Severity::Error, NOTICE);
             }
         }
@@ -253,7 +253,7 @@ impl BuilderView {
         dialogs::confirm(
             window,
             cx,
-            "You have an unsaved template. Quit anyway?",
+            "You have an unsaved note type. Quit anyway?",
             "Quit",
             true,
             move |_, cx| {
@@ -294,8 +294,8 @@ impl BuilderView {
                     .label("Save")
                     .disabled(!has_template)
                     .tooltip(match has_template {
-                        true => "Save the template",
-                        false => "Generate a template first",
+                        true => "Save the note type",
+                        false => "Generate a note type first",
                     })
                     .on_click(cx.listener(|view, _, window, cx| view.save(window, cx))),
             )
