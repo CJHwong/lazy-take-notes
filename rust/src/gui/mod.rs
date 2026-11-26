@@ -6,6 +6,7 @@ mod bridge;
 mod builder;
 mod design;
 mod dialogs;
+mod dock_icon;
 mod env;
 pub(crate) mod icons;
 mod preflight;
@@ -122,6 +123,7 @@ pub fn run() -> i32 {
         .with_assets(icons::AppAssets)
         .run(|cx: &mut App| {
             init(cx);
+            dock_icon::set_outside_bundle();
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
                 KeyBinding::new("cmd-w", CloseWindow, None),

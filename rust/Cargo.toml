@@ -16,7 +16,7 @@ required-features = ["gui"]
 
 [features]
 # The native window. Off by default: the release tarball has no GPUI.
-gui = ["dep:gpui-kit"]
+gui = ["dep:gpui-kit", "dep:cocoa", "dep:objc"]
 # The GPUI Kit test helpers for the window's tests.
 gui-test = ["gui", "gpui-kit/test-support"]
 
@@ -30,6 +30,10 @@ dirs = "7.0.0"
 fancy-regex = "0.20.2"
 flate2 = "1.1.11"
 gpui-kit = { version = "=0.11.0", optional = true }
+# The Dock icon of a run outside the .app. The same versions gpui uses, so
+# they add no crate to the build.
+cocoa = { version = "=0.25.0", optional = true }
+objc = { version = "=0.2.7", optional = true }
 futures-util = { version = "0.3.34", default-features = false }
 indexmap = { version = "2.14.2", features = ["serde"] }
 libc = "0.2.191"
