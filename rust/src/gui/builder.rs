@@ -259,6 +259,16 @@ impl BuilderView {
         );
     }
 
+    /// True while the template differs from the last save.
+    pub fn unsaved(&self) -> bool {
+        self.runtime.unsaved()
+    }
+
+    /// Drop the template without the Closed event: the shell moves on itself.
+    pub fn discard(&mut self) {
+        self.runtime.leave();
+    }
+
     fn leave(&mut self, cx: &mut Context<Self>) {
         self.runtime.leave();
         cx.emit(BuilderEvent::Closed);

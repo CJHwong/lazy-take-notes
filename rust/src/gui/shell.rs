@@ -168,6 +168,27 @@ impl Shell {
         cx.notify();
     }
 
+    /// Run `next` once the pane may change. An unsaved template on the
+    /// builder page asks first, as its Close button does.
+    fn leave_page_then(&mut self, next: OnClick, window: &mut Window, cx: &mut Context<Self>) {
+        let builder = match &self.detail {
+            Detail::Builder(builder) if builder.read(cx).unsaved() => builder.clone(),
+            _ => return next(self, window, cx),
+        };
+        let shell = cx.entity().downgrade();
+        dialogs::confirm(
+            window,
+            cx,
+            "You have an unsaved template. Quit anyway?",
+            "Quit",
+            true,
+            move |window, cx| {
+                builder.update(cx, |builder, _| builder.discard());
+                let _ = shell.update(cx, |shell, cx| next(shell, window, cx));
+            },
+        );
+    }
+
     fn set_stage(&mut self, stage: Stage, subscription: Subscription, cx: &mut Context<Self>) {
         if let Some(live) = self.live.as_mut() {
             live.stage = stage;
@@ -693,7 +714,9 @@ impl Shell {
                         column.child(div().text_xs().text_color(muted).truncate().child(detail))
                     }),
             )
-            .on_click(cx.listener(move |shell, _, window, cx| on_click(shell, window, cx)))
+            .on_click(cx.listener(move |shell, _, window, cx| {
+                shell.leave_page_then(on_click.clone(), window, cx)
+            }))
     }
 
     fn session_rows(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
@@ -1002,13 +1025,21 @@ fn with_shell(cx: &mut App, f: impl FnOnce(&mut Shell, &mut Window, &mut Context
 
 pub fn new_recording(cx: &mut App) {
     with_shell(cx, |shell, window, cx| {
-        shell.start(Flow::Record, window, cx)
+        shell.leave_page_then(
+            Rc::new(|shell, window, cx| shell.start(Flow::Record, window, cx)),
+            window,
+            cx,
+        )
     });
 }
 
 pub fn transcribe_file(cx: &mut App) {
     with_shell(cx, |shell, window, cx| {
-        shell.start(Flow::Transcribe, window, cx)
+        shell.leave_page_then(
+            Rc::new(|shell, window, cx| shell.start(Flow::Transcribe, window, cx)),
+            window,
+            cx,
+        )
     });
 }
 
@@ -1020,7 +1051,13 @@ pub fn show_help(cx: &mut App) {
 }
 
 pub fn open_settings(cx: &mut App) {
-    with_shell(cx, |shell, window, cx| shell.open_settings(window, cx));
+    with_shell(cx, |shell, window, cx| {
+        shell.leave_page_then(
+            Rc::new(|shell, window, cx| shell.open_settings(window, cx)),
+            window,
+            cx,
+        )
+    });
 }
 
 /// Cmd-Q and Cmd-W: the same way out as the close button.
