@@ -16,7 +16,6 @@ use tracing::warn;
 
 use crate::adapters::templates::YamlTemplates;
 use crate::app::container::Loaded;
-use crate::app::notices::BUILTIN_NOTICE_BODY;
 use crate::app::session::Severity;
 use crate::app::template_catalog::{Row, TemplateCatalog};
 use crate::gui::bridge::notify;
@@ -30,6 +29,13 @@ use crate::gui::widgets::{
 };
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The first-run notice about the built-in note types, in the window's words
+/// and controls. The terminal's names its key.
+const BUILTIN_NOTE_TYPES_NOTICE: &str = "Built-in note types are **examples** for common sessions: meetings, standups, lectures and podcasts.
+
+- Use **New** to **create your own**.
+- To hide them, turn off **Show built-in note types** in Settings > Sessions.
+";
 /// The list with no note types, in the window's words and controls.
 const NO_NOTE_TYPES: &str = "**No note types yet.**\n\nUse New to create one, or turn on Show built-in note types in Settings > Sessions.";
 pub enum TemplatePickerEvent {
@@ -624,6 +630,11 @@ impl TemplatePickerView {
             .checks
             .as_ref()
             .is_some_and(|checks| checks.read(cx).running());
+        // Finished checks still on screen failed: their own Back, Check
+        // Again and Start Anyway are the actions then, not a second start.
+        if self.checks.is_some() && !checking {
+            return None;
+        }
         let muted = cx.theme().muted_foreground;
         let import = Button::new("start-transcribe")
             .outline()
@@ -689,7 +700,7 @@ fn builtin_notice(noticed: std::path::PathBuf, window: &mut Window, cx: &mut App
         window,
         cx,
         "Built-in Note Types",
-        BUILTIN_NOTICE_BODY,
+        BUILTIN_NOTE_TYPES_NOTICE,
         "accent",
         Some(extra),
         None,

@@ -122,7 +122,7 @@ impl PreflightView {
                     .flex()
                     .flex_col()
                     .gap(space::XS)
-                    .child(section_heading(check.title))
+                    .child(section_heading(window_title(check)))
                     .when(!check.detail.is_empty(), |row| {
                         row.child(div().text_color(muted).child(check.detail.clone()))
                     })
@@ -219,5 +219,13 @@ impl Render for PreflightView {
                     })
                     .when(!running && summary_shown, |checks| checks.child(actions)),
             )
+    }
+}
+
+/// A check's title in the window's words: the terminal says template.
+fn window_title(check: &Check) -> &'static str {
+    match check.key {
+        "template" => "Note type",
+        _ => check.title,
     }
 }
