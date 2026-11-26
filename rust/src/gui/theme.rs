@@ -1,7 +1,7 @@
 //! The window follows the macOS appearance, light or dark. The Textual theme
 //! stays a terminal setting.
 
-use gpui_kit::component::{ActiveTheme, Theme};
+use gpui_kit::component::Theme;
 use gpui_kit::*;
 
 use crate::app::theme::Rgb;
@@ -28,36 +28,4 @@ fn sync(window: &mut Window, cx: &mut App) {
         // Toasts start below the title bar row, where the toolbar is.
         theme.notification.margins.top = TITLE_BAR_HEIGHT + px(8.);
     });
-}
-
-/// The system color for a Textual variable name. The views from the terminal
-/// app still name their colors this way.
-pub fn color(cx: &App, variable: &str) -> Hsla {
-    let theme = cx.theme();
-    match variable {
-        "background" => theme.background,
-        "text-muted" | "footer-description-foreground" => theme.muted_foreground,
-        "primary" | "border" => theme.primary,
-        "surface" | "footer-background" | "footer-key-background" => theme.muted,
-        "border-blurred" => theme.border,
-        "block-cursor-background" => theme.list_active,
-        "block-cursor-blurred-background" | "block-hover-background" => theme.list_hover,
-        "error" => theme.danger,
-        _ => theme.foreground,
-    }
-}
-
-/// A text color on a background, by the same names.
-pub fn on(cx: &App, variable: &str, background: &str) -> Hsla {
-    let theme = cx.theme();
-    match (variable, background) {
-        ("text", "primary") => theme.primary_foreground,
-        ("text", "error") => theme.danger_foreground,
-        _ => color(cx, variable),
-    }
-}
-
-/// A background, always painted.
-pub fn fill(cx: &App, variable: &str) -> Option<Hsla> {
-    Some(color(cx, variable))
 }

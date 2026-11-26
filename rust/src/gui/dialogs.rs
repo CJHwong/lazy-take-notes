@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
@@ -10,8 +11,6 @@ use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-
-use crate::gui::theme::color;
 
 /// Something a dialog runs on the main thread.
 pub type Callback = Rc<dyn Fn(&mut Window, &mut App)>;
@@ -49,7 +48,7 @@ pub fn markdown(
             .w(px(640.))
             .title(
                 div()
-                    .text_color(color(cx, accent))
+                    .text_color(title_color(cx, accent))
                     .font_weight(FontWeight::BOLD)
                     .child(title.clone()),
             )
@@ -123,7 +122,7 @@ pub fn prompt(
             .w(px(460.))
             .title(
                 div()
-                    .text_color(color(cx, "primary"))
+                    .text_color(cx.theme().foreground)
                     .font_weight(FontWeight::BOLD)
                     .child(title.clone()),
             )
@@ -174,4 +173,12 @@ pub fn confirm(
                 true
             })
     });
+}
+
+/// A dialog title is plain text, or the warning color for a warning.
+fn title_color(cx: &App, accent: &str) -> Hsla {
+    match accent {
+        "warning" => cx.theme().warning,
+        _ => cx.theme().foreground,
+    }
 }
