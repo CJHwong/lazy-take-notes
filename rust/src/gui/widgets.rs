@@ -202,8 +202,13 @@ pub fn tool(id: impl Into<ElementId>, icon: impl Into<Icon>, label: &'static str
     Button::new(id)
         .ghost()
         .with_size(control::CONTROL)
-        .icon(icon)
+        .icon(beside_label(icon))
         .label(label)
+}
+
+/// An icon placed to line up with the label text beside it.
+fn beside_label(icon: impl Into<Icon>) -> Icon {
+    icon.into().relative().top(space::ICON_DROP)
 }
 
 /// A small button inside a column header: Copy, Digest Now.
@@ -211,7 +216,7 @@ pub fn inline_tool(id: impl Into<ElementId>, icon: impl Into<Icon>, label: &'sta
     Button::new(id)
         .ghost()
         .with_size(control::INLINE)
-        .icon(icon)
+        .icon(beside_label(icon))
         .label(label)
 }
 
