@@ -717,17 +717,19 @@ impl SettingsView {
             )
     }
 
-    /// The title, then Revert and Save at the right end. Save waits for a
-    /// change.
+    /// The title, then Revert and Save at the right end. Revert shows only
+    /// while there is a change to undo; Save waits for one.
     fn header(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let changed = self.has_unsaved_changes(cx);
         pane_header("settings-title", &self.drag, cx)
             .child(pane_title("Settings").flex_1())
-            .child(
-                tool("revert", IconName::Undo2, "Revert")
-                    .tooltip("Read config.yaml again")
-                    .on_click(cx.listener(|view, _, window, cx| view.revert(window, cx))),
-            )
+            .when(changed, |header| {
+                header.child(
+                    tool("revert", IconName::Undo2, "Revert")
+                        .tooltip("Undo the changes and read config.yaml again")
+                        .on_click(cx.listener(|view, _, window, cx| view.revert(window, cx))),
+                )
+            })
             .child(
                 Button::new("save")
                     .primary()
