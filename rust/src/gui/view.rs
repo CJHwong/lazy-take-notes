@@ -5,8 +5,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme, IconName};
 use gpui_kit::*;
@@ -350,9 +352,10 @@ impl SessionReader {
             div()
                 .flex_1()
                 .min_h_0()
-                .px(space::SM)
+                .flex()
+                .flex_col()
                 .text_size(text::READING)
-                .child(lines),
+                .child(scroll_area(lines, &self.transcript)),
         )
     }
 
@@ -412,13 +415,13 @@ impl SessionReader {
         }
         column.child(
             div()
-                .id("reader-notes")
                 .flex_1()
                 .min_h_0()
                 .px(space::LG)
                 .pb(space::SM)
                 .text_size(text::READING)
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
+                .id("reader-notes")
                 .child(markdown(&self.notes)),
         )
     }

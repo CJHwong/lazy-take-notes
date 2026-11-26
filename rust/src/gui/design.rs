@@ -55,7 +55,7 @@ pub mod size {
     /// The bar under the start panel's preview, with the start buttons.
     pub const START_BAR: Pixels = px(64.);
     /// A status or chip strip under a pane: the live session, the reader.
-    pub const STATUS_STRIP: Pixels = px(28.);
+    pub const STATUS_STRIP: Pixels = px(32.);
     /// The heading row over a column: Transcript, Digest, Preview.
     pub const COLUMN_HEADER: Pixels = px(36.);
     pub const SIDEBAR: Pixels = px(240.);
@@ -65,6 +65,9 @@ pub mod size {
     pub const ROW: Pixels = px(28.);
     pub const ICON: Pixels = px(16.);
     pub const ICON_SM: Pixels = px(14.);
+    /// A speaker chip: the height of a caption line, so it keeps clear of
+    /// the strip's edges like the tags beside it.
+    pub const CHIP: Pixels = px(18.);
     /// A status dot: recording, a check state.
     pub const DOT: Pixels = px(8.);
     /// One bar of a level meter.

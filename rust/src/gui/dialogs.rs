@@ -9,6 +9,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::DialogFooter;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::{TextView, TextViewState};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -77,9 +78,9 @@ pub fn markdown(
             .title(title_text(title.clone()).text_color(title_color(cx, accent)))
             .child(
                 div()
-                    .id("dialog-body")
                     .max_h(size::DIALOG_BODY)
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
+                    .id("dialog-body")
                     .child(TextView::new(&text).selectable(true)),
             )
             .footer(footer)

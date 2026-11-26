@@ -2,6 +2,7 @@
 //! check, a fix under each failure, the summary, then the buttons.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -206,12 +207,12 @@ impl Render for PreflightView {
             .flex_col()
             .child(
                 div()
-                    .id("checks")
                     .flex_1()
                     .min_h_0()
                     .px(space::XL)
                     .pb(space::LG)
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
+                    .id("checks")
                     .child(page_title(TITLE).pt(space::XL).pb(space::SM))
                     .children(rows)
                     .when_some(summary, |checks, (message, tint)| {

@@ -3,9 +3,11 @@
 
 use std::time::Duration;
 
+use crate::gui::widgets::scroll_area;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -336,7 +338,7 @@ impl BuilderView {
             .border_r(size::HAIRLINE)
             .border_color(border)
             .child(column_header("Conversation", cx))
-            .child(
+            .child(scroll_area(
                 div()
                     .id("builder-chat")
                     .flex_1()
@@ -358,7 +360,8 @@ impl BuilderView {
                     })
                     .children(rows)
                     .when(busy, |chat| chat.child(thinking)),
-            )
+                &self.chat_scroll,
+            ))
             .child(
                 action_bar(cx)
                     .child(
@@ -388,13 +391,13 @@ impl BuilderView {
             .child(column_header("Preview", cx))
             .child(
                 div()
-                    .id("builder-preview")
                     .flex_1()
                     .min_h_0()
                     .px(space::LG)
                     .pb(space::LG)
                     .text_size(text::READING)
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
+                    .id("builder-preview")
                     .child(markdown(&self.preview)),
             )
     }

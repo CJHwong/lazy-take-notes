@@ -6,8 +6,10 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -745,7 +747,7 @@ impl Render for TemplatePickerView {
                     )
                     .child(self.render_new(cx)),
             )
-            .child(
+            .child(scroll_area(
                 div()
                     .id("templates")
                     .flex_1()
@@ -756,15 +758,16 @@ impl Render for TemplatePickerView {
                     .track_scroll(&self.scroll)
                     .on_click(cx.listener(|view, _, window, cx| view.focus_part(true, window, cx)))
                     .children(rows),
-            );
+                &self.scroll,
+            ));
         let detail = match &self.checks {
             Some(checks) => checks.clone().into_any_element(),
             None => div()
-                .id("preview")
                 .size_full()
                 .px(space::XL)
                 .pb(space::LG)
-                .overflow_y_scroll()
+                .overflow_y_scrollbar()
+                .id("preview")
                 .children(self.render_heading(cx))
                 .map(|preview| match self.render_roles(cx) {
                     Some(roles) => preview.child(roles),

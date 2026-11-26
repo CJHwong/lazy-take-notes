@@ -6,6 +6,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, Textarea};
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::radio::Radio;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::tooltip::Tooltip;
@@ -773,10 +774,10 @@ impl Render for SettingsView {
             .child(
                 div().flex().flex_1().min_h_0().child(self.nav(cx)).child(
                     div()
-                        .id("settings-page")
                         .flex_1()
                         .min_w_0()
-                        .overflow_y_scroll()
+                        .overflow_y_scrollbar()
+                        .id("settings-page")
                         .child(
                             div()
                                 .max_w(size::FORM_PAGE)

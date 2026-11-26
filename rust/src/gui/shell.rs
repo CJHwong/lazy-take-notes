@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -846,10 +847,10 @@ impl Shell {
             .child(self.start_button(start, cx))
             .child(
                 div()
-                    .id("sessions")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
+                    .id("sessions")
                     .pb(space::SM)
                     .children(self.session_rows(cx)),
             )

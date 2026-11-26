@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::scroll::{ScrollableElement as _, ScrollbarHandle};
 use gpui_kit::component::text::{TextView, TextViewState, TextViewStyle};
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
@@ -295,9 +296,11 @@ pub fn transcript_line(
         .when(edge.last, |block| block.pb(space::SM).rounded_b(radius::LG))
         .when(!edge.last, |block| block.pb(space::XXS))
         .child(line.into());
+    // The pane inset lives on the row, not on the list, so the scrollbar
+    // runs in the gutter beside the blocks instead of over their edge.
     div()
         .w_full()
-        .px(space::SM)
+        .px(space::LG)
         .when(edge.first, |row| row.pt(space::MD))
         .children(header)
         .child(block)
@@ -318,9 +321,11 @@ pub fn speaker_chip(
     let hover = theme.secondary_hover;
     div()
         .id(id)
+        .flex()
         .flex_none()
+        .items_center()
+        .h(size::CHIP)
         .px(space::SM)
-        .py(space::XXS)
         .rounded_full()
         .bg(background)
         .text_color(foreground)
@@ -364,4 +369,18 @@ pub fn card(cx: &App) -> Div {
         .border(size::HAIRLINE)
         .border_color(theme.border)
         .bg(theme.foreground.opacity(tint::CARD))
+}
+
+/// A scroll area that drives its own handle (to follow new lines, or to keep
+/// a selection in view), with the scrollbar for that handle. The bar shows
+/// while the area scrolls and fades when it stops, as macOS draws it.
+pub fn scroll_area<H: ScrollbarHandle + Clone>(area: impl IntoElement, handle: &H) -> Div {
+    div()
+        .flex_1()
+        .min_h_0()
+        .relative()
+        .flex()
+        .flex_col()
+        .child(area)
+        .vertical_scrollbar(handle)
 }

@@ -7,9 +7,11 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -1037,9 +1039,10 @@ impl SessionView {
             .child(
                 div()
                     .id("transcript")
+                    .flex()
+                    .flex_col()
                     .flex_1()
                     .min_h_0()
-                    .px(space::SM)
                     .text_size(text::READING)
                     .on_click(cx.listener(|view, _, window, cx| {
                         view.selected_speaker = None;
@@ -1047,7 +1050,7 @@ impl SessionView {
                     }))
                     .map(|column| match self.lines.is_empty() {
                         true => column.child(self.transcript_empty(cx)),
-                        false => column.child(list),
+                        false => column.child(scroll_area(list, &self.transcript)),
                     }),
             )
     }
@@ -1114,13 +1117,13 @@ impl SessionView {
             )
             .child(
                 div()
-                    .id("digest")
                     .flex_1()
                     .min_h_0()
                     .px(space::LG)
                     .pb(space::SM)
                     .text_size(text::READING)
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
+                    .id("digest")
                     .map(|column| match self.has_digest() {
                         true => column.child(markdown(&self.digest)),
                         false => column.child(self.digest_empty(cx)),
