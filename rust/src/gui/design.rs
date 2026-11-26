@@ -81,6 +81,8 @@ pub mod size {
     /// The size and status columns of a model row, and its buttons.
     pub const STAT_COLUMN: Pixels = px(72.);
     pub const ACTION_COLUMN: Pixels = px(160.);
+    /// The label column of a quick action in a template's card.
+    pub const ACTION_LABEL: Pixels = px(96.);
     /// A locale code field.
     pub const LOCALE_FIELD: Pixels = px(96.);
     /// The widest chat bubble of the template builder.

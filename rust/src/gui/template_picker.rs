@@ -9,7 +9,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::TextViewState;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use tracing::warn;
@@ -25,7 +25,8 @@ use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::preflight::PreflightView;
 use crate::gui::widgets::{
-    DragArm, action_bar, markdown, page_title, pane_header, pane_title, tag,
+    DragArm, action_bar, caption, card, markdown, page_title, pane_header, pane_title,
+    section_heading, tag,
 };
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -52,6 +53,10 @@ pub struct TemplatePickerView {
     checks: Option<Entity<PreflightView>>,
     focus: FocusHandle,
     drag: DragArm,
+    /// The lines a digest waits for, so a card can say how often notes update.
+    digest_lines: usize,
+    /// The instructions are open under the role cards.
+    instructions_open: bool,
     _subscription: Subscription,
 }
 
@@ -95,6 +100,8 @@ impl TemplatePickerView {
             checks: None,
             focus: cx.focus_handle(),
             drag: DragArm::default(),
+            digest_lines: loaded.config.digest.min_lines,
+            instructions_open: false,
             _subscription: subscription,
         };
         view.rebuild("", cx);
@@ -172,9 +179,16 @@ impl TemplatePickerView {
         }
     }
 
+    /// The preview's markdown: the chosen template's instructions, which the
+    /// role cards above it explain.
     fn show_preview(&mut self, cx: &mut Context<Self>) {
         let markdown = match self.current() {
-            Some(name) => self.catalog.preview_body(&name).unwrap_or_default(),
+            Some(name) => self
+                .catalog
+                .loaded
+                .get(&name)
+                .map(|template| template.system_prompt.clone())
+                .unwrap_or_default(),
             None if self.catalog.loaded.is_empty() => NO_TEMPLATES.to_string(),
             None => "*No matching templates*".to_string(),
         };
@@ -431,6 +445,109 @@ impl TemplatePickerView {
         )
     }
 
+    /// What the template does, in the order the user meets it: the notes it
+    /// keeps during the meeting, the questions to ask any time, the words it
+    /// listens for. Then its instructions, folded.
+    fn render_roles(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let name = self.current()?;
+        let template = self.catalog.loaded.get(&name)?;
+        let muted = cx.theme().muted_foreground;
+        let role = |icon: Icon, title: &'static str, cx: &App| {
+            card(cx).gap(space::SM).p(space::MD).child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(icon.size(size::ICON).text_color(cx.theme().primary))
+                    .child(section_heading(title)),
+            )
+        };
+        let during = role(icons::extra("sparkles"), "During the meeting", cx).child(
+            div().text_color(muted).child(format!(
+                "The Notes panel follows the instructions below and updates about every {} \
+                 lines while people talk. When the session ends, one last pass writes the \
+                 full notes.",
+                self.digest_lines
+            )),
+        );
+        let asks = template.quick_actions.iter().map(|action| {
+            div()
+                .flex()
+                .gap(space::MD)
+                .child(
+                    div()
+                        .flex_none()
+                        .w(size::ACTION_LABEL)
+                        .font_weight(text::STRONG)
+                        .child(action.label.clone()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .text_color(muted)
+                        .child(action.description.clone()),
+                )
+        });
+        let ask = role(icons::extra("zap"), "Ask any time", cx)
+            .when(template.quick_actions.is_empty(), |card| {
+                card.child(
+                    div()
+                        .text_color(muted)
+                        .child("This template has no quick actions."),
+                )
+            })
+            .when(!template.quick_actions.is_empty(), |card| {
+                card.child(
+                    div()
+                        .text_color(muted)
+                        .child("Quick Actions in the notes header answer from the meeting so far."),
+                )
+                .children(asks)
+            });
+        let hints = template.recognition_hints.clone();
+        let listens = (!hints.is_empty()).then(|| {
+            role(Icon::new(IconName::Mic), "Listens for", cx).child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(space::XS)
+                    .children(hints.into_iter().map(|hint| tag(hint, cx))),
+            )
+        });
+        let open = self.instructions_open;
+        let fold = div()
+            .id("instructions")
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .pt(space::SM)
+            .cursor_pointer()
+            .child(
+                Icon::new(match open {
+                    true => IconName::ChevronDown,
+                    false => IconName::ChevronRight,
+                })
+                .size(size::ICON_SM),
+            )
+            .child(section_heading("Instructions"))
+            .child(caption("What the AI is told to do", cx))
+            .on_click(cx.listener(|view, _, _, cx| {
+                view.instructions_open = !view.instructions_open;
+                cx.notify();
+            }));
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::MD)
+                .child(during)
+                .child(ask)
+                .children(listens)
+                .child(fold)
+                .when(open, |roles| roles.child(markdown(&self.preview))),
+        )
+    }
+
     /// New, Edit, Edit with AI and Delete, under the list.
     fn render_tools(&self, cx: &mut Context<Self>) -> Div {
         let current = self.current();
@@ -599,7 +716,10 @@ impl Render for TemplatePickerView {
                 .pb(space::LG)
                 .overflow_y_scroll()
                 .children(self.render_heading(cx))
-                .child(markdown(&self.preview))
+                .map(|preview| match self.render_roles(cx) {
+                    Some(roles) => preview.child(roles),
+                    None => preview.child(markdown(&self.preview)),
+                })
                 .into_any_element(),
         };
         let header = self

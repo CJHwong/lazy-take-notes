@@ -19,8 +19,10 @@ use crate::app::session::status_line::{LEVEL_TOP, level_step};
 use crate::app::settings::rows::{RowAction, row_actions, row_detail, row_status, status_color};
 use crate::app::settings::{Meter, SPEAKER, open_privacy};
 use crate::domain::model_asset::AssetStatus;
-use crate::gui::design::{control, radius, size, space, tint};
-use crate::gui::widgets::{caption, pane_header, pane_title, section_heading, source_row, tool};
+use crate::gui::design::{control, size, space, tint};
+use crate::gui::widgets::{
+    caption, card, pane_header, pane_title, section_heading, source_row, tool,
+};
 
 /// A theme color by the name the runtime gives it.
 fn tint_of(name: Option<&str>, cx: &App) -> Hsla {
@@ -89,15 +91,8 @@ fn buttons() -> Div {
 
 /// A titled card of rows with inset dividers between them.
 fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let theme = cx.theme();
-    let line = theme.border;
-    let mut card = div()
-        .flex()
-        .flex_col()
-        .rounded(radius::LG)
-        .border(size::HAIRLINE)
-        .border_color(line)
-        .bg(theme.foreground.opacity(tint::CARD));
+    let line = cx.theme().border;
+    let mut card = card(cx);
     for (index, item) in rows.into_iter().enumerate() {
         if index > 0 {
             card = card.child(div().mx(space::MD).h(size::HAIRLINE).bg(line));

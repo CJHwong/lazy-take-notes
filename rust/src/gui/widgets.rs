@@ -346,3 +346,16 @@ pub fn source_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Statefu
         .when(selected, |row| row.bg(selected_bg))
         .when(!selected, |row| row.hover(|row| row.bg(hover)))
 }
+
+/// A rounded card on the window background: a Settings section, a role of
+/// a template.
+pub fn card(cx: &App) -> Div {
+    let theme = cx.theme();
+    div()
+        .flex()
+        .flex_col()
+        .rounded(radius::LG)
+        .border(size::HAIRLINE)
+        .border_color(theme.border)
+        .bg(theme.foreground.opacity(tint::CARD))
+}
