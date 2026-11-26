@@ -118,3 +118,17 @@ fn a_missing_helper_names_the_build_script() {
         "CoreAudioTapSource requires 16000 Hz mono output"
     );
 }
+
+#[test]
+fn a_link_to_the_executable_finds_the_helper_beside_the_real_one() {
+    let root = tempfile::tempdir().unwrap();
+    let app = root.path().join("App.app/Contents/MacOS");
+    let bin = root.path().join("bin");
+    std::fs::create_dir_all(&app).unwrap();
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::write(app.join("lazy-take-notes"), b"").unwrap();
+    std::os::unix::fs::symlink(app.join("lazy-take-notes"), bin.join("lazy-take-notes")).unwrap();
+    let helper = helper_beside(&bin.join("lazy-take-notes")).unwrap();
+    let expected = std::fs::canonicalize(&app).unwrap().join("coreaudio-tap");
+    assert_eq!(helper, expected);
+}
