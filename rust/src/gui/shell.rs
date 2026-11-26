@@ -40,7 +40,8 @@ use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
 use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
 use crate::gui::widgets::{
-    DragArm, brand, caption, empty_state, mascot, pane_header, pane_title, source_row, title_strip,
+    DragArm, app_icon, brand, caption, empty_state, pane_header, pane_title, source_row,
+    title_strip,
 };
 
 const START_ERROR_TIMEOUT: Duration = Duration::from_secs(12);
@@ -886,7 +887,7 @@ impl Shell {
         )
     }
 
-    /// The mascot, and the way to start.
+    /// The app icon, and the way to start.
     fn empty_state(&self, cx: &Context<Self>) -> AnyElement {
         div()
             .size_full()
@@ -895,7 +896,7 @@ impl Shell {
             .items_center()
             .justify_center()
             .gap(space::LG)
-            .child(mascot(size::MASCOT_PIXEL))
+            .child(app_icon(size::LOGO))
             .child(brand(text::LARGE_TITLE))
             .child(
                 div().pt(space::SM).child(

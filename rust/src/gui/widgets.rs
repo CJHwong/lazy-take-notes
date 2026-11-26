@@ -59,18 +59,9 @@ pub fn brand(size: Pixels) -> Div {
         .child(div().text_color(hsla(logo::TEAL)).child("take-notes"))
 }
 
-/// The mascot, one square per pixel.
-pub fn mascot(pixel: Pixels) -> Div {
-    let rows = logo::PIXELS.iter().map(move |row| {
-        div().flex().children(row.bytes().map(move |code| {
-            let cell = div().w(pixel).h(pixel);
-            match logo::pixel(code) {
-                Some(rgb) => cell.bg(hsla(rgb)),
-                None => cell,
-            }
-        }))
-    });
-    div().flex().flex_col().children(rows)
+/// The app icon at `edge` points, from the repo's high-resolution PNG.
+pub fn app_icon(edge: Pixels) -> Img {
+    img(crate::gui::icons::APP_ICON).size(edge)
 }
 
 /// The title bar row of a pane: the pane inset, a title on the left, room for

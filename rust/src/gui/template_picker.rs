@@ -25,8 +25,8 @@ use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::preflight::PreflightView;
 use crate::gui::widgets::{
-    DragArm, caption, card, markdown, page_title, pane_header, pane_title, section_heading, tag,
-    tool,
+    DragArm, action_bar, caption, card, markdown, page_title, pane_header, pane_title,
+    section_heading, tag, tool,
 };
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -593,35 +593,8 @@ impl TemplatePickerView {
             )
     }
 
-    /// The flow's title bar: the title, then Cancel, Transcribe File and
-    /// Record at the right end. While the checks run, both starts wait.
+    /// The flow's title bar: the title, then Cancel.
     fn render_header(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let checking = self
-            .checks
-            .as_ref()
-            .is_some_and(|checks| checks.read(cx).running());
-        let idle = self.current().is_none() || checking;
-        let transcribe = Button::new("start-transcribe")
-            .outline()
-            .with_size(control::CONTROL)
-            .icon(IconName::File)
-            .label("Import Audio…")
-            .tooltip("Make notes from an audio file with this note type")
-            .disabled(idle)
-            .on_click(cx.listener(|view, _, _, cx| view.transcribe(cx)));
-        let record = Button::new("start-record")
-            .danger()
-            .with_size(control::CONTROL)
-            .icon(IconName::Mic)
-            .label(if checking {
-                "Checking…"
-            } else {
-                "Start Recording"
-            })
-            .tooltip("Record a meeting with this note type")
-            .loading(checking)
-            .disabled(idle)
-            .on_click(cx.listener(|view, _, _, cx| view.pick(cx)));
         pane_header("picker-title", &self.drag, cx)
             .child(pane_title("New Session"))
             .child(div().flex_1())
@@ -632,8 +605,66 @@ impl TemplatePickerView {
                     .label("Cancel")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Cancelled))),
             )
-            .child(transcribe)
-            .child(record)
+    }
+
+    /// The bar under the preview that starts the session: the note type it
+    /// starts with, then Import Audio and Start Recording at full size. It
+    /// sits under what the user just read, where the eye ends. While the
+    /// checks run, both starts wait.
+    fn render_start_bar(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let name = self.current()?;
+        let label = self
+            .catalog
+            .loaded
+            .get(&name)
+            .map_or(name.clone(), |template| template.metadata.name.clone());
+        let checking = self
+            .checks
+            .as_ref()
+            .is_some_and(|checks| checks.read(cx).running());
+        let muted = cx.theme().muted_foreground;
+        let import = Button::new("start-transcribe")
+            .outline()
+            .with_size(control::HERO)
+            .icon(IconName::File)
+            .label("Import Audio…")
+            .tooltip("Make notes from an audio file with this note type")
+            .disabled(checking)
+            .on_click(cx.listener(|view, _, _, cx| view.transcribe(cx)));
+        let record = Button::new("start-record")
+            .danger()
+            .with_size(control::HERO)
+            .icon(IconName::Mic)
+            .label(if checking {
+                "Checking…"
+            } else {
+                "Start Recording"
+            })
+            .tooltip("Record a meeting with this note type")
+            .loading(checking)
+            .disabled(checking)
+            .on_click(cx.listener(|view, _, _, cx| view.pick(cx)));
+        Some(
+            action_bar(cx)
+                .h(size::START_BAR)
+                .px(space::XL)
+                .gap(space::MD)
+                .bg(cx.theme().secondary)
+                .child(
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(space::XS)
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(div().text_color(muted).child("Start with"))
+                        .child(div().font_weight(text::STRONG).child(label)),
+                )
+                .child(import)
+                .child(record),
+        )
     }
 }
 
@@ -729,6 +760,10 @@ impl Render for TemplatePickerView {
                 .into_any_element(),
         };
         let header = self.starts.then(|| self.render_header(cx));
+        let start_bar = match self.starts {
+            true => self.render_start_bar(cx),
+            false => None,
+        };
         div()
             .key_context("TemplatePicker")
             .track_focus(&self.focus)
@@ -738,12 +773,16 @@ impl Render for TemplatePickerView {
             .flex_col()
             .children(header)
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(list)
-                    .child(div().flex_1().min_w_0().h_full().child(detail)),
+                div().flex().flex_1().min_h_0().child(list).child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .h_full()
+                        .child(div().flex_1().min_h_0().child(detail))
+                        .children(start_bar),
+                ),
             )
     }
 }

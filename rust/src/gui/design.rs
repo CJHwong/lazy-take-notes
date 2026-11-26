@@ -52,6 +52,8 @@ pub mod size {
     pub const TRAFFIC_LIGHTS_Y: Pixels = px(20.);
     /// A bar of buttons under a pane: the start panel, Settings, the builder.
     pub const ACTION_BAR: Pixels = px(48.);
+    /// The bar under the start panel's preview, with the start buttons.
+    pub const START_BAR: Pixels = px(64.);
     /// A status or chip strip under a pane: the live session, the reader.
     pub const STATUS_STRIP: Pixels = px(28.);
     /// The heading row over a column: Transcript, Digest, Preview.
@@ -70,8 +72,8 @@ pub mod size {
     pub const METER_HEIGHT: Pixels = px(12.);
     /// A hairline: borders and dividers.
     pub const HAIRLINE: Pixels = px(1.);
-    /// The mascot's pixel on the empty window.
-    pub const MASCOT_PIXEL: Pixels = px(8.);
+    /// The app icon on the empty window.
+    pub const LOGO: Pixels = px(128.);
     /// The Settings page list, a form row, the control column of a form,
     /// and the widest a Settings page grows.
     pub const SETTINGS_NAV: Pixels = px(200.);

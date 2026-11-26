@@ -22,8 +22,16 @@ gpui_kit::assets::icon_assets!(
 /// The kit's assets, with the toolbar icons first.
 pub struct AppAssets;
 
+/// The app icon, drawn on the empty window.
+pub const APP_ICON: &str = "brand/icon.png";
+
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path == APP_ICON {
+            return Ok(Some(Cow::Borrowed(include_bytes!(
+                "../../../assets/icon.png"
+            ))));
+        }
         match ToolbarIcons.load(path)? {
             Some(bytes) => Ok(Some(bytes)),
             None => assets::Assets.load(path),
