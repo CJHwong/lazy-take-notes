@@ -177,6 +177,77 @@ const BLUE: i32 = 4;
 /// destructive confirm. The kit draws a danger button as a pale tint; a
 /// record button must be solid.
 const RED: (u32, u32) = (0xFF3B30, 0xFF453A);
+/// The macOS dark palette, as AppKit resolves it under `darkAqua`. The kit's
+/// own dark theme is near black with grey text; a Mac window is not.
+mod dark {
+    /// `windowBackgroundColor`, and the content of a pane.
+    pub const WINDOW: u32 = 0x1E1E1E;
+    /// `underPageBackgroundColor`: the sidebar, menus and dialogs, which sit
+    /// a step above the content.
+    pub const RAISED: u32 = 0x282828;
+    /// White over the window, as the system labels, separators and fills
+    /// take it.
+    pub const LABEL: f32 = 0.85;
+    pub const SECONDARY_LABEL: f32 = 0.55;
+    pub const SEPARATOR: f32 = 0.12;
+    /// The border of a text field: a step over a separator, so it shows.
+    pub const FIELD: f32 = 0.18;
+    /// `quaternarySystemFill` to `systemFill`, then a pressed fill.
+    pub const FILL_FAINT: f32 = 0.05;
+    pub const FILL: f32 = 0.08;
+    pub const FILL_HOVER: f32 = 0.10;
+    pub const FILL_PRESSED: f32 = 0.14;
+    pub const SCROLL_THUMB: f32 = 0.30;
+}
+
+/// Paint the kit's surfaces, text and lines with the macOS dark palette.
+fn apply_dark(theme: &mut Theme) {
+    let window: Hsla = rgb(dark::WINDOW).into();
+    let raised: Hsla = rgb(dark::RAISED).into();
+    let line = white().opacity(dark::SEPARATOR);
+    let label = white().opacity(dark::LABEL);
+    let secondary_label = white().opacity(dark::SECONDARY_LABEL);
+    let fill = white().opacity(dark::FILL);
+    let hover = white().opacity(dark::FILL_HOVER);
+    let pressed = white().opacity(dark::FILL_PRESSED);
+    theme.background = window;
+    theme.foreground = label;
+    theme.muted = hover;
+    theme.muted_foreground = secondary_label;
+    theme.border = line;
+    theme.input = white().opacity(dark::FIELD);
+    theme.window_border = line;
+    theme.title_bar = window;
+    theme.title_bar_border = line;
+    theme.status_bar = window;
+    theme.status_bar_border = line;
+    theme.sidebar = raised;
+    theme.sidebar_border = line;
+    theme.sidebar_foreground = label;
+    theme.sidebar_accent = hover;
+    theme.sidebar_accent_foreground = label;
+    theme.popover = raised;
+    theme.popover_foreground = label;
+    theme.secondary = fill;
+    theme.secondary_hover = hover;
+    theme.secondary_active = pressed;
+    theme.secondary_foreground = label;
+    theme.button = fill;
+    theme.button_hover = hover;
+    theme.button_active = pressed;
+    theme.button_foreground = label;
+    theme.accent = hover;
+    theme.accent_foreground = label;
+    theme.colors.list = window;
+    theme.list_even = window;
+    theme.list_head = window;
+    theme.list_hover = white().opacity(dark::FILL_FAINT);
+    theme.group_box = white().opacity(dark::FILL_FAINT);
+    theme.group_box_foreground = label;
+    theme.scrollbar_thumb = white().opacity(dark::SCROLL_THUMB);
+    theme.scrollbar_thumb_hover = white().opacity(dark::SECONDARY_LABEL);
+}
+
 /// Yellow is the one accent too light for white text.
 const YELLOW: i32 = 2;
 
@@ -210,6 +281,9 @@ pub fn apply(theme: &mut Theme, dark: bool) {
     let on_accent: Hsla = if setting == YELLOW { black() } else { white() };
     let hover = color.opacity(0.9);
     let active = color.opacity(0.8);
+    if dark {
+        apply_dark(theme);
+    }
     theme.font_size = text::BODY;
     theme.radius = radius::MD;
     theme.radius_lg = radius::LG;
