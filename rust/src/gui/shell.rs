@@ -35,7 +35,7 @@ use crate::gui::builder::{BuilderEvent, BuilderView};
 use crate::gui::dialogs;
 use crate::gui::preflight::{PreflightEvent, PreflightView};
 use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
-use crate::gui::settings::{SettingsEvent, SettingsView};
+use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
 use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
 use crate::gui::widgets::{DragArm, brand, mascot, title_strip};
@@ -169,10 +169,16 @@ impl Shell {
     }
 
     /// Run `next` once the pane may change. An unsaved template on the
-    /// builder page asks first, as its Close button does.
+    /// builder page, or unsaved settings, ask first, as their own Close does.
     fn leave_page_then(&mut self, next: OnClick, window: &mut Window, cx: &mut Context<Self>) {
         let builder = match &self.detail {
             Detail::Builder(builder) if builder.read(cx).unsaved() => builder.clone(),
+            Detail::Settings(settings) if settings.read(cx).has_unsaved_changes(cx) => {
+                let shell = cx.entity().downgrade();
+                return ask_discard(window, cx, move |window, cx| {
+                    let _ = shell.update(cx, |shell, cx| next(shell, window, cx));
+                });
+            }
             _ => return next(self, window, cx),
         };
         let shell = cx.entity().downgrade();
@@ -588,8 +594,12 @@ impl Shell {
         };
         let settings = cx.new(|cx| SettingsView::new(paths, None, window, cx));
         let subscription = cx.subscribe_in(&settings, window, |shell, _, event, _, cx| {
-            let SettingsEvent::Closed = event;
-            shell.show_detail(Detail::Empty, None, cx);
+            // A save can move the output folder, so the session list reads it again.
+            shell.refresh_sessions();
+            match event {
+                SettingsEvent::Closed => shell.show_detail(Detail::Empty, None, cx),
+                SettingsEvent::Saved => cx.notify(),
+            }
         });
         self.show_detail(Detail::Settings(settings), Some(subscription), cx);
     }
@@ -715,6 +725,10 @@ impl Shell {
                     }),
             )
             .on_click(cx.listener(move |shell, _, window, cx| {
+                // A click on the open page's own row keeps it as it is.
+                if selected {
+                    return on_click(shell, window, cx);
+                }
                 shell.leave_page_then(on_click.clone(), window, cx)
             }))
     }

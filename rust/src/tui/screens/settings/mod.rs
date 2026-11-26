@@ -602,7 +602,11 @@ pub struct SettingsClosed {
 impl Screen for SettingsScreen {
     fn mounted(&mut self, ctx: &mut Ctx) -> Action {
         ctx.set_theme(self.runtime.theme());
-        self.runtime.mounted(&mut Fields(&mut self.pages), ctx);
+        self.runtime.mounted(
+            &mut Fields(&mut self.pages),
+            ctx,
+            "Press [e] to fix the file.",
+        );
         Action::None
     }
 

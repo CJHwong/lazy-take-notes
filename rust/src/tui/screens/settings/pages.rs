@@ -8,6 +8,7 @@ use super::preview::Preview;
 use crate::app::settings::form::{
     DIARIZATION_DEVICES, LLM_PROVIDERS, OpeningValues, THEME_ORDER, TRANSCRIPTION_PROVIDERS,
 };
+use crate::app::settings::rows::select_options;
 use crate::domain::model_asset::ModelAsset;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::select::Select;
@@ -57,11 +58,10 @@ fn switch(id: &'static str, label: &str, on: bool) -> Item {
 
 /// `SelectRow`: the value joins the options when it is not one of them.
 fn select_row(id: &'static str, label: &str, options: &[&str], value: &str, help: &str) -> Item {
-    let mut names: Vec<String> = options.iter().map(|name| name.to_string()).collect();
-    if !names.iter().any(|name| name == value) {
-        names.push(value.into());
-    }
-    let pairs = names.into_iter().map(|name| (name.clone(), name)).collect();
+    let pairs = select_options(options, value)
+        .into_iter()
+        .map(|name| (name.clone(), name))
+        .collect();
     Item::new(
         id,
         Kind::Select {

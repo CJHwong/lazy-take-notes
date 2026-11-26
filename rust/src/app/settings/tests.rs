@@ -153,7 +153,7 @@ fn save_writes_the_file_and_takes_the_form_as_saved() {
     let mut runtime = settings(root.path());
     let mut form = valid_form(root.path());
     let mut front = Front::new();
-    runtime.mounted(&mut form, &mut front);
+    runtime.mounted(&mut form, &mut front, "Press [e] to fix the file.");
     form.fields.insert("cfg-digest-model", "llama3".into());
     assert!(runtime.has_unsaved_changes(&mut form));
     assert_eq!(runtime.save(&mut form, &mut front), Some(false));

@@ -7,6 +7,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use crate::app::settings::rows::{
+    DISCARD_BODY, DISCARD_CANCEL, DISCARD_CONFIRM, DISCARD_TITLE, remove_question,
+};
 use crate::domain::model_asset::RemovalEstimate;
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
@@ -43,53 +46,25 @@ pub struct Dialog {
     focus: usize,
 }
 
-fn megabytes(size: u64) -> String {
-    format!("{:.0} MB", size as f64 / (1024.0 * 1024.0))
-}
-
-fn home_relative(path: &str) -> String {
-    let Some(home) = dirs::home_dir() else {
-        return path.to_string();
-    };
-    let home = home.to_string_lossy().to_string();
-    if path == home || path.starts_with(&format!("{home}/")) {
-        return format!("~{}", &path[home.len()..]);
-    }
-    path.to_string()
-}
-
 impl Dialog {
     pub fn discard() -> Self {
         Self {
-            title: "Unsaved changes".into(),
-            body: "Your changes to Settings have not been saved. Leave anyway?".into(),
+            title: DISCARD_TITLE.into(),
+            body: DISCARD_BODY.into(),
             checkbox: None,
             checked: false,
-            cancel: "Keep editing",
-            confirm: "Discard and exit",
+            cancel: DISCARD_CANCEL,
+            confirm: DISCARD_CONFIRM,
             focus: 1,
         }
     }
 
     pub fn remove(label: &str, estimate: &RemovalEstimate) -> Self {
-        let mut body = format!("This frees {}.", megabytes(estimate.frees));
-        let checkbox = estimate.legacy_path.as_ref().map(|legacy| {
-            let extra = estimate.frees_with_legacy.saturating_sub(estimate.frees);
-            body += &format!(
-                " An older copy in {} uses {} more.",
-                home_relative(legacy),
-                megabytes(extra)
-            );
-            format!(
-                "Also delete it (frees {} in total)",
-                megabytes(estimate.frees_with_legacy)
-            )
-        });
-        body += " It downloads again if you need it.";
+        let question = remove_question(label, estimate);
         Self {
-            title: format!("Remove {label}?"),
-            body,
-            checkbox,
+            title: question.title,
+            body: question.body,
+            checkbox: question.checkbox,
             checked: false,
             cancel: "Cancel",
             confirm: "Remove",

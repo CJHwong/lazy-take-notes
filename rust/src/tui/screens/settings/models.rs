@@ -12,35 +12,17 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 
 use super::form::{Custom, FormEvent, spans_at};
-use crate::adapters::model_catalog::{asset_for_model, expand_model_alias};
-use crate::app::download_progress::{describe, megabytes};
+use crate::app::download_progress::megabytes;
 use crate::app::settings::form::model_uri;
+use crate::app::settings::rows::{
+    language_choices, row_actions, row_detail, row_status, status_color,
+};
 use crate::app::settings::{ModelRow, SpeakerStatus};
 use crate::domain::model_asset::{AssetStatus, ModelAsset};
 use crate::tui::text::{str_width, truncate};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input::Input;
 use crate::tui::widgets::select::{Select, SelectKey, compact_button_width, draw_compact_button};
-
-fn status_text(status: AssetStatus) -> &'static str {
-    match status {
-        AssetStatus::Ready => "Ready",
-        AssetStatus::Missing => "Missing",
-        AssetStatus::Downloading | AssetStatus::Busy => "Downloading",
-        AssetStatus::Corrupt => "Damaged",
-        AssetStatus::Unsupported => "Unsupported",
-    }
-}
-
-fn status_color(status: AssetStatus) -> Option<&'static str> {
-    match status {
-        AssetStatus::Ready => Some("success"),
-        AssetStatus::Missing => Some("warning"),
-        AssetStatus::Corrupt => Some("error"),
-        AssetStatus::Downloading | AssetStatus::Busy => Some("accent"),
-        AssetStatus::Unsupported => None,
-    }
-}
 
 fn text_style(theme: &Theme, color: Option<&str>) -> Style {
     Style::default()
@@ -172,36 +154,15 @@ impl ModelChooser {
 
     /// The buttons a row shows, by its state.
     fn actions(&self, asset: &ModelAsset) -> Vec<(&'static str, &'static str)> {
-        let status = self.states[asset.id].status;
-        let mut actions = Vec::new();
-        if matches!(
-            status,
-            AssetStatus::Missing | AssetStatus::Corrupt | AssetStatus::Busy
-        ) {
-            actions.push(("download", "Download"));
-        }
-        if matches!(status, AssetStatus::Ready | AssetStatus::Corrupt) {
-            actions.push(("remove", "Remove"));
-        }
-        if status == AssetStatus::Downloading {
-            actions.push(("cancel", "Cancel"));
-        }
-        actions
+        row_actions(self.states[asset.id].status)
+            .into_iter()
+            .map(|action| (action.id(), action.label()))
+            .collect()
     }
 
     /// The detail under a row: the download's progress, or why it waits.
     fn detail(&self, asset: &ModelAsset) -> String {
-        let row = &self.states[asset.id];
-        if row.paused {
-            format!(
-                "{} kept. Download continues from there.",
-                megabytes(row.kept)
-            )
-        } else if row.status == AssetStatus::Busy {
-            "In another window. Press Download to follow it.".into()
-        } else {
-            row.progress.as_ref().map(describe).unwrap_or_default()
-        }
+        row_detail(&self.states[asset.id])
     }
 
     /// Rows a model takes: its line, and a detail line when it has one.
@@ -282,10 +243,7 @@ impl Custom for ModelChooser {
                 // The row takes the focus; Enter or a click marks it.
                 label_style = label_style.add_modifier(Modifier::REVERSED);
             }
-            let status = match row.paused {
-                true => "Paused",
-                false => status_text(row.status),
-            };
+            let status = row_status(row);
             let line = vec![
                 cell(mark, 2, text_style(theme, Some("accent"))),
                 cell(asset.label, 30, label_style),
@@ -407,24 +365,7 @@ impl LanguageEditor {
     }
 
     fn make_row(&self, locale: &str, uri: &str) -> LanguageRow {
-        let uri = match uri.is_empty() {
-            true => String::new(),
-            false => asset_for_model(&expand_model_alias(uri), &self.assets)
-                .map(model_uri)
-                .unwrap_or_else(|| uri.to_string()),
-        };
-        let mut choices: Vec<(String, String)> = self
-            .assets
-            .iter()
-            .map(|asset| (asset.label.to_string(), model_uri(asset)))
-            .collect();
-        if !uri.is_empty() && !choices.iter().any(|(_, value)| *value == uri) {
-            choices.push((uri.clone(), uri.clone()));
-        }
-        let value = match uri.is_empty() {
-            true => choices.first().map(|(_, v)| v.clone()).unwrap_or_default(),
-            false => uri,
-        };
+        let (choices, value) = language_choices(&self.assets, uri);
         let mut input = Input::new("zh");
         input.compact = Some(("surface-lighten-1", "surface-lighten-2"));
         input.set_value(locale);

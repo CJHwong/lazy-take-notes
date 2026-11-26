@@ -5,6 +5,7 @@
 
 pub mod form;
 pub mod probe;
+pub mod rows;
 
 #[cfg(test)]
 mod tests;
@@ -242,12 +243,13 @@ impl SettingsRuntime {
     }
 
     /// The form opened: take its state, report a broken file, read the model cache.
-    pub fn mounted(&mut self, form: &mut dyn FormValues, io: &mut dyn SettingsIo) {
+    /// `fix_hint` tells the user how this front end opens the file.
+    pub fn mounted(&mut self, form: &mut dyn FormValues, io: &mut dyn SettingsIo, fix_hint: &str) {
         self.mark_saved_state(form);
         if !self.loaded.error.is_empty() {
             io.error(
                 format!(
-                    "config.yaml cannot be read ({}). Showing defaults. Press [e] to fix the file.",
+                    "config.yaml cannot be read ({}). Showing defaults. {fix_hint}",
                     self.loaded.error
                 ),
                 Duration::from_secs(20),
