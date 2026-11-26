@@ -5,12 +5,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::text::{TextView, TextViewState};
-use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, IconName, Sizable as _};
-use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::input::{InputEvent, InputState};
+use gpui_kit::component::text::TextViewState;
+use gpui_kit::component::{ActiveTheme, IconName};
 use gpui_kit::*;
 use tracing::error;
 
@@ -19,8 +17,13 @@ use crate::app::saved_session::{self, SavedSession, split_line, spoken_by};
 use crate::app::session::{Severity, format_spoken_time};
 use crate::app::session_list::title;
 use crate::gui::bridge::notify;
+use crate::gui::design::{size, space, text, tint};
 use crate::gui::dialogs;
-use crate::gui::widgets::{DragArm, title_strip};
+use crate::gui::icons;
+use crate::gui::widgets::{
+    DragArm, column_header, empty_state, inline_tool, markdown, pane_header, speaker_chip,
+    status_strip, title_field, tool, transcript_line,
+};
 use crate::gui::{CopyDigest, CopyTranscript, RenameSession, SESSION_CONTEXT, ShowInFinder};
 
 const COPY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -64,7 +67,11 @@ impl SessionReader {
                 .default_value(shown_title(&dir))
         });
         let subscriptions = vec![cx.subscribe_in(&title, window, Self::on_title)];
-        let transcript = ListState::new(session.transcript.len(), ListAlignment::Top, px(400.));
+        let transcript = ListState::new(
+            session.transcript.len(),
+            ListAlignment::Top,
+            size::LIST_OVERDRAW,
+        );
         let focus_handle = cx.focus_handle();
         // The toasts need the window, and the keys start on the view.
         cx.defer_in(window, move |view, window, cx| {
@@ -243,108 +250,58 @@ fn shown_title(dir: &Path) -> String {
     title(&name)
 }
 
-/// A small heading over a column, as the live pane's.
-fn heading(text: &'static str, cx: &App) -> Div {
-    div()
-        .flex_none()
-        .px_4()
-        .pt_3()
-        .pb_1()
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(cx.theme().muted_foreground)
-        .child(text)
-}
-
-/// A centered, muted line where a column has nothing to show.
-fn empty_state(text: &'static str, cx: &App) -> Div {
-    div()
-        .flex_1()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .items_center()
-        .justify_center()
-        .px_4()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text)
-}
-
 impl SessionReader {
     fn render_title_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover = cx.theme().foreground.opacity(0.06);
-        title_strip("reader-title", &self.drag)
-            .gap_2()
-            .px_4()
-            .child(
-                // A press in the field selects text; it must not move the window.
-                div()
-                    .id("reader-title-field")
-                    .w(px(360.))
-                    .min_w(px(120.))
-                    .flex_shrink(1.)
-                    .px_1()
-                    .rounded(px(6.))
-                    .hover(|field| field.bg(hover))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .tooltip(|window, cx| Tooltip::new("Rename").build(window, cx))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(Input::new(&self.title).appearance(false)),
-            )
+        pane_header("reader-title", &self.drag, cx)
+            .child(title_field("reader-title-field", &self.title, cx))
             .child(div().flex_1())
             .child(
-                Button::new("reader-finder")
-                    .ghost()
-                    .small()
-                    .icon(IconName::FolderOpen)
-                    .label("Show in Finder")
+                tool("reader-finder", IconName::FolderOpen, "Show in Finder")
                     .on_click(cx.listener(|view, _, _, cx| view.show_in_finder(cx))),
             )
     }
 
-    fn heading_with_copy(&self, text: &'static str, copied: Copied, cx: &mut Context<Self>) -> Div {
-        heading(text, cx)
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                Button::new(text)
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Copy)
-                    .label("Copy")
-                    .on_click(
-                        cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)),
-                    ),
-            )
+    fn copy_button(&self, id: &'static str, copied: Copied, cx: &mut Context<Self>) -> Button {
+        inline_tool(id, IconName::Copy, "Copy")
+            .on_click(cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)))
     }
 
     fn render_transcript(&self, cx: &mut Context<Self>) -> Div {
         let column = div()
             .flex()
             .flex_col()
-            .flex_1()
+            .flex_none()
+            .w(relative(0.4))
             .min_w_0()
-            .child(self.heading_with_copy("Transcript", Copied::Transcript, cx));
+            .child(column_header("Transcript", cx).child(self.copy_button(
+                "reader-copy-transcript",
+                Copied::Transcript,
+                cx,
+            )));
         if self.session.transcript.is_empty() {
-            let empty = match self.session.audio_only {
-                true => empty_state("No transcript. The audio is saved in this folder.", cx).child(
-                    Button::new("reader-audio")
-                        .small()
-                        .icon(IconName::FolderOpen)
-                        .label("Show in Finder")
-                        .on_click(cx.listener(|view, _, _, cx| view.show_in_finder(cx))),
-                ),
-                false => empty_state("No transcript.", cx),
+            let line = match self.session.audio_only {
+                true => "No transcript. The audio is saved in this folder.",
+                false => "No transcript.",
             };
-            return column.child(empty);
+            return column.child(empty_state(IconName::FileText, line, cx));
         }
         let highlight = self
             .hovered_speaker
             .map(|speaker| self.speaker_label(speaker));
-        let marked = cx.theme().primary.opacity(0.12);
+        let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
+        let labels: Vec<String> = self
+            .session
+            .speakers
+            .as_ref()
+            .map(|saved| {
+                saved
+                    .chips()
+                    .into_iter()
+                    .map(|(speaker, _, _)| saved.label(speaker))
+                    .collect()
+            })
+            .unwrap_or_default();
         let lines = list(
             self.transcript.clone(),
             cx.processor(move |view: &mut Self, index: usize, _, _| {
@@ -354,36 +311,38 @@ impl SessionReader {
                 let mine = highlight
                     .as_deref()
                     .is_some_and(|label| spoken_by(line, label));
-                let (stamp, text) = match split_line(line) {
+                let (stamp, rest) = match split_line(line) {
                     (Some(stamp), rest) => (stamp.trim_matches(['[', ']']), rest.trim_start()),
                     (None, _) => ("", line.as_str()),
                 };
-                div()
-                    .w_full()
-                    .flex()
-                    .gap_3()
-                    .px_2()
-                    .py(px(3.))
-                    .rounded(px(4.))
-                    .when(mine, |row| row.bg(marked))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .pt(px(1.))
-                            .text_color(muted)
-                            .child(stamp.to_string()),
-                    )
-                    .child(div().flex_1().min_w_0().child(text.to_string()))
-                    .into_any_element()
+                let (speaker, words) = split_speaker(rest, &labels);
+                let before = index
+                    .checked_sub(1)
+                    .and_then(|before| view.session.transcript.get(before))
+                    .map(|before| split_speaker(split_line(before).1.trim_start(), &labels).0);
+                let turn = before.is_none_or(|before| before != speaker);
+                transcript_line(
+                    stamp.to_string(),
+                    speaker.filter(|_| turn).map(|name| name.to_string().into()),
+                    words.to_string(),
+                    mine.then_some(marked),
+                    muted,
+                )
+                .into_any_element()
             }),
         )
         .size_full();
-        column
-            .child(div().flex_1().min_h_0().px_2().child(lines))
-            .children(self.render_speakers(cx))
+        column.child(
+            div()
+                .flex_1()
+                .min_h_0()
+                .px(space::SM)
+                .text_size(text::READING)
+                .child(lines),
+        )
     }
 
+    /// The speakers, in the strip under both columns, as in a live session.
     fn render_speakers(&self, cx: &mut Context<Self>) -> Option<Div> {
         let chips = self
             .session
@@ -394,29 +353,13 @@ impl SessionReader {
         if chips.is_empty() {
             return None;
         }
-        let theme = cx.theme();
-        let (plain, plain_text, hover) = (
-            theme.secondary,
-            theme.secondary_foreground,
-            theme.secondary_hover,
-        );
         let items = chips.into_iter().map(|(speaker, _, seconds)| {
-            div()
-                .id(("reader-speaker", speaker as usize))
-                .px_2()
-                .py(px(2.))
-                .rounded_full()
-                .bg(plain)
-                .text_color(plain_text)
-                .text_xs()
-                .cursor_pointer()
-                .hover(|chip| chip.bg(hover))
-                .tooltip(|window, cx| Tooltip::new("Name this speaker").build(window, cx))
-                .child(format!(
-                    "{}  {}",
-                    self.speaker_label(speaker),
-                    format_spoken_time(seconds)
-                ))
+            let label = format!(
+                "{}  {}",
+                self.speaker_label(speaker),
+                format_spoken_time(seconds)
+            );
+            speaker_chip(("reader-speaker", speaker as usize), label, false, cx)
                 .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
                     if *hovered || view.hovered_speaker == Some(speaker) {
                         view.hovered_speaker = hovered.then_some(speaker);
@@ -428,38 +371,38 @@ impl SessionReader {
                 }))
         });
         Some(
-            div()
-                .flex()
-                .flex_wrap()
-                .flex_none()
-                .gap_2()
-                .px_4()
-                .py_2()
-                .border_t_1()
-                .border_color(cx.theme().border)
+            status_strip(cx)
+                .gap(space::XS)
+                .overflow_hidden()
                 .children(items),
         )
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
-        let column = div()
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_w_0()
-            .child(self.heading_with_copy("Digest", Copied::Digest, cx));
+        let column = div().flex().flex_col().flex_1().min_w_0().child(
+            column_header("Notes", cx).child(self.copy_button(
+                "reader-copy-notes",
+                Copied::Digest,
+                cx,
+            )),
+        );
         if self.session.notes.is_empty() {
-            return column.child(empty_state("No notes for this session.", cx));
+            return column.child(empty_state(
+                icons::extra("sparkles"),
+                "No notes for this session.",
+                cx,
+            ));
         }
         column.child(
             div()
                 .id("reader-notes")
                 .flex_1()
                 .min_h_0()
-                .px_4()
-                .pb_2()
+                .px(space::LG)
+                .pb(space::SM)
+                .text_size(text::READING)
                 .overflow_y_scroll()
-                .child(TextView::new(&self.notes).selectable(true)),
+                .child(markdown(&self.notes)),
         )
     }
 }
@@ -497,11 +440,21 @@ impl Render for SessionReader {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .border_t_1()
-                    .border_color(border)
                     .child(self.render_transcript(cx))
-                    .child(div().w(px(1.)).h_full().bg(border))
+                    .child(div().w(size::HAIRLINE).h_full().bg(border))
                     .child(self.render_notes(cx)),
             )
+            .children(self.render_speakers(cx))
     }
+}
+
+/// The speaker label a saved line starts with, and the words after it.
+fn split_speaker<'a>(rest: &'a str, labels: &[String]) -> (Option<&'a str>, &'a str) {
+    labels
+        .iter()
+        .find_map(|label| {
+            let words = rest.strip_prefix(label.as_str())?.strip_prefix(": ")?;
+            Some((Some(&rest[..label.len()]), words))
+        })
+        .unwrap_or((None, rest))
 }

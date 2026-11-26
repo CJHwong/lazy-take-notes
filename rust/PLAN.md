@@ -240,7 +240,7 @@ An error is `{code, message, data: {type}}`, where `type` is the Python exceptio
 72. In the `.app`, leaving the template builder page through the sidebar, ⌘N, ⌘O or ⌘, asks about an unsaved template, as Close does. A recording or transcription flow keeps its builder while the pane shows another page.
 73. The `.app` Settings pane puts Save and Revert under the pages. Revert loads config.yaml again and drops every unsaved change. The terminal app has no Revert.
 74. The `.app` Open Config File button opens config.yaml in the macOS text editor (`open -W -t`) and reads it again when that editor quits. A config.yaml that cannot be read shows "Use Open Config File to fix it." in place of the terminal app's "Press [e] to fix the file."
-75. The `.app` Appearance page keeps the terminal theme select, and says that it colors the terminal app only. The window follows the macOS light or dark appearance.
+75. The `.app` Settings has no Appearance page. The window follows the macOS light or dark appearance, and the terminal theme colors the terminal app only. Save keeps the theme in config.yaml as it is.
 76. In the `.app` Settings pane, Esc in a field focuses the pane, as the terminal app goes back to its page list. Esc on the pane leaves Settings, and asks first when a change is not saved. The sidebar, ⌘N, ⌘O and ⌘, ask the same question. Quit, ⌘W and the close button do not ask.
 77. When the terminal app's saved session viewer cannot read a file, its log line is now `<message> (<folder>)`, the same text the `.app` reader logs. It was `Cannot read <path>: <error>`.
 78. The `.app` live session folds an empty Session Context to its header. A click on the header opens it, and text in it keeps it open. The terminal app always shows the field.

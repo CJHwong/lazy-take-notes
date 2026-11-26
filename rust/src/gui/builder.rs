@@ -7,17 +7,20 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::text::{TextView, TextViewState};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _};
+use gpui_kit::component::text::TextViewState;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::session::Severity;
 use crate::app::template_builder::{Role, TemplateBuilderRuntime};
 use crate::gui::bridge::{Bridge, Incoming, notify};
+use crate::gui::design::{control, radius, size, space, text};
 use crate::gui::dialogs;
-use crate::gui::design::size;
-use crate::gui::widgets::{DragArm, title_strip};
+use crate::gui::icons;
+use crate::gui::widgets::{
+    DragArm, action_bar, column_header, empty_state, markdown, pane_header, pane_title, tool,
+};
 
 /// As long as the TUI's notices stay.
 const NOTICE: Duration = Duration::from_secs(5);
@@ -274,23 +277,20 @@ impl BuilderView {
         cx.emit(BuilderEvent::Closed);
     }
 
+    /// The title, then Close and Save at the right end: Save is the pane's
+    /// one primary action.
     fn render_title_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let has_template = self.runtime.current().is_some();
-        title_strip("builder-title", &self.drag)
-            .gap_2()
-            .px_4()
+        pane_header("builder-title", &self.drag, cx)
+            .child(pane_title(self.runtime.title()).flex_1().min_w_0())
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(self.runtime.title()),
+                tool("builder-close", IconName::Close, "Close")
+                    .on_click(cx.listener(|view, _, window, cx| view.close(window, cx))),
             )
             .child(
                 Button::new("builder-save")
                     .primary()
-                    .small()
+                    .with_size(control::CONTROL)
                     .label("Save")
                     .disabled(!has_template)
                     .tooltip(match has_template {
@@ -299,32 +299,24 @@ impl BuilderView {
                     })
                     .on_click(cx.listener(|view, _, window, cx| view.save(window, cx))),
             )
-            .child(
-                Button::new("builder-close")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Close)
-                    .label("Close")
-                    .on_click(cx.listener(|view, _, window, cx| view.close(window, cx))),
-            )
     }
 
-    fn render_entry(&self, index: usize, text: &str, cx: &App) -> Div {
+    /// The user's message in an accent bubble on the right; the AI's reply as
+    /// plain text, as a reader reads it.
+    fn render_entry(&self, index: usize, line: &str, cx: &App) -> Div {
         let theme = cx.theme();
-        let bubble = div().max_w(relative(0.85)).px_3().py_2().rounded(px(10.));
         match &self.entries[index] {
             None => div().flex().justify_end().child(
-                bubble
+                div()
+                    .max_w(size::BUBBLE_MAX)
+                    .px(space::MD)
+                    .py(space::SM)
+                    .rounded(radius::LG)
                     .bg(theme.primary)
                     .text_color(theme.primary_foreground)
-                    .child(text.to_string()),
+                    .child(line.to_string()),
             ),
-            Some(markdown) => div().flex().child(
-                bubble
-                    .bg(theme.secondary)
-                    .text_color(theme.foreground)
-                    .child(TextView::new(markdown).selectable(true)),
-            ),
+            Some(reply) => div().child(markdown(reply)),
         }
     }
 
@@ -336,51 +328,64 @@ impl BuilderView {
             .iter()
             .enumerate()
             .take(self.entries.len())
-            .map(|(index, (_, text))| self.render_entry(index, text, cx))
+            .map(|(index, (_, line))| self.render_entry(index, line, cx))
             .collect();
+        let empty = rows.is_empty() && !busy;
         let theme = cx.theme();
         let (border, muted) = (theme.border, theme.muted_foreground);
+        let thinking = div()
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .text_color(muted)
+            .child(Icon::new(IconName::LoaderCircle).size(size::ICON_SM))
+            .child("Thinking…");
         div()
             .flex()
             .flex_col()
-            .flex_1()
+            .flex_none()
+            .w(relative(0.4))
             .min_w_0()
-            .border_r_1()
+            .border_r(size::HAIRLINE)
             .border_color(border)
+            .child(column_header("Conversation", cx))
             .child(
                 div()
                     .id("builder-chat")
                     .flex_1()
                     .min_h_0()
-                    .px_4()
-                    .py_3()
+                    .px(space::LG)
+                    .pb(space::LG)
                     .flex()
                     .flex_col()
-                    .gap_3()
+                    .gap(space::LG)
+                    .text_size(text::READING)
                     .overflow_y_scroll()
                     .track_scroll(&self.chat_scroll)
+                    .when(empty, |chat| {
+                        chat.child(empty_state(
+                            icons::extra("sparkles"),
+                            "Describe the meeting you want notes for.",
+                            cx,
+                        ))
+                    })
                     .children(rows)
-                    .when(busy, |chat| {
-                        chat.child(div().italic().text_color(muted).child("Thinking…"))
-                    }),
+                    .when(busy, |chat| chat.child(thinking)),
             )
             .child(
-                div()
-                    .flex()
-                    .flex_none()
-                    .items_center()
-                    .gap_2()
-                    .h(size::ACTION_BAR)
-                    .px_4()
-                    .border_t_1()
-                    .border_color(border)
-                    .child(div().flex_1().min_w_0().child(Input::new(&self.message)))
+                action_bar(cx)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(Input::new(&self.message).with_size(control::CONTROL)),
+                    )
                     .child(
                         Button::new("builder-send")
                             .primary()
+                            .with_size(control::CONTROL)
                             .icon(IconName::ArrowUp)
-                            .label(if busy { "Thinking…" } else { "Send" })
-                            .loading(busy)
+                            .label("Send")
                             .disabled(busy)
                             .on_click(cx.listener(|view, _, window, cx| view.send(window, cx))),
                     ),
@@ -388,32 +393,22 @@ impl BuilderView {
     }
 
     fn render_preview(&self, cx: &App) -> Div {
-        let muted = cx.theme().muted_foreground;
         div()
             .flex()
             .flex_col()
             .flex_1()
             .min_w_0()
-            .child(
-                div()
-                    .flex_none()
-                    .px_4()
-                    .pt_3()
-                    .pb_1()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(muted)
-                    .child("Preview"),
-            )
+            .child(column_header("Preview", cx))
             .child(
                 div()
                     .id("builder-preview")
                     .flex_1()
                     .min_h_0()
-                    .px_4()
-                    .pb_3()
+                    .px(space::LG)
+                    .pb(space::LG)
+                    .text_size(text::READING)
                     .overflow_y_scroll()
-                    .child(TextView::new(&self.preview).selectable(true)),
+                    .child(markdown(&self.preview)),
             )
     }
 }
@@ -465,8 +460,6 @@ impl Render for BuilderView {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .border_t_1()
-                    .border_color(cx.theme().border)
                     .child(self.render_chat(cx))
                     .child(self.render_preview(cx)),
             )

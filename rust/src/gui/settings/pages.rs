@@ -1,5 +1,6 @@
-//! What the settings pane draws: the page list, the five pages as labeled
-//! rows, and the bar with Save and Revert.
+//! What the settings pane draws: the title bar with Revert and Save, the
+//! page list, and each page as titled cards of rows, as System Settings
+//! draws them.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, Textarea};
@@ -7,7 +8,8 @@ use gpui_kit::component::progress::Progress;
 use gpui_kit::component::radio::Radio;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::switch::Switch;
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -17,14 +19,11 @@ use crate::app::session::status_line::{LEVEL_TOP, level_step};
 use crate::app::settings::rows::{RowAction, row_actions, row_detail, row_status, status_color};
 use crate::app::settings::{Meter, SPEAKER, open_privacy};
 use crate::domain::model_asset::AssetStatus;
-use crate::gui::design::size;
-
-const NAV_WIDTH: Pixels = px(180.);
-const LABEL_WIDTH: Pixels = px(190.);
-const CONTROL_WIDTH: Pixels = px(360.);
+use crate::gui::design::{control, radius, size, space, tint};
+use crate::gui::widgets::{caption, pane_header, pane_title, section_heading, source_row, tool};
 
 /// A theme color by the name the runtime gives it.
-fn tint(name: Option<&str>, cx: &App) -> Hsla {
+fn tint_of(name: Option<&str>, cx: &App) -> Hsla {
     let theme = cx.theme();
     match name {
         Some("success") => theme.success,
@@ -35,59 +34,97 @@ fn tint(name: Option<&str>, cx: &App) -> Hsla {
     }
 }
 
-fn heading(text: &'static str) -> Div {
-    div()
-        .pt_5()
-        .pb_1()
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(text)
+fn note(content: impl Into<SharedString>, cx: &App) -> Div {
+    caption(content, cx)
 }
 
-fn note(text: impl Into<SharedString>, cx: &App) -> Div {
-    div()
-        .text_sm()
-        .text_color(cx.theme().muted_foreground)
-        .child(text.into())
-}
-
-/// A form row: the label at the left, the control and its help at the right.
+/// A card row: the label and its help at the left, the control at the right
+/// in a column of one width, so every control lines up.
 fn row(label: &'static str, control: impl IntoElement, help: &str, cx: &App) -> Div {
     div()
         .flex()
-        .gap_4()
-        .py_2()
-        .border_b_1()
-        .border_color(cx.theme().border.opacity(0.5))
-        .child(div().flex_none().w(LABEL_WIDTH).pt_1().child(label))
+        .items_center()
+        .gap(space::LG)
+        .min_h(size::FORM_ROW)
+        .px(space::MD)
+        .py(space::SM)
         .child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap_1()
-                .child(div().max_w(CONTROL_WIDTH).child(control))
+                .gap(space::XXS)
+                .child(label)
                 .when(!help.is_empty(), |column| {
                     column.child(note(help.to_string(), cx))
                 }),
         )
+        .child(
+            div()
+                .flex_none()
+                .w(size::FORM_FIELD)
+                .flex()
+                .justify_end()
+                .child(control),
+        )
 }
 
+/// A row whose control needs the card's whole width: a text area, a list.
+fn wide_row(content: impl IntoElement) -> Div {
+    div().px(space::MD).py(space::SM).child(content)
+}
+
+/// The buttons of a card, right-aligned in its last row.
 fn buttons() -> Div {
-    div().flex().flex_wrap().items_center().gap_2().py_2()
+    div()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .justify_end()
+        .gap(space::SM)
+        .px(space::MD)
+        .py(space::SM)
+}
+
+/// A titled card of rows with inset dividers between them.
+fn section(title: &'static str, rows: Vec<AnyElement>, cx: &App) -> AnyElement {
+    let theme = cx.theme();
+    let line = theme.border;
+    let mut card = div()
+        .flex()
+        .flex_col()
+        .rounded(radius::LG)
+        .border(size::HAIRLINE)
+        .border_color(line)
+        .bg(theme.foreground.opacity(tint::CARD));
+    for (index, item) in rows.into_iter().enumerate() {
+        if index > 0 {
+            card = card.child(div().mx(space::MD).h(size::HAIRLINE).bg(line));
+        }
+        card = card.child(item);
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::SM)
+        .child(section_heading(title).px(space::XS))
+        .child(card)
+        .into_any_element()
 }
 
 impl SettingsView {
     fn input(&self, id: &'static str) -> Input {
-        Input::new(&self.inputs[id])
+        Input::new(&self.inputs[id]).with_size(control::CONTROL)
     }
 
     fn field(&self, id: &'static str, label: &'static str, help: &str, cx: &App) -> Div {
-        row(label, self.input(id), help, cx)
+        row(label, div().w_full().child(self.input(id)), help, cx)
     }
 
     fn select(&self, id: &'static str, label: &'static str, help: &str, cx: &App) -> Div {
-        row(label, Select::new(&self.selects[id]), help, cx)
+        let select = Select::new(&self.selects[id]).with_size(control::CONTROL);
+        row(label, div().w_full().child(select), help, cx)
     }
 
     fn switch(
@@ -99,13 +136,16 @@ impl SettingsView {
     ) -> Div {
         let on = self.switches.get(id).copied().unwrap_or(false);
         let view = cx.entity().downgrade();
-        let control = Switch::new(id).checked(on).on_click(move |on, _, cx| {
-            let on = *on;
-            let _ = view.update(cx, |view, cx| {
-                view.switches.insert(id, on);
-                cx.notify();
+        let control = Switch::new(id)
+            .with_size(control::CONTROL)
+            .checked(on)
+            .on_click(move |on, _, cx| {
+                let on = *on;
+                let _ = view.update(cx, |view, cx| {
+                    view.switches.insert(id, on);
+                    cx.notify();
+                });
             });
-        });
         row(label, control, help, cx)
     }
 
@@ -116,7 +156,7 @@ impl SettingsView {
         run: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> Button {
         Button::new(id)
-            .small()
+            .with_size(control::CONTROL)
             .label(label)
             .on_click(cx.listener(move |view, _, window, cx| run(view, window, cx)))
     }
@@ -129,41 +169,21 @@ impl SettingsView {
             .models_text
             .clone()
             .unwrap_or_else(|| "Use Refresh to list the models on the server.".into());
-        let mut items: Vec<AnyElement> = vec![
-            heading("Text generation").into_any_element(),
-            self.select(
-                "cfg-llm-provider",
-                "Provider",
-                "Ollama runs a model here, or a cloud model after ollama signin. OpenAI needs an API key.",
-                cx,
-            )
-            .into_any_element(),
-            self.field("cfg-ollama-host", "Server", "", cx).into_any_element(),
-            self.field("cfg-openai-base-url", "API base", "", cx)
-                .into_any_element(),
-        ];
         let key = div()
+            .w_full()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(self.input(API_KEY))
+            .items_end()
+            .gap(space::SM)
+            .child(div().w_full().child(self.input(API_KEY)))
             .when(self.key_stored, |column| {
-                column.child(div().child(Self::button(
+                column.child(Self::button(
                     "clear-key",
                     "Clear Stored Key",
                     cx,
                     |view, window, cx| view.clear_key(window, cx),
-                )))
+                ))
             });
-        items.push(row("API key", key, "", cx).into_any_element());
-        items.push(
-            self.field("cfg-digest-model", "Summary model", "", cx)
-                .into_any_element(),
-        );
-        items.push(
-            self.field("cfg-interactive-model", "Quick action model", "", cx)
-                .into_any_element(),
-        );
         let tools = buttons()
             .child(Self::button("ai-test", "Test", cx, |view, window, cx| {
                 view.call(window, cx, |runtime, form, io| runtime.test_ai(form, io));
@@ -198,10 +218,26 @@ impl SettingsView {
                     });
                 },
             ));
-        items.push(row("Installed models", note(models_text, cx), "", cx).into_any_element());
-        items.push(tools.into_any_element());
-        items.push(heading("Speech-to-Text").into_any_element());
-        items.push(
+        let text_generation = vec![
+            self.select(
+                "cfg-llm-provider",
+                "Provider",
+                "Ollama runs a model here, or a cloud model after ollama signin. OpenAI needs an API key.",
+                cx,
+            )
+            .into_any_element(),
+            self.field("cfg-ollama-host", "Server", "", cx).into_any_element(),
+            self.field("cfg-openai-base-url", "API base", "", cx)
+                .into_any_element(),
+            row("API key", key, "", cx).into_any_element(),
+            self.field("cfg-digest-model", "Summary model", "", cx)
+                .into_any_element(),
+            self.field("cfg-interactive-model", "Quick action model", "", cx)
+                .into_any_element(),
+            row("Installed models", note(models_text, cx), "", cx).into_any_element(),
+            tools.into_any_element(),
+        ];
+        let mut speech = vec![
             self.select(
                 "cfg-trans-provider",
                 "Engine",
@@ -209,12 +245,11 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
-        );
-        items.push(note("Default model", cx).pt_2().into_any_element());
+        ];
         for index in 0..self.assets.len() {
-            items.push(self.model_row(index, cx).into_any_element());
+            speech.push(self.model_row(index, cx).into_any_element());
         }
-        items.push(
+        speech.push(
             buttons()
                 .child(Self::button(
                     "download-all",
@@ -228,18 +263,17 @@ impl SettingsView {
                 ))
                 .into_any_element(),
         );
-        items.push(heading("Language models").into_any_element());
-        items.push(
-            note(
+        let mut languages = vec![
+            wide_row(note(
                 "Use a different model for a locale. The default applies otherwise.",
                 cx,
-            )
+            ))
             .into_any_element(),
-        );
+        ];
         for index in 0..self.languages.len() {
-            items.push(self.language_line(index, cx).into_any_element());
+            languages.push(self.language_line(index, cx).into_any_element());
         }
-        items.push(
+        languages.push(
             buttons()
                 .child(
                     Self::button("add-language", "Add Language", cx, |view, window, cx| {
@@ -249,10 +283,13 @@ impl SettingsView {
                 )
                 .into_any_element(),
         );
-        items.push(heading("Speaker assets").into_any_element());
-        items.push(self.speaker_row(cx).into_any_element());
-        items.push(heading("Advanced").into_any_element());
-        items.push(
+        let cache = self.runtime.store().cache_root().display().to_string();
+        let open = Self::button("open-cache", "Open Cache Folder", cx, |view, _, cx| {
+            view.open_cache(cx)
+        })
+        .icon(IconName::FolderOpen)
+        .tooltip(cache);
+        let advanced = vec![
             self.field(
                 CUSTOM_PATH,
                 "Custom model file",
@@ -260,39 +297,30 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
-        );
-        let cache = self.runtime.store().cache_root().display().to_string();
-        let open = Self::button("open-cache", "Open Cache Folder", cx, |view, _, cx| {
-            view.open_cache(cx)
-        })
-        .icon(IconName::FolderOpen);
-        items.push(
-            row(
-                "Cache",
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(note(cache, cx))
-                    .child(div().child(open)),
-                "",
+            row("Cache", open, "", cx).into_any_element(),
+        ];
+        vec![
+            section("Text generation", text_generation, cx),
+            section("Speech-to-Text", speech, cx),
+            section("Language models", languages, cx),
+            section(
+                "Speaker assets",
+                vec![self.speaker_row(cx).into_any_element()],
                 cx,
-            )
-            .into_any_element(),
-        );
-        items
+            ),
+            section("Advanced", advanced, cx),
+        ]
     }
 
-    /// One speech model: the mark and its name, size, status, buttons, then
-    /// the progress or the reason it waits.
+    /// One speech model: the mark and its name, then size, status and
+    /// buttons in columns, then the progress or the reason it waits.
     fn model_row(&self, index: usize, cx: &mut Context<Self>) -> Div {
         let asset = &self.assets[index];
         let id = asset.id;
         let Some(state) = self.runtime.rows.get(id).cloned() else {
             return div();
         };
-        let theme = cx.theme();
-        let (muted, border) = (theme.muted_foreground, theme.border.opacity(0.5));
+        let muted = cx.theme().muted_foreground;
         let view = cx.entity().downgrade();
         let mark = Radio::new(("model", index))
             .label(asset.label)
@@ -302,7 +330,7 @@ impl SettingsView {
             });
         let actions = row_actions(state.status).into_iter().map(|action| {
             Button::new((action.id(), index))
-                .small()
+                .with_size(control::CONTROL)
                 .when(action == RowAction::Remove, |button| button.ghost())
                 .label(action.label())
                 .on_click(cx.listener(move |view, _, window, cx| match action {
@@ -325,35 +353,35 @@ impl SettingsView {
         div()
             .flex()
             .flex_col()
-            .gap_1()
-            .py_2()
-            .border_b_1()
-            .border_color(border)
+            .gap(space::XS)
+            .px(space::MD)
+            .py(space::SM)
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap_3()
+                    .min_h(size::ROW)
+                    .gap(space::MD)
                     .child(div().flex_1().min_w_0().child(mark))
                     .child(
                         div()
-                            .w(px(80.))
-                            .text_sm()
+                            .w(size::STAT_COLUMN)
+                            .flex()
+                            .justify_end()
                             .text_color(muted)
                             .child(megabytes(asset.size)),
                     )
                     .child(
                         div()
-                            .w(px(100.))
-                            .text_sm()
-                            .text_color(tint(status_color(state.status), cx))
+                            .w(size::STAT_COLUMN)
+                            .text_color(tint_of(status_color(state.status), cx))
                             .child(row_status(&state)),
                     )
                     .child(
                         div()
                             .flex()
-                            .gap_1()
-                            .w(px(170.))
+                            .gap(space::XS)
+                            .w(size::ACTION_COLUMN)
                             .justify_end()
                             .children(actions),
                     ),
@@ -361,33 +389,36 @@ impl SettingsView {
             .when(downloading, |column| {
                 column.child(
                     div()
-                        .pl_6()
-                        .max_w(CONTROL_WIDTH)
+                        .pl(space::XL)
                         .child(Progress::new(("model-progress", index)).value(percent)),
                 )
             })
             .when(!detail.is_empty(), |column| {
-                column.child(note(detail, cx).pl_6())
+                column.child(note(detail, cx).pl(space::XL))
             })
     }
 
     fn language_line(&self, index: usize, cx: &mut Context<Self>) -> Div {
-        let row = &self.languages[index];
+        let line = &self.languages[index];
         div()
             .flex()
             .items_center()
-            .gap_2()
-            .py_1()
-            .child(div().w(px(90.)).child(Input::new(&row.locale)))
+            .gap(space::SM)
+            .px(space::MD)
+            .py(space::SM)
+            .child(
+                div()
+                    .w(size::LOCALE_FIELD)
+                    .child(Input::new(&line.locale).with_size(control::CONTROL)),
+            )
             .child(
                 div()
                     .flex_1()
-                    .max_w(CONTROL_WIDTH)
-                    .child(Select::new(&row.model)),
+                    .child(Select::new(&line.model).with_size(control::CONTROL)),
             )
             .child(
                 Button::new(("remove-language", index))
-                    .small()
+                    .with_size(control::CONTROL)
                     .ghost()
                     .label("Remove")
                     .on_click(cx.listener(move |view, _, _, cx| view.remove_language(index, cx))),
@@ -400,7 +431,11 @@ impl SettingsView {
             true => "Checking...".to_string(),
             false => speaker.status.clone(),
         };
-        let controls = buttons()
+        let controls = div()
+            .flex()
+            .items_center()
+            .gap(space::SM)
+            .child(note(status, cx))
             .when(speaker.install, |bar| {
                 bar.child(Self::button(
                     "speaker-install",
@@ -432,11 +467,7 @@ impl SettingsView {
             });
         row(
             "Runtime and model",
-            div()
-                .flex()
-                .flex_col()
-                .child(div().pt_1().child(status))
-                .child(controls),
+            controls,
             "Speaker labels need these. They download once.",
             cx,
         )
@@ -445,8 +476,7 @@ impl SettingsView {
     // --- Digest ---------------------------------------------------------
 
     fn digest_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        vec![
-            heading("When to summarize").into_any_element(),
+        let when = vec![
             self.field("cfg-digest-min-lines", "After lines", "", cx)
                 .into_any_element(),
             self.field("cfg-digest-min-interval", "Wait seconds", "", cx)
@@ -454,11 +484,12 @@ impl SettingsView {
             self.field(
                 "cfg-digest-max-lines",
                 "Force after",
-                "Force after is optional. Blank means twice After lines.",
+                "Optional. Blank means twice After lines.",
                 cx,
             )
             .into_any_element(),
-            heading("Advanced").into_any_element(),
+        ];
+        let advanced = vec![
             self.field(
                 "cfg-digest-compact",
                 "Compaction threshold",
@@ -466,6 +497,10 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
+        ];
+        vec![
+            section("When to summarize", when, cx),
+            section("Advanced", advanced, cx),
         ]
     }
 
@@ -474,23 +509,24 @@ impl SettingsView {
     /// A source's level bars against the silence threshold, and its permission.
     fn meter(&self, label: &'static str, meter: &Meter, cx: &App) -> Div {
         let theme = cx.theme();
-        let (quiet, loud) = (theme.muted_foreground.opacity(0.4), theme.primary);
+        let (quiet, loud) = (theme.muted_foreground.opacity(tint::FAINT), theme.success);
         let silence = self.runtime.silence_threshold();
+        let rise = size::METER_HEIGHT - size::METER_BAR;
         let bars = meter.levels.iter().map(|level| {
             let step = level_step(*level, silence);
-            let height = 3. + 17. * step as f32 / LEVEL_TOP as f32;
+            let height = size::METER_BAR + rise * (step as f32 / LEVEL_TOP as f32);
             div()
-                .w(px(5.))
-                .h(px(height))
-                .rounded(px(1.))
+                .w(size::METER_BAR)
+                .h(height)
+                .rounded_full()
                 .bg(if step == 0 { quiet } else { loud })
         });
-        let (text, color) = match meter.permission {
+        let (status, color) = match meter.permission {
             Some(permission) => (permission.text, permission.color),
             None => ("Not tested", None),
         };
         let color = match color {
-            Some(_) => tint(color, cx),
+            Some(_) => tint_of(color, cx),
             None => theme.muted_foreground,
         };
         row(
@@ -498,16 +534,16 @@ impl SettingsView {
             div()
                 .flex()
                 .items_center()
-                .gap_4()
+                .gap(space::MD)
                 .child(
                     div()
                         .flex()
                         .items_end()
-                        .gap(px(2.))
-                        .h(px(20.))
+                        .gap(space::XXS)
+                        .h(size::METER_HEIGHT)
                         .children(bars),
                 )
-                .child(div().text_sm().text_color(color).child(text)),
+                .child(div().text_color(color).child(status)),
             "",
             cx,
         )
@@ -515,25 +551,7 @@ impl SettingsView {
 
     fn audio_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let running = self.runtime.probe_running();
-        let probe_buttons = buttons()
-            .child(
-                Self::button("audio-start", "Start Test", cx, |view, window, cx| {
-                    view.call(window, cx, |runtime, form, io| {
-                        runtime.start_probe(form, io)
-                    });
-                })
-                .icon(IconName::Play)
-                .disabled(running),
-            )
-            .child(
-                Self::button("audio-stop", "Stop", cx, |view, _, cx| {
-                    view.runtime.stop_probe();
-                    cx.notify();
-                })
-                .icon(IconName::Square)
-                .disabled(!running),
-            );
-        let grant = buttons()
+        let check = buttons()
             .child(Self::button(
                 "grant-system",
                 "Grant System Audio",
@@ -545,21 +563,38 @@ impl SettingsView {
                 "Open Microphone Settings",
                 cx,
                 |_, _, _| open_privacy("Privacy_Microphone"),
-            ));
+            ))
+            .child(
+                Self::button("audio-stop", "Stop", cx, |view, _, cx| {
+                    view.runtime.stop_probe();
+                    cx.notify();
+                })
+                .icon(IconName::Square)
+                .disabled(!running),
+            )
+            .child(
+                Self::button("audio-start", "Start Test", cx, |view, window, cx| {
+                    view.call(window, cx, |runtime, form, io| {
+                        runtime.start_probe(form, io)
+                    });
+                })
+                .primary()
+                .icon(IconName::Play)
+                .disabled(running),
+            );
         let meters = &self.runtime.meters;
-        vec![
-            heading("Input check").into_any_element(),
-            note(
+        let input_check = vec![
+            wide_row(note(
                 "Start a 15 second test and make a sound. Nothing is saved.",
                 cx,
-            )
+            ))
             .into_any_element(),
-            probe_buttons.into_any_element(),
             self.meter("Microphone", &meters[0], cx).into_any_element(),
             self.meter("System audio", &meters[1], cx)
                 .into_any_element(),
-            grant.into_any_element(),
-            heading("Microphone").into_any_element(),
+            check.into_any_element(),
+        ];
+        let microphone = vec![
             self.select(
                 DEVICE,
                 "Input device",
@@ -567,7 +602,8 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
-            heading("Audio processing").into_any_element(),
+        ];
+        let processing = vec![
             self.field("cfg-trans-chunk", "Chunk duration", "", cx)
                 .into_any_element(),
             self.field("cfg-trans-overlap", "Overlap", "", cx)
@@ -576,21 +612,27 @@ impl SettingsView {
                 .into_any_element(),
             self.field("cfg-trans-pause", "Pause duration", "", cx)
                 .into_any_element(),
-            heading("Speaker labels").into_any_element(),
+        ];
+        let speakers = vec![
             self.switch("cfg-diarization-enabled", "Label speakers", "", cx)
                 .into_any_element(),
             self.select("cfg-diarization-device", "Device", "", cx)
                 .into_any_element(),
             self.field("cfg-diarization-interval", "Update every", "", cx)
                 .into_any_element(),
+        ];
+        vec![
+            section("Input check", input_check, cx),
+            section("Microphone", microphone, cx),
+            section("Audio processing", processing, cx),
+            section("Speaker labels", speakers, cx),
         ]
     }
 
-    // --- Sessions and Appearance ----------------------------------------
+    // --- Sessions -------------------------------------------------------
 
     fn sessions_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        vec![
-            heading("Session storage").into_any_element(),
+        let storage = vec![
             self.field("cfg-output-dir", "Output folder", "", cx)
                 .into_any_element(),
             self.switch("cfg-output-save-audio", "Save audio", "", cx)
@@ -608,15 +650,22 @@ impl SettingsView {
                 .into_any_element(),
             self.switch("cfg-output-auto-label", "Auto-label sessions", "", cx)
                 .into_any_element(),
-            heading("Custom vocabulary").into_any_element(),
-            row(
-                "Words to watch for",
-                Textarea::new(&self.hints),
-                "Names, acronyms, or jargon the recognizer should watch for. One per line.",
-                cx,
+        ];
+        let vocabulary = vec![
+            wide_row(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::SM)
+                    .child(note(
+                        "Names, acronyms, or jargon the recognizer should watch for. One per line.",
+                        cx,
+                    ))
+                    .child(Textarea::new(&self.hints)),
             )
             .into_any_element(),
-            heading("Templates").into_any_element(),
+        ];
+        let templates = vec![
             self.switch(
                 "cfg-show-builtin-templates",
                 "Show built-in templates",
@@ -624,97 +673,83 @@ impl SettingsView {
                 cx,
             )
             .into_any_element(),
-        ]
-    }
-
-    fn appearance_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        ];
         vec![
-            heading("Theme").into_any_element(),
-            self.select(
-                "cfg-theme",
-                "Terminal theme",
-                "This theme colors the terminal app only. This window follows the macOS appearance.",
-                cx,
-            )
-            .into_any_element(),
+            section("Session storage", storage, cx),
+            section("Custom vocabulary", vocabulary, cx),
+            section("Templates", templates, cx),
         ]
     }
 
     // --- The frame ------------------------------------------------------
 
+    /// The page list, and Open Config File under it: the file every page
+    /// edits.
     fn nav(&self, cx: &mut Context<Self>) -> Div {
-        let theme = cx.theme();
-        let (active, hover) = (theme.list_active, theme.foreground.opacity(0.05));
         let rows = PAGES.iter().map(|(page, label)| {
             let (page, current) = (*page, *page == self.page);
-            div()
-                .id(*label)
-                .px_3()
-                .py(px(6.))
-                .rounded(px(6.))
-                .text_sm()
-                .when(current, |row| row.bg(active))
-                .when(!current, |row| row.hover(|row| row.bg(hover)))
+            source_row(*label, current, cx)
+                .child(
+                    Icon::new(page_icon(page))
+                        .size(size::ICON)
+                        .text_color(cx.theme().primary),
+                )
                 .child(*label)
                 .on_click(cx.listener(move |view, _, _, cx| {
                     view.page = page;
                     cx.notify();
                 }))
         });
+        let path = self.runtime.config_file().display().to_string();
         div()
             .flex_none()
-            .w(NAV_WIDTH)
+            .w(size::SETTINGS_NAV)
             .h_full()
             .flex()
             .flex_col()
-            .gap_1()
-            .p_2()
-            .border_r_1()
-            .border_color(theme.border)
-            .children(rows)
-    }
-
-    fn bar(&self, cx: &mut Context<Self>) -> Div {
-        let path = self.runtime.config_file().display().to_string();
-        let muted = cx.theme().muted_foreground;
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_2()
-            .h(size::ACTION_BAR)
-            .px_4()
-            .border_t_1()
+            .gap(space::XXS)
+            .p(space::SM)
+            .border_r(size::HAIRLINE)
             .border_color(cx.theme().border)
+            .children(rows)
+            .child(div().flex_1())
             .child(
-                Button::new("open-config")
-                    .ghost()
-                    .icon(IconName::FileText)
-                    .label("Open Config File")
-                    .tooltip(path.clone())
+                source_row("open-config", false, cx)
+                    .child(Icon::new(IconName::FileText).size(size::ICON))
+                    .child("Open Config File")
+                    .tooltip(move |window, cx| Tooltip::new(path.clone()).build(window, cx))
                     .on_click(cx.listener(|view, _, window, cx| view.open_config(window, cx))),
             )
+    }
+
+    /// The title, then Revert and Save at the right end. Save waits for a
+    /// change.
+    fn header(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+        let changed = self.has_unsaved_changes(cx);
+        pane_header("settings-title", &self.drag, cx)
+            .child(pane_title("Settings").flex_1())
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_sm()
-                    .text_color(muted)
-                    .child(path),
-            )
-            .child(
-                Button::new("revert")
-                    .icon(IconName::Undo2)
-                    .label("Revert")
+                tool("revert", IconName::Undo2, "Revert")
+                    .tooltip("Read config.yaml again")
                     .on_click(cx.listener(|view, _, window, cx| view.revert(window, cx))),
             )
             .child(
                 Button::new("save")
                     .primary()
+                    .with_size(control::CONTROL)
                     .label("Save")
+                    .disabled(!changed)
                     .on_click(cx.listener(|view, _, window, cx| view.save(window, cx))),
             )
+    }
+}
+
+fn page_icon(page: Page) -> IconName {
+    match page {
+        Page::Models => IconName::Bot,
+        Page::Digest => IconName::BookOpen,
+        Page::Audio => IconName::Mic,
+        Page::Sessions => IconName::Folder,
     }
 }
 
@@ -725,7 +760,6 @@ impl Render for SettingsView {
             Page::Digest => self.digest_page(cx),
             Page::Audio => self.audio_page(cx),
             Page::Sessions => self.sessions_page(cx),
-            Page::Appearance => self.appearance_page(cx),
         };
         div()
             .key_context("Settings")
@@ -738,18 +772,25 @@ impl Render for SettingsView {
             .size_full()
             .flex()
             .flex_col()
+            .child(self.header(cx))
             .child(
                 div().flex().flex_1().min_h_0().child(self.nav(cx)).child(
                     div()
                         .id("settings-page")
                         .flex_1()
                         .min_w_0()
-                        .px_6()
-                        .pb_6()
                         .overflow_y_scroll()
-                        .children(items),
+                        .child(
+                            div()
+                                .max_w(size::FORM_PAGE)
+                                .flex()
+                                .flex_col()
+                                .gap(space::XL)
+                                .px(space::XL)
+                                .py(space::XL)
+                                .children(items),
+                        ),
                 ),
             )
-            .child(self.bar(cx))
     }
 }

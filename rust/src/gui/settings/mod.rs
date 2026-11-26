@@ -1,5 +1,5 @@
-//! Settings: a page list at the left, one page of labeled rows at the right,
-//! and Save and Revert under it. The flow lives in `SettingsRuntime`; this
+//! Settings: Revert and Save in the title bar, a page list at the left, and
+//! one page of cards at the right. The flow lives in `SettingsRuntime`; this
 //! view owns the fields, lends a copy of them to each runtime call, and shows
 //! the state the runtime keeps.
 
@@ -32,6 +32,7 @@ use crate::app::settings::{Edited, SettingsIo, SettingsRuntime, Step};
 use crate::app::tasks::Tasks;
 use crate::domain::model_asset::{AssetGroup, ModelAsset};
 use crate::gui::bridge::{Bridge, Incoming, notify};
+use crate::gui::widgets::DragArm;
 
 pub use questions::ask_discard;
 
@@ -51,15 +52,13 @@ pub enum Page {
     Digest,
     Audio,
     Sessions,
-    Appearance,
 }
 
-pub const PAGES: [(Page, &str); 5] = [
+pub const PAGES: [(Page, &str); 4] = [
     (Page::Models, "Models"),
     (Page::Digest, "Digest"),
     (Page::Audio, "Audio"),
     (Page::Sessions, "Sessions"),
-    (Page::Appearance, "Appearance"),
 ];
 
 /// The text fields: id, placeholder, masked.
@@ -91,6 +90,8 @@ const SELECTS: [(&str, &[&str]); 4] = [
     ("cfg-llm-provider", &LLM_PROVIDERS),
     ("cfg-trans-provider", &TRANSCRIPTION_PROVIDERS),
     ("cfg-diarization-device", &DIARIZATION_DEVICES),
+    // The terminal theme has no page here: the window follows the macOS
+    // appearance. Its select still holds the value, so Save keeps it.
     ("cfg-theme", &THEME_ORDER),
 ];
 const DEVICE: &str = "cfg-audio-device";
@@ -221,6 +222,7 @@ pub struct SettingsView {
     /// A key is stored, so the clear-key button shows.
     key_stored: bool,
     focus: FocusHandle,
+    drag: DragArm,
     _pump: Task<()>,
 }
 
@@ -288,6 +290,7 @@ impl SettingsView {
             chosen: None,
             key_stored: false,
             focus: cx.focus_handle(),
+            drag: DragArm::default(),
             _pump: pump,
         };
         let values = opening_values(&view.runtime.loaded, &view.devices);

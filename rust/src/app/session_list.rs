@@ -2,7 +2,7 @@
 //! The date comes from the folder name, which the session wrote when it
 //! started, so a copied or touched folder keeps its place.
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Datelike as _, NaiveDate, NaiveDateTime};
 
 use crate::adapters::session_reader::SessionInfo;
 
@@ -85,9 +85,13 @@ fn entry(info: SessionInfo, today: NaiveDate) -> Entry {
         };
     };
     let group = group(start.date(), today);
+    // The group already says when; the row adds only what tells rows apart,
+    // short enough to leave the title its room.
     let when = match group {
         Group::Today | Group::Yesterday => start.format("%H:%M").to_string(),
-        _ => start.format("%Y-%m-%d %H:%M").to_string(),
+        Group::Older if start.year() != today.year() => start.format("%b %-d, %Y").to_string(),
+        Group::Older => start.format("%b %-d").to_string(),
+        _ => start.format("%a").to_string(),
     };
     Entry {
         title,
@@ -165,7 +169,7 @@ mod tests {
         let today_entry = &groups[0].1[0];
         assert_eq!(today_entry.title, "a b");
         assert_eq!(today_entry.when, "09:30");
-        assert_eq!(groups[1].1[0].when, "2026-11-01 17:00");
+        assert_eq!(groups[1].1[0].when, "Nov 1");
     }
 
     #[test]

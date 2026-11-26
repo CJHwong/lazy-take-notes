@@ -4,12 +4,16 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::text::{TextView, TextViewState, TextViewStyle};
-use gpui_kit::component::{ActiveTheme as _, Icon};
+use gpui_kit::component::tooltip::Tooltip;
+use gpui_kit::component::{ActiveTheme as _, Icon, Sizable as _};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::logo;
-use crate::gui::design::{radius, size, space, text, tint};
+use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::theme::hsla;
 
 /// A press on the strip that may turn into a window move. The owner keeps it
@@ -69,10 +73,14 @@ pub fn mascot(pixel: Pixels) -> Div {
     div().flex().flex_col().children(rows)
 }
 
-/// The title bar row of a pane: the pane inset, a title on the left, and room
-/// for the pane's own controls after it.
-pub fn pane_header(id: impl Into<ElementId>, arm: &DragArm) -> Stateful<Div> {
-    title_strip(id, arm).px(space::LG).gap(space::SM)
+/// The title bar row of a pane: the pane inset, a title on the left, room for
+/// the pane's own controls after it, and the one hairline under it.
+pub fn pane_header(id: impl Into<ElementId>, arm: &DragArm, cx: &App) -> Stateful<Div> {
+    title_strip(id, arm)
+        .px(space::LG)
+        .gap(space::SM)
+        .border_b(size::HAIRLINE)
+        .border_color(cx.theme().border)
 }
 
 /// A pane title, as the title bar row shows it.
@@ -194,4 +202,147 @@ pub fn markdown(state: &Entity<TextViewState>) -> TextView {
             text::MARKDOWN_HEADINGS[usize::from(level.clamp(1, 6)) - 1]
         }),
     )
+}
+
+/// A button in a title bar: an icon and a word, flat until the pointer is
+/// over it.
+pub fn tool(id: impl Into<ElementId>, icon: impl Into<Icon>, label: &'static str) -> Button {
+    Button::new(id)
+        .ghost()
+        .with_size(control::CONTROL)
+        .icon(icon)
+        .label(label)
+}
+
+/// A small button inside a column header: Copy, Digest Now.
+pub fn inline_tool(id: impl Into<ElementId>, icon: impl Into<Icon>, label: &'static str) -> Button {
+    Button::new(id)
+        .ghost()
+        .with_size(control::INLINE)
+        .icon(icon)
+        .label(label)
+}
+
+/// A session's title as an editable field in the title bar. Its text starts
+/// at the pane inset, as every pane title does.
+pub fn title_field(
+    id: impl Into<ElementId>,
+    state: &Entity<InputState>,
+    cx: &App,
+) -> Stateful<Div> {
+    let hover = cx.theme().foreground.opacity(tint::SUBTLE);
+    div()
+        .id(id)
+        .w(size::TITLE_FIELD)
+        .min_w(size::TITLE_FIELD_MIN)
+        .flex_shrink(1.)
+        .rounded(radius::MD)
+        .hover(|field| field.bg(hover))
+        .tooltip(|window, cx| Tooltip::new("Rename").build(window, cx))
+        // A press in the field selects text; it must not move the window.
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(
+            Input::new(state)
+                .appearance(false)
+                .px(space::NONE)
+                .text_size(text::TITLE)
+                .font_weight(text::STRONG),
+        )
+}
+
+/// One transcript entry: the time in fixed-width digits, then the text.
+/// One line height for both, so the time sits on a wrapped entry's first
+/// line. `speaker` heads a new turn, as a chat names a new sender; the
+/// caller passes it only where the speaker changes. `marked` tints the entry
+/// while its speaker is pointed at.
+pub fn transcript_line(
+    time: impl Into<SharedString>,
+    speaker: Option<SharedString>,
+    line: impl Into<SharedString>,
+    marked: Option<Hsla>,
+    muted: Hsla,
+) -> Div {
+    let body = div()
+        .flex_1()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .when_some(speaker, |body, name| {
+            body.child(
+                div()
+                    .text_size(text::CAPTION)
+                    .font_weight(text::STRONG)
+                    .child(name),
+            )
+        })
+        .child(line.into());
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .line_height(text::READING_LINE)
+        .gap(space::MD)
+        .px(space::SM)
+        .py(space::XXS)
+        .rounded(radius::SM)
+        .when_some(marked, |row, tint| row.bg(tint))
+        .child(
+            div()
+                .flex_none()
+                .font_family(text::MONO)
+                .text_size(text::CAPTION)
+                .text_color(muted)
+                .child(time.into()),
+        )
+        .child(body)
+}
+
+/// A speaker with their spoken time. A click names them.
+pub fn speaker_chip(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    selected: bool,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let (background, foreground) = match selected {
+        true => (theme.primary, theme.primary_foreground),
+        false => (theme.secondary, theme.secondary_foreground),
+    };
+    let hover = theme.secondary_hover;
+    div()
+        .id(id)
+        .flex_none()
+        .px(space::SM)
+        .py(space::XXS)
+        .rounded_full()
+        .bg(background)
+        .text_color(foreground)
+        .text_size(text::CAPTION)
+        .cursor_pointer()
+        .when(!selected, |chip| chip.hover(|chip| chip.bg(hover)))
+        .tooltip(|window, cx| Tooltip::new("Name this speaker").build(window, cx))
+        .child(label.into())
+}
+
+/// A row of a source list, as the Finder sidebar draws one: a soft grey
+/// under the selected row, the text unchanged. The sidebar and the Settings
+/// page list use it.
+pub fn source_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let hover = theme.sidebar_foreground.opacity(tint::SUBTLE);
+    let selected_bg = theme.sidebar_foreground.opacity(tint::STRONG);
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::SM)
+        .px(space::SM)
+        .h(size::ROW)
+        .rounded(radius::MD)
+        .text_size(text::BODY)
+        .text_color(theme.sidebar_foreground)
+        .when(selected, |row| row.bg(selected_bg))
+        .when(!selected, |row| row.hover(|row| row.bg(hover)))
 }

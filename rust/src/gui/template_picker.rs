@@ -507,7 +507,7 @@ impl TemplatePickerView {
             true => start.danger(),
             false => start.primary(),
         };
-        pane_header("picker-title", &self.drag)
+        pane_header("picker-title", &self.drag, cx)
             .child(pane_title(action.title))
             .child(div().flex_1())
             .child(
@@ -619,9 +619,6 @@ impl Render for TemplatePickerView {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .when(self.action.is_some(), |body| {
-                        body.border_t(size::HAIRLINE).border_color(border)
-                    })
                     .child(list)
                     .child(div().flex_1().min_w_0().h_full().child(detail)),
             )

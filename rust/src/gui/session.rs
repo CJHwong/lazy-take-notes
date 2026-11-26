@@ -8,10 +8,9 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::text::TextViewState;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -32,7 +31,8 @@ use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::widgets::{
-    DragArm, column_header, empty_state, markdown, pane_header, status_strip, tag,
+    DragArm, column_header, empty_state, inline_tool, markdown, pane_header, speaker_chip,
+    status_strip, tag, title_field, tool, transcript_line,
 };
 use crate::gui::{
     CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
@@ -112,6 +112,9 @@ enum Copied {
 /// One drawn transcript line.
 struct Line {
     time: SharedString,
+    /// The speaker's label, once the speakers are known.
+    speaker: Option<SharedString>,
+    /// The words alone, without the speaker.
     text: SharedString,
     /// The text without its time, for the copy and the speaker highlight.
     plain: String,
@@ -367,7 +370,8 @@ impl SessionView {
             let plain = texts::spoken_text(segment, label.as_deref());
             self.lines.push(Line {
                 time: format_wall_time(segment.wall_start).into(),
-                text: plain.clone().into(),
+                speaker: label.map(Into::into),
+                text: segment.text.clone().into(),
                 plain,
             });
         }
@@ -818,11 +822,6 @@ fn is_thread_end(payload: &Payload) -> bool {
     payload.is::<()>()
 }
 
-/// A toolbar button: an icon and a word, flat until the pointer is over it.
-fn tool(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> Button {
-    Button::new(id).ghost().small().icon(icon).label(label)
-}
-
 /// An alert in the status strip.
 fn badge(text: impl Into<SharedString>, background: Hsla, foreground: Hsla) -> Div {
     div()
@@ -840,28 +839,8 @@ fn badge(text: impl Into<SharedString>, background: Hsla, foreground: Hsla) -> D
 impl SessionView {
     /// The title field, the template's name, then the commands.
     fn render_title_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let hover = cx.theme().foreground.opacity(tint::SUBTLE);
-        pane_header("session-title", &self.drag)
-            .child(
-                // A press in the field selects text; it must not move the window.
-                // The field's text starts at the pane inset, as every pane title does.
-                div()
-                    .id("title-field")
-                    .w(size::TITLE_FIELD)
-                    .min_w(size::TITLE_FIELD_MIN)
-                    .flex_shrink(1.)
-                    .rounded(radius::MD)
-                    .hover(|field| field.bg(hover))
-                    .tooltip(|window, cx| Tooltip::new("Rename").build(window, cx))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        Input::new(&self.title)
-                            .appearance(false)
-                            .px(space::NONE)
-                            .text_size(text::TITLE)
-                            .font_weight(text::STRONG),
-                    ),
-            )
+        pane_header("session-title", &self.drag, cx)
+            .child(title_field("title-field", &self.title, cx))
             .child(div().flex_1())
             .child(self.render_live_state(cx))
             .child(self.render_controls(cx))
@@ -971,11 +950,7 @@ impl SessionView {
             return None;
         }
         let handle = self.focus_handle.clone();
-        let button = Button::new("quick-actions")
-            .ghost()
-            .with_size(control::INLINE)
-            .icon(icons::extra("zap"))
-            .label("Quick Actions");
+        let button = inline_tool("quick-actions", icons::extra("zap"), "Quick Actions");
         Some(button.dropdown_menu(move |menu, _, _| {
             let mut menu = menu.action_context(handle.clone());
             for (index, label) in labels.iter().enumerate() {
@@ -989,11 +964,7 @@ impl SessionView {
 
     /// The Copy button at the end of a column header.
     fn copy_button(&self, id: &'static str, copied: Copied, cx: &mut Context<Self>) -> Button {
-        Button::new(id)
-            .ghost()
-            .with_size(control::INLINE)
-            .icon(IconName::Copy)
-            .label("Copy")
+        inline_tool(id, IconName::Copy, "Copy")
             .on_click(cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)))
     }
 
@@ -1024,28 +995,19 @@ impl SessionView {
                 let mine = highlight
                     .as_deref()
                     .is_some_and(|label| line.plain.starts_with(label));
-                // One line height for the time and the text, so the time sits
-                // on the first line of a wrapped entry.
-                div()
-                    .w_full()
-                    .flex()
-                    .items_start()
-                    .line_height(text::READING_LINE)
-                    .gap(space::MD)
-                    .px(space::SM)
-                    .py(space::XXS)
-                    .rounded(radius::SM)
-                    .when(mine, |row| row.bg(marked))
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_family(text::MONO)
-                            .text_size(text::CAPTION)
-                            .text_color(muted)
-                            .child(line.time.clone()),
-                    )
-                    .child(div().flex_1().min_w_0().child(line.text.clone()))
-                    .into_any_element()
+                let turn = index
+                    .checked_sub(1)
+                    .and_then(|before| view.lines.get(before))
+                    .is_none_or(|before| before.speaker != line.speaker);
+                let speaker = line.speaker.clone().filter(|_| turn);
+                transcript_line(
+                    line.time.clone(),
+                    speaker,
+                    line.text.clone(),
+                    mine.then_some(marked),
+                    muted,
+                )
+                .into_any_element()
             }),
         )
         .size_full();
@@ -1082,37 +1044,19 @@ impl SessionView {
     fn render_speakers(&self, cx: &mut Context<Self>) -> Div {
         let chips = self.speakers();
         let focused = self.focus == Focus::Speakers;
-        let theme = cx.theme();
-        let (chosen, chosen_text) = (theme.primary, theme.primary_foreground);
-        let (plain, plain_text) = (theme.secondary, theme.secondary_foreground);
-        let hover = theme.secondary_hover;
         let items = chips.into_iter().map(|(speaker, name, seconds)| {
             // The keys choose a speaker only while the chips have the focus.
             let selected = focused && self.selected_speaker == Some(speaker);
-            let (background, text) = match selected {
-                true => (chosen, chosen_text),
-                false => (plain, plain_text),
-            };
             let shown = if name.is_empty() {
                 format!("S{speaker}")
             } else {
                 name
             };
-            div()
-                .id(("speaker", speaker as usize))
-                .px(space::SM)
-                .py(space::XXS)
-                .rounded_full()
-                .bg(background)
-                .text_color(text)
-                .text_size(text::CAPTION)
-                .cursor_pointer()
-                .when(!selected, |chip| chip.hover(|chip| chip.bg(hover)))
-                .tooltip(|window, cx| Tooltip::new("Name this speaker").build(window, cx))
-                .child(format!(
-                    "{shown}  {}",
-                    crate::app::session::format_spoken_time(seconds)
-                ))
+            let label = format!(
+                "{shown}  {}",
+                crate::app::session::format_spoken_time(seconds)
+            );
+            speaker_chip(("speaker", speaker as usize), label, selected, cx)
                 .on_hover(cx.listener(move |view, hovered: &bool, _, cx| {
                     let now = hovered.then_some(speaker);
                     if *hovered || view.hovered_speaker == Some(speaker) {
@@ -1152,14 +1096,9 @@ impl SessionView {
                         .items_center()
                         .gap(space::XS)
                         .child(
-                            Button::new("digest")
-                                .ghost()
-                                .with_size(control::INLINE)
-                                .icon(icons::extra("sparkles"))
-                                .label("Digest Now")
-                                .on_click(
-                                    cx.listener(|view, _, window, cx| view.digest_now(window, cx)),
-                                ),
+                            inline_tool("digest", icons::extra("sparkles"), "Digest Now").on_click(
+                                cx.listener(|view, _, window, cx| view.digest_now(window, cx)),
+                            ),
                         )
                         .children(self.render_quick_actions())
                         .child(self.copy_button("copy-digest", Copied::Digest, cx)),
@@ -1462,8 +1401,6 @@ impl Render for SessionView {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .border_t(size::HAIRLINE)
-                    .border_color(border)
                     .child(self.render_transcript(cx))
                     .child(div().w(size::HAIRLINE).h_full().bg(border))
                     .child(self.render_notes(cx)),

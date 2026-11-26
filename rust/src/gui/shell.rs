@@ -32,7 +32,7 @@ use crate::app::template_builder::{TemplateBuilderRuntime, config_setup};
 use crate::domain::template::SessionTemplate;
 use crate::gui::bridge::notify;
 use crate::gui::builder::{BuilderEvent, BuilderView};
-use crate::gui::design::{control, radius, size, space, text, tint};
+use crate::gui::design::{control, size, space, text};
 use crate::gui::dialogs;
 use crate::gui::preflight::{PreflightEvent, PreflightView};
 use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
@@ -40,7 +40,7 @@ use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
 use crate::gui::template_picker::{StartAction, TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
 use crate::gui::widgets::{
-    DragArm, brand, caption, empty_state, mascot, pane_header, pane_title, title_strip,
+    DragArm, brand, caption, empty_state, mascot, pane_header, pane_title, source_row, title_strip,
 };
 
 const START_ERROR_TIMEOUT: Duration = Duration::from_secs(12);
@@ -709,52 +709,26 @@ impl Shell {
             dot,
         } = row;
         let theme = cx.theme();
-        // As the Finder sidebar: a soft grey under the selected row, the text unchanged.
-        let (text, muted) = (theme.sidebar_foreground, theme.muted_foreground);
-        let hover = theme.sidebar_foreground.opacity(tint::SUBTLE);
-        let selected_bg = theme.sidebar_foreground.opacity(tint::STRONG);
-        let height = if detail.is_some() {
-            size::ROW_TWO_LINE
-        } else {
-            size::ROW
-        };
-        div()
-            .id(id)
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(space::SM)
+        let muted = theme.muted_foreground;
+        source_row(id, selected, cx)
             .mx(space::SM)
-            .px(space::SM)
-            .h(height)
-            .rounded(radius::MD)
-            .text_size(text::BODY)
-            .text_color(text)
-            .when(selected, |row| row.bg(selected_bg))
-            .when(!selected, |row| row.hover(|row| row.bg(hover)))
             .when_some(icon, |row, icon| {
                 row.child(Icon::new(icon).size(size::ICON).text_color(theme.primary))
             })
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .min_w_0()
-                    .flex_1()
-                    .child(div().truncate().child(title))
-                    .when_some(detail, |column, detail| {
-                        column.child(
-                            div()
-                                .text_size(text::CAPTION)
-                                .text_color(muted)
-                                .truncate()
-                                .child(detail),
-                        )
-                    }),
-            )
-            // The live dot sits at the end, so a live row's title lines up with the rest.
+            .child(div().flex_1().min_w_0().truncate().child(title))
+            // The live dot and the time sit at the end, so every title lines up.
             .when_some(dot, |row, dot| {
                 row.child(div().flex_none().size(size::DOT).rounded_full().bg(dot))
+            })
+            .when_some(detail, |row, detail| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .font_family(text::MONO)
+                        .text_size(text::CAPTION)
+                        .text_color(muted)
+                        .child(detail),
+                )
             })
             .on_click(cx.listener(move |shell, _, window, cx| {
                 // A click on the open page's own row keeps it as it is.
@@ -909,31 +883,37 @@ impl Shell {
     /// The two ways to start, over the session list. Recording is the app's
     /// main act, so it is the one red, full-width button in the window.
     fn start_buttons(&self, record: OnClick, transcribe: OnClick, cx: &mut Context<Self>) -> Div {
+        // One choice with a default: the same size and shape, recording in red.
         div()
             .flex()
-            .flex_col()
             .flex_none()
-            .gap(space::XS)
-            .pb(space::SM)
+            .gap(space::SM)
+            .px(space::SM)
+            .pb(space::MD)
             .child(
                 Button::new("new-recording")
                     .danger()
                     .with_size(control::HERO)
-                    .mx(space::SM)
+                    .flex_1()
                     .icon(IconName::Mic)
-                    .label("New Recording")
+                    .label("Record")
+                    .tooltip("Start a new recording")
                     .on_click(cx.listener(move |shell, _, window, cx| {
                         shell.leave_page_then(record.clone(), window, cx)
                     })),
             )
-            .child(self.nav_row(
-                NavRow {
-                    icon: Some(IconName::File),
-                    ..nav("transcribe-file", "Transcribe File…")
-                },
-                transcribe,
-                cx,
-            ))
+            .child(
+                Button::new("transcribe-file")
+                    .outline()
+                    .with_size(control::HERO)
+                    .flex_1()
+                    .icon(IconName::File)
+                    .label("Transcribe")
+                    .tooltip("Transcribe an audio file")
+                    .on_click(cx.listener(move |shell, _, window, cx| {
+                        shell.leave_page_then(transcribe.clone(), window, cx)
+                    })),
+            )
     }
 
     /// The mascot, and the two ways to start.
@@ -997,7 +977,8 @@ impl Shell {
             Detail::Saved(view, _) => (None, view.clone().into_any_element()),
             Detail::Templates(view) => (Some("Templates".into()), view.clone().into_any_element()),
             Detail::Builder(view) => (None, view.clone().into_any_element()),
-            Detail::Settings(view) => (Some("Settings".into()), view.clone().into_any_element()),
+            // Settings draws its own title bar, with Revert and Save.
+            Detail::Settings(view) => (None, view.clone().into_any_element()),
         }
     }
 }
@@ -1020,10 +1001,13 @@ impl Render for Shell {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .when_some(title, |pane, title| {
-                        pane.child(
-                            pane_header("pane-title", &self.pane_drag).child(pane_title(title)),
-                        )
+                    // The empty window keeps a bare strip to drag by: no title,
+                    // so no line under it.
+                    .when_some(title, |pane, title| match title.is_empty() {
+                        true => pane.child(title_strip("pane-title", &self.pane_drag)),
+                        false => pane.child(
+                            pane_header("pane-title", &self.pane_drag, cx).child(pane_title(title)),
+                        ),
                     })
                     .child(div().flex_1().min_h_0().child(body)),
             )

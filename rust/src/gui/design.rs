@@ -59,9 +59,8 @@ pub mod size {
     pub const SIDEBAR: Pixels = px(240.);
     /// The template list column of the start panel.
     pub const LIST_COLUMN: Pixels = px(300.);
-    /// A one-line list row, and a row with a second line.
+    /// A list row.
     pub const ROW: Pixels = px(28.);
-    pub const ROW_TWO_LINE: Pixels = px(40.);
     pub const ICON: Pixels = px(16.);
     pub const ICON_SM: Pixels = px(14.);
     /// A status dot: recording, a check state.
@@ -73,6 +72,19 @@ pub mod size {
     pub const HAIRLINE: Pixels = px(1.);
     /// The mascot's pixel on the empty window.
     pub const MASCOT_PIXEL: Pixels = px(8.);
+    /// The Settings page list, a form row, the control column of a form,
+    /// and the widest a Settings page grows.
+    pub const SETTINGS_NAV: Pixels = px(200.);
+    pub const FORM_ROW: Pixels = px(40.);
+    pub const FORM_FIELD: Pixels = px(280.);
+    pub const FORM_PAGE: Pixels = px(720.);
+    /// The size and status columns of a model row, and its buttons.
+    pub const STAT_COLUMN: Pixels = px(72.);
+    pub const ACTION_COLUMN: Pixels = px(160.);
+    /// A locale code field.
+    pub const LOCALE_FIELD: Pixels = px(96.);
+    /// The widest chat bubble of the template builder.
+    pub const BUBBLE_MAX: Pixels = px(520.);
     /// The Session Context panel under the notes, while it has no focus.
     pub const CONTEXT_PANEL: Pixels = px(140.);
     /// The title field of a session: wide enough for most names.
@@ -125,6 +137,8 @@ pub mod tint {
     pub const STRONG: f32 = 0.16;
     /// Text and icons that sit back: disabled controls, empty meter bars.
     pub const FAINT: f32 = 0.4;
+    /// The fill of a Settings card over the window background.
+    pub const CARD: f32 = 0.025;
 }
 
 /// The macOS accent colors, light then dark, as `AppleAccentColor` numbers
