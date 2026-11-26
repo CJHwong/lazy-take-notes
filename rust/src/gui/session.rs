@@ -51,15 +51,15 @@ pub const SHORTCUTS: &str = "\
 |-----|--------|
 | `Space` | Pause or resume the recording |
 | `⌘.` | Stop |
-| `⌘↩` | Finish: write the final digest and save |
-| `⌘D` | Digest now |
+| `⌘↩` | Finish: write the final notes and save |
+| `⌘D` | Update the notes now |
 | `⇧⌘M` | Mute or unmute the microphone |
-| `⌘1` to `⌘5` | The template's quick actions |
+| `⌘1` to `⌘5` | Ask AI: the note type's questions |
 | `⇧⌘C` | Copy the transcript |
-| `⌥⌘C` | Copy the digest |
+| `⌥⌘C` | Copy the notes |
 | `⌘L` | Rename the session |
 | `⇧⌘R` | Show the session folder in Finder |
-| `Tab` | Move between the transcript, the speakers and the session context |
+| `Tab` | Move between the transcript, the speakers and Background for AI |
 | `←` `→` `Return` | On the speakers: choose one, name it |
 | `⌘N` | New session: choose a note type, then record or import audio |
 | `⌘,` | Settings |

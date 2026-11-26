@@ -94,6 +94,11 @@ pub mod size {
     /// The title field of a session: wide enough for most names.
     pub const TITLE_FIELD: Pixels = px(360.);
     pub const TITLE_FIELD_MIN: Pixels = px(120.);
+    /// Dialog widths: a question or a form, and a long text.
+    pub const DIALOG: Pixels = px(440.);
+    pub const DIALOG_WIDE: Pixels = px(640.);
+    /// The tallest a dialog's text grows before it scrolls.
+    pub const DIALOG_BODY: Pixels = px(480.);
     /// How far a long list draws past its visible part.
     pub const LIST_OVERDRAW: Pixels = px(400.);
 }

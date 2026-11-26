@@ -323,7 +323,7 @@ impl TemplatePickerView {
         }
         let view = cx.entity().downgrade();
         let message = format!("Delete the note type \"{name}\"?");
-        dialogs::confirm(window, cx, message, "Yes", true, move |window, cx| {
+        dialogs::confirm(window, cx, message, "Delete", true, move |window, cx| {
             let _ = view.update(cx, |view, cx| view.delete(&name, window, cx));
         });
     }

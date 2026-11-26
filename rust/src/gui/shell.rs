@@ -190,8 +190,8 @@ impl Shell {
         dialogs::confirm(
             window,
             cx,
-            "You have an unsaved note type. Quit anyway?",
-            "Quit",
+            "You have an unsaved note type. Discard it?",
+            "Discard",
             true,
             move |window, cx| {
                 builder.update(cx, |builder, _| builder.discard());

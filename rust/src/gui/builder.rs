@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::dialog::{DialogAction, DialogClose, DialogFooter};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _};
@@ -186,40 +185,28 @@ impl BuilderView {
             }
             let (view, file, display) = (view.clone(), file_name.clone(), display_name.clone());
             let muted = cx.theme().muted_foreground;
-            let label = move |text: &'static str| div().text_sm().text_color(muted).child(text);
+            let label = move |line: &'static str| {
+                div().text_size(text::CAPTION).text_color(muted).child(line)
+            };
             dialog
-                .w(px(460.))
-                .title(
-                    div()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("Save Note Type"),
-                )
+                .w(size::DIALOG)
+                .title(dialogs::title_text("Save Note Type"))
                 .child(
                     div()
                         .flex()
                         .flex_col()
-                        .gap_2()
+                        .gap(space::XS)
                         .child(label("File name"))
-                        .child(Input::new(&file_name))
+                        .child(Input::new(&file_name).with_size(control::CONTROL))
+                        .child(div().h(space::XS))
                         .child(label("Display name"))
-                        .child(Input::new(&display_name)),
+                        .child(Input::new(&display_name).with_size(control::CONTROL)),
                 )
-                .footer(
-                    DialogFooter::new()
-                        .justify_end()
-                        .child(DialogClose::new().trigger(|button| button.label("Cancel")))
-                        .child(
-                            DialogAction::new()
-                                .child(Button::new("save-template").primary().label("Save")),
-                        ),
-                )
-                .on_ok(move |_, window, cx| {
-                    let Some((file, display)) = save_names(&file, &display, cx) else {
-                        return false;
-                    };
-                    let _ = view.update(cx, |view, cx| view.saved_as(&file, &display, window, cx));
-                    true
-                })
+                .footer(dialogs::buttons("Save", false, {
+                    let (view, file, display) = (view.clone(), file.clone(), display.clone());
+                    move |window, cx| save_as(&view, &file, &display, window, cx)
+                }))
+                .on_ok(move |_, window, cx| save_as(&view, &file, &display, window, cx))
         });
     }
 
@@ -253,8 +240,8 @@ impl BuilderView {
         dialogs::confirm(
             window,
             cx,
-            "You have an unsaved note type. Quit anyway?",
-            "Quit",
+            "You have an unsaved note type. Discard it?",
+            "Discard",
             true,
             move |_, cx| {
                 let _ = view.update(cx, |view, cx| view.leave(cx));
@@ -411,6 +398,21 @@ impl BuilderView {
                     .child(markdown(&self.preview)),
             )
     }
+}
+
+/// Save under the names the dialog holds. False keeps the dialog open.
+fn save_as(
+    view: &WeakEntity<BuilderView>,
+    file_name: &Entity<InputState>,
+    display_name: &Entity<InputState>,
+    window: &mut Window,
+    cx: &mut App,
+) -> bool {
+    let Some((file, display)) = save_names(file_name, display_name, cx) else {
+        return false;
+    };
+    let _ = view.update(cx, |view, cx| view.saved_as(&file, &display, window, cx));
+    true
 }
 
 /// The names the save dialog holds. None keeps the dialog open, as an empty
