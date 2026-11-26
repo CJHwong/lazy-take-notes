@@ -25,8 +25,8 @@ use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::preflight::PreflightView;
 use crate::gui::widgets::{
-    DragArm, action_bar, caption, card, markdown, page_title, pane_header, pane_title,
-    section_heading, tag,
+    DragArm, caption, card, markdown, page_title, pane_header, pane_title, section_heading, tag,
+    tool,
 };
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -411,10 +411,11 @@ impl TemplatePickerView {
     }
 
     /// The selected template's name, source, locale and description.
-    fn render_heading(&self, cx: &App) -> Option<Div> {
+    fn render_heading(&self, cx: &mut Context<Self>) -> Option<Div> {
         let name = self.current()?;
         let template = self.catalog.loaded.get(&name)?;
-        let meta = &template.metadata;
+        let meta = template.metadata.clone();
+        let tools = self.render_template_tools(&name, cx);
         let source = if self.catalog.user_names.contains(&name) {
             "User"
         } else {
@@ -427,7 +428,14 @@ impl TemplatePickerView {
                 .gap(space::SM)
                 .pt(space::XL)
                 .pb(space::MD)
-                .child(page_title(meta.name.clone()))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::MD)
+                        .child(page_title(meta.name.clone()).flex_1().min_w_0())
+                        .child(tools),
+                )
                 .child(
                     div()
                         .flex()
@@ -548,49 +556,39 @@ impl TemplatePickerView {
         )
     }
 
-    /// New, Edit, Edit with AI and Delete, under the list.
-    fn render_tools(&self, cx: &mut Context<Self>) -> Div {
-        let current = self.current();
-        let none = current.is_none();
-        let user = current
-            .as_ref()
-            .is_some_and(|name| self.catalog.user_names.contains(name));
-        action_bar(cx)
+    /// New, beside the filter: it makes a template, so it sits with the list.
+    fn render_new(&self, cx: &mut Context<Self>) -> Button {
+        Button::new("new-template")
+            .outline()
+            .with_size(control::CONTROL)
+            .icon(IconName::Plus)
+            .label("New")
+            .tooltip("Create a template with AI")
+            .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Create)))
+    }
+
+    /// Edit, Edit with AI and Delete, beside the name of the template they
+    /// change.
+    fn render_template_tools(&self, name: &str, cx: &mut Context<Self>) -> Div {
+        let user = self.catalog.user_names.contains(name);
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
             .gap(space::XS)
-            .px(space::SM)
             .child(
-                Button::new("new-template")
-                    .ghost()
-                    .small()
-                    .icon(IconName::Plus)
-                    .label("New")
-                    .tooltip("Create a template with AI")
-                    .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Create))),
-            )
-            .child(
-                Button::new("edit-template")
-                    .ghost()
-                    .small()
-                    .icon(icons::extra("pencil"))
-                    .label("Edit")
+                tool("edit-template", icons::extra("pencil"), "Edit")
                     .tooltip("Open the template in your text editor")
-                    .disabled(none)
                     .on_click(cx.listener(|view, _, window, cx| view.edit(window, cx))),
             )
             .child(
-                Button::new("edit-template-ai")
-                    .ghost()
-                    .small()
-                    .icon(icons::extra("sparkles"))
-                    .label("Edit with AI")
-                    .disabled(none)
+                tool("edit-template-ai", icons::extra("sparkles"), "Edit with AI")
                     .on_click(cx.listener(|view, _, _, cx| view.edit_with_ai(cx))),
             )
-            .child(div().flex_1())
             .child(
                 Button::new("delete-template")
                     .ghost()
-                    .small()
+                    .with_size(control::CONTROL)
                     .icon(icons::extra("trash"))
                     .tooltip(if user {
                         "Delete this template"
@@ -690,9 +688,17 @@ impl Render for TemplatePickerView {
             .child(
                 div()
                     .flex_none()
-                    .px(space::SM)
-                    .pb(space::SM)
-                    .child(Input::new(&self.search).cleanable(true)),
+                    .flex()
+                    .gap(space::SM)
+                    .p(space::SM)
+                    .child(
+                        div().flex_1().child(
+                            Input::new(&self.search)
+                                .with_size(control::CONTROL)
+                                .cleanable(true),
+                        ),
+                    )
+                    .child(self.render_new(cx)),
             )
             .child(
                 div()
@@ -705,8 +711,7 @@ impl Render for TemplatePickerView {
                     .track_scroll(&self.scroll)
                     .on_click(cx.listener(|view, _, window, cx| view.focus_part(true, window, cx)))
                     .children(rows),
-            )
-            .child(self.render_tools(cx));
+            );
         let detail = match &self.checks {
             Some(checks) => checks.clone().into_any_element(),
             None => div()
