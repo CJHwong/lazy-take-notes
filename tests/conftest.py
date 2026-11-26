@@ -159,6 +159,7 @@ class FakePersistence:
         self.digest_calls: list[tuple[str, int]] = []
         self.history_calls: list[tuple[str, int, bool]] = []
         self.context_calls: list[str] = []
+        self.template_calls: list[str] = []
 
     def save_transcript_lines(self, segments: list[TranscriptSegment], *, append: bool = True) -> Path:
         self.transcript_calls.append((segments, append))
@@ -175,6 +176,10 @@ class FakePersistence:
     def save_session_context(self, context: str) -> Path:
         self.context_calls.append(context)
         return self._output_dir / CONTEXT.name
+
+    def save_template_name(self, name: str) -> Path:
+        self.template_calls.append(name)
+        return self._output_dir / 'template.txt'
 
 
 class FailingPersistence(FakePersistence):

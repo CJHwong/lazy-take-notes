@@ -36,6 +36,8 @@ pub const DEBUG_LOG: SessionFile = SessionFile {
 };
 /// The transcript with speaker labels, written by a labeled session and by `diarize`.
 pub const SPEAKER_TRANSCRIPT: &str = "transcript_speakers.txt";
+/// The name of the template the session ran with, so a viewer can show it.
+pub const TEMPLATE: &str = "template.txt";
 
 #[cfg(test)]
 mod tests {

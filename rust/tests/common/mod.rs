@@ -177,6 +177,7 @@ pub struct Saved {
     pub digest: Vec<(String, u32)>,
     pub history: Vec<(String, u32, bool)>,
     pub context: Vec<String>,
+    pub template: Vec<String>,
 }
 
 /// Records each write. A method named in `failing` fails like a full disk instead.
@@ -254,6 +255,12 @@ impl lazy_take_notes::ports::persistence::Persistence for FakePersistence {
     fn save_session_context(&mut self, context: &str) -> std::io::Result<std::path::PathBuf> {
         let path = self.check("save_session_context")?;
         self.saved.lock().unwrap().context.push(context.into());
+        Ok(path)
+    }
+
+    fn save_template_name(&mut self, name: &str) -> std::io::Result<std::path::PathBuf> {
+        let path = self.check("save_template_name")?;
+        self.saved.lock().unwrap().template.push(name.into());
         Ok(path)
     }
 }

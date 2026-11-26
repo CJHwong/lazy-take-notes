@@ -28,6 +28,8 @@ CONTEXT = SessionFile('context.txt', 'session_context.txt')
 DEBUG_LOG = SessionFile('debug.log', 'ltn_debug.log')
 # The transcript with speaker labels; written by a labeled session and by `diarize`.
 SPEAKER_TRANSCRIPT = 'transcript_speakers.txt'
+# The name of the template the session ran with, so a viewer can show it.
+TEMPLATE = 'template.txt'
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::adapters::os_error::OsError;
-use crate::domain::session_files::{CONTEXT, NOTES, TRANSCRIPT};
+use crate::domain::session_files::{CONTEXT, NOTES, TEMPLATE, TRANSCRIPT};
 use crate::domain::transcript::{TranscriptSegment, format_wall_time};
 use crate::ports::persistence::Persistence;
 
@@ -99,6 +99,12 @@ impl Persistence for FilePersistence {
     fn save_session_context(&mut self, context: &str) -> io::Result<PathBuf> {
         let path = self.output_dir.join(CONTEXT.name);
         write_text(&path, context)?;
+        Ok(path)
+    }
+
+    fn save_template_name(&mut self, name: &str) -> io::Result<PathBuf> {
+        let path = self.output_dir.join(TEMPLATE);
+        write_text(&path, &format!("{name}\n"))?;
         Ok(path)
     }
 }

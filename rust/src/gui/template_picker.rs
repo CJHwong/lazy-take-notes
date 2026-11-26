@@ -560,7 +560,7 @@ impl TemplatePickerView {
     fn render_new(&self, cx: &mut Context<Self>) -> Button {
         Button::new("new-template")
             .outline()
-            .with_size(control::CONTROL)
+            .with_size(control::HERO)
             .icon(IconName::Plus)
             .label("New")
             .tooltip("Create a template with AI")
@@ -694,7 +694,7 @@ impl Render for TemplatePickerView {
                     .child(
                         div().flex_1().child(
                             Input::new(&self.search)
-                                .with_size(control::CONTROL)
+                                .with_size(control::HERO)
                                 .cleanable(true),
                         ),
                     )

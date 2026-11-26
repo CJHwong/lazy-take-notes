@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from lazy_take_notes.l1_entities.session_files import CONTEXT, NOTES, TRANSCRIPT
+from lazy_take_notes.l1_entities.session_files import CONTEXT, NOTES, TEMPLATE, TRANSCRIPT
 from lazy_take_notes.l1_entities.transcript import TranscriptSegment, format_wall_time
 
 log = logging.getLogger('ltn.persist')
@@ -52,6 +52,11 @@ class FilePersistenceGateway:
     def save_session_context(self, context: str) -> Path:
         path = self._output_dir / CONTEXT.name
         path.write_text(context, encoding='utf-8')
+        return path
+
+    def save_template_name(self, name: str) -> Path:
+        path = self._output_dir / TEMPLATE
+        path.write_text(f'{name}\n', encoding='utf-8')
         return path
 
     def save_history(self, markdown: str, digest_number: int, *, is_final: bool = False) -> Path:

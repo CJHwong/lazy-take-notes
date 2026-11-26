@@ -53,6 +53,7 @@ class SessionController:
         self.speaker_turns: list[SpeakerTurn] = []
         self.speaker_names: dict[int, str] = {}
         self._persist_error: str | None = None
+        self._template_saved = False
 
     def _persist(self, what: str, write: Callable[[], object]) -> None:
         """Run one disk write. A full or vanished disk must not end the recording."""
@@ -102,6 +103,12 @@ class SessionController:
             self.digest_state.all_lines.append(seg.text)
 
         self._persist('transcript', lambda: self._persistence.save_transcript_lines(segments, append=True))
+        # With the first lines, not at start: a session cancelled before any
+        # speech must not leave a folder that looks like a session.
+        if not self._template_saved:
+            self._template_saved = True
+            name = self._template.metadata.name
+            self._persist('template name', lambda: self._persistence.save_template_name(name))
 
         dc = self._config.digest
         return should_trigger_digest(self.digest_state, dc.min_lines, dc.min_interval, dc.max_lines)

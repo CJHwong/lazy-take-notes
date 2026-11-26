@@ -97,8 +97,9 @@ pub mod size {
 }
 
 /// Control sizes, as the kit names them. Every button, field and menu in a
-/// toolbar or a form is `CONTROL` (24 pt). Only the start buttons are `HERO`
-/// (32 pt), and only inline buttons in a column header are `INLINE` (20 pt).
+/// title bar or a form is `CONTROL` (24 pt). `HERO` (32 pt) is for the start
+/// buttons and a list's own search row. Inline buttons in a column header are
+/// `INLINE` (20 pt).
 pub mod control {
     use gpui_kit::component::Size;
     pub const CONTROL: Size = Size::Small;
