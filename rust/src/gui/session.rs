@@ -308,8 +308,10 @@ impl SessionView {
             Mode::Record(record) => record.task_result(payload, io),
             Mode::File(file) => file.task_result(payload, io),
         });
-        result.unwrap_or_else(|_| {
-            error!(target: "ltn.app", "a task result nobody takes");
+        result.unwrap_or_else(|payload| {
+            if !is_thread_end(&payload) {
+                error!(target: "ltn.app", "a task result nobody takes");
+            }
             Step::None
         })
     }
@@ -809,6 +811,12 @@ fn shown_title(label: &str) -> String {
 }
 
 /// A toolbar icon outside the kit's default set; `icons.rs` embeds it.
+/// A worker thread (audio, transcription, speakers) posts its empty return
+/// value when it ends. The terminal app drops it too: it carries nothing.
+fn is_thread_end(payload: &Payload) -> bool {
+    payload.is::<()>()
+}
+
 /// A small heading over a column, as the sidebar's group titles.
 fn heading(title: &'static str, cx: &App) -> Div {
     div()
@@ -1404,5 +1412,16 @@ impl Render for SessionView {
                     .child(self.render_notes(cx)),
             )
             .child(self.render_status(cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Payload, is_thread_end};
+
+    #[test]
+    fn only_an_empty_result_is_a_thread_end() {
+        assert!(is_thread_end(&(Box::new(()) as Payload)));
+        assert!(!is_thread_end(&(Box::new(String::new()) as Payload)));
     }
 }
