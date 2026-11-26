@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
@@ -501,6 +502,19 @@ class TestMixedAudioSource:
         assert result is not None
         # combined = [1.6, 1.8], peak = 1.8 → scale by 0.99/1.8 → [0.88, 0.99]
         np.testing.assert_allclose(result, [1.6 * (0.99 / 1.8), 0.99], atol=1e-5)
+
+    def test_close_logs_how_many_blocks_the_limiter_scaled(self, caplog):
+        mic = FakeAudioSource(chunks=[np.array([0.8, 0.9], dtype=np.float32)])
+        sys_audio = FakeAudioSource(chunks=[np.array([0.8, 0.9], dtype=np.float32)])
+        src = MixedAudioSource(mic, sys_audio)
+        src.open(16000, 1)
+
+        time.sleep(0.1)
+        src.read(timeout=0.5)
+        with caplog.at_level(logging.INFO, logger='ltn.audio.mixed'):
+            src.close()
+
+        assert 'limiter scaled 1 of 1 blocks' in caplog.text
 
     def test_last_mic_rms_tracks_pre_mix_mic_signal(self):
         """last_mic_rms must reflect the mic's own signal, not the mixed output."""
