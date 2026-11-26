@@ -10,16 +10,16 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use tracing::error;
 
-use crate::adapters::os_error::OsError;
 use crate::adapters::saved_speakers::{self, SavedSpeakers};
-use crate::domain::session_files::{NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
+use crate::app::saved_session::{self, split_line, spoken_by};
+use crate::domain::session_files::{NOTES, TRANSCRIPT};
 use crate::tui::host::{Action, Ctx, MouseInput, MouseKind, Payload, Screen};
 use crate::tui::keys::{Binding, SCREEN_BASE, action_for, bind};
 use crate::tui::screens::modals::LabelModal;
 use crate::tui::screens::session::{
     BarKey, render_speaker_bar, select_on_entry, speaker_bar_key, wrap_chips,
 };
-use crate::tui::screens::session_picker::{SessionPicker, picked_dir, utf8_error};
+use crate::tui::screens::session_picker::{SessionPicker, picked_dir};
 use crate::tui::system::{copy_to_clipboard, open_folder};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::scroll::ScrollView;
@@ -88,29 +88,20 @@ impl Default for TranscriptPanel {
 /// One saved line, `[hh:mm:ss] text`: the timestamp dim, then the text. `background`
 /// marks a line of the selected speaker.
 pub fn transcript_line(text: &str, background: Option<Color>) -> Line<'static> {
-    let line = match text.starts_with('[') {
-        true => match text.find("] ") {
-            Some(at) => Line::from(vec![
-                Span::styled(
-                    text[..=at].to_string(),
-                    Style::default().add_modifier(Modifier::DIM),
-                ),
-                Span::raw(text[at + 1..].to_string()),
-            ]),
-            None => Line::from(text.to_string()),
-        },
-        false => Line::from(text.to_string()),
+    let line = match split_line(text) {
+        (Some(stamp), rest) => Line::from(vec![
+            Span::styled(
+                stamp.to_string(),
+                Style::default().add_modifier(Modifier::DIM),
+            ),
+            Span::raw(rest.to_string()),
+        ]),
+        (None, _) => Line::from(text.to_string()),
     };
     match background {
         Some(color) => line.style(Style::default().bg(color)),
         None => line,
     }
-}
-
-/// True when `text` is a line of the speaker shown as `label`.
-fn spoken_by(text: &str, label: &str) -> bool {
-    text.find("] ")
-        .is_some_and(|at| text[at + 2..].starts_with(&format!("{label}: ")))
 }
 
 impl TranscriptPanel {
@@ -297,33 +288,20 @@ impl ViewScreen {
         let Some(path) = path else {
             return String::new();
         };
-        let failure = match std::fs::read(&path) {
-            Ok(bytes) => match String::from_utf8(bytes) {
-                Ok(text) => return text.trim().to_string(),
-                Err(e) => utf8_error(&e),
-            },
-            Err(e) => OsError::from_io(&e, Some(&path), None).to_string(),
-        };
-        error!(target: "ltn.view", "Cannot read {}: {failure}", path.display());
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        ctx.error(
-            format!("Cannot read {name}: {failure}"),
-            Duration::from_secs(8),
-        );
-        String::new()
+        match saved_session::read_saved(&path) {
+            Ok(text) => text,
+            Err(message) => {
+                error!(target: "ltn.view", "{message} ({})", path.display());
+                ctx.error(message, Duration::from_secs(8));
+                String::new()
+            }
+        }
     }
 
     /// The labeled transcript when the session has one, else the plain one.
     fn load_transcript(&mut self, ctx: &mut Ctx) {
         self.transcript.clear();
-        let labeled = self.session_dir.join(SPEAKER_TRANSCRIPT);
-        let path = match labeled.is_file() {
-            true => Some(labeled),
-            false => TRANSCRIPT.resolve(&self.session_dir),
-        };
+        let path = saved_session::transcript_path(&self.session_dir);
         let text = self.read_saved(path, ctx);
         // The saved lines already carry their timestamps; write them as they are.
         for line in text.lines().filter(|line| !line.trim().is_empty()) {
@@ -406,22 +384,15 @@ impl ViewScreen {
             .zip(self.speakers.as_ref())
             .map(|(speaker, saved)| saved.label(speaker));
     }
-
-    fn has_recording(&self) -> bool {
-        std::fs::read_dir(&self.session_dir).is_ok_and(|entries| {
-            entries.filter_map(Result::ok).any(|entry| {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                name.starts_with("recording") && name.ends_with(".wav")
-            })
-        })
-    }
 }
 
 impl Screen for ViewScreen {
     fn mounted(&mut self, ctx: &mut Ctx) -> Action {
         self.load_speakers(ctx);
         self.load_transcript(ctx);
-        if TRANSCRIPT.resolve(&self.session_dir).is_none() && self.has_recording() {
+        if TRANSCRIPT.resolve(&self.session_dir).is_none()
+            && saved_session::has_recording(&self.session_dir)
+        {
             // A failed transcription keeps only the audio.
             self.transcript.view.write(Line::from(
                 "No transcript. The audio is saved in this folder: press o to open it.",

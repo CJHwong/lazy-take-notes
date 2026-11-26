@@ -24,7 +24,7 @@ use crate::app::logging::close_file_logging;
 use crate::app::preflight::Reload;
 use crate::app::preflight_runtime::PreflightRuntime;
 use crate::app::session::Severity;
-use crate::app::session_list::{Entry, grouped, title};
+use crate::app::session_list::{Entry, grouped};
 use crate::app::session_start::{
     TranscribeSource, TranscribeStart, build_plan, preflight_llm, record_start,
 };
@@ -494,9 +494,16 @@ impl Shell {
             return self.show_detail(Detail::Live, None, cx);
         }
         let reader = cx.new(|cx| SessionReader::new(dir.to_path_buf(), window, cx));
-        let subscription = cx.subscribe_in(&reader, window, |shell, _, event, _, cx| {
-            let ReaderEvent::Closed = event;
-            shell.show_detail(Detail::Empty, None, cx);
+        let subscription = cx.subscribe_in(&reader, window, |shell, _, event, _, cx| match event {
+            ReaderEvent::Closed => shell.show_detail(Detail::Empty, None, cx),
+            ReaderEvent::Renamed(moved) => {
+                // The sidebar marks the open session by its folder.
+                if let Detail::Saved(_, dir) = &mut shell.detail {
+                    *dir = moved.clone();
+                }
+                shell.refresh_sessions();
+                cx.notify();
+            }
         });
         self.show_detail(
             Detail::Saved(reader, dir.to_path_buf()),
@@ -925,13 +932,7 @@ impl Shell {
                 Some((Stage::Session(view), _)) => (None, view.clone().into_any_element()),
                 None => (Some("".into()), self.empty_state(cx)),
             },
-            Detail::Saved(view, dir) => {
-                let name = dir
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                (Some(title(&name).into()), view.clone().into_any_element())
-            }
+            Detail::Saved(view, _) => (None, view.clone().into_any_element()),
             Detail::Templates(view) => (Some("Templates".into()), view.clone().into_any_element()),
             Detail::Builder(view) => (None, view.clone().into_any_element()),
             Detail::Settings(view) => (Some("Settings".into()), view.clone().into_any_element()),
