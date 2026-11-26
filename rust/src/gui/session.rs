@@ -31,8 +31,8 @@ use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
 use crate::gui::widgets::{
-    DragArm, column_header, empty_state, inline_tool, markdown, pane_header, speaker_chip,
-    status_strip, tag, title_field, tool, transcript_line,
+    DragArm, TurnColors, TurnEdge, column_header, empty_state, inline_tool, markdown, pane_header,
+    speaker_chip, status_strip, tag, title_field, tool, transcript_line,
 };
 use crate::gui::{
     CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
@@ -985,6 +985,7 @@ impl SessionView {
         });
         let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
+        let fill = cx.theme().foreground.opacity(tint::BLOCK);
         let list = list(
             self.transcript.clone(),
             cx.processor(move |view: &mut Self, index: usize, _, _| {
@@ -994,17 +995,29 @@ impl SessionView {
                 let mine = highlight
                     .as_deref()
                     .is_some_and(|label| line.plain.starts_with(label));
-                let turn = index
+                let same = |other: Option<&Line>| {
+                    other.is_some_and(|other| {
+                        line.speaker.is_some() && other.speaker == line.speaker
+                    })
+                };
+                let before = index
                     .checked_sub(1)
-                    .and_then(|before| view.lines.get(before))
-                    .is_none_or(|before| before.speaker != line.speaker);
-                let speaker = line.speaker.clone().filter(|_| turn);
+                    .and_then(|before| view.lines.get(before));
+                let edge = TurnEdge {
+                    first: !same(before),
+                    last: !same(view.lines.get(index + 1)),
+                };
+                let colors = TurnColors {
+                    fill,
+                    marked: mine.then_some(marked),
+                    muted,
+                };
                 transcript_line(
                     line.time.clone(),
-                    speaker,
+                    line.speaker.clone(),
                     line.text.clone(),
-                    mine.then_some(marked),
-                    muted,
+                    edge,
+                    colors,
                 )
                 .into_any_element()
             }),

@@ -21,8 +21,8 @@ use crate::gui::design::{size, space, text, tint};
 use crate::gui::dialogs;
 use crate::gui::icons;
 use crate::gui::widgets::{
-    DragArm, column_header, empty_state, inline_tool, markdown, pane_header, speaker_chip,
-    status_strip, tag, title_field, tool, transcript_line,
+    DragArm, TurnColors, TurnEdge, column_header, empty_state, inline_tool, markdown, pane_header,
+    speaker_chip, status_strip, tag, title_field, tool, transcript_line,
 };
 use crate::gui::{CopyDigest, CopyTranscript, RenameSession, SESSION_CONTEXT, ShowInFinder};
 
@@ -290,6 +290,7 @@ impl SessionReader {
             .map(|speaker| self.speaker_label(speaker));
         let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
+        let fill = cx.theme().foreground.opacity(tint::BLOCK);
         let labels: Vec<String> = self
             .session
             .speakers
@@ -316,17 +317,30 @@ impl SessionReader {
                     (None, _) => ("", line.as_str()),
                 };
                 let (speaker, words) = split_speaker(rest, &labels);
-                let before = index
-                    .checked_sub(1)
-                    .and_then(|before| view.session.transcript.get(before))
-                    .map(|before| split_speaker(split_line(before).1.trim_start(), &labels).0);
-                let turn = before.is_none_or(|before| before != speaker);
+                let speaker_of = |at: usize| {
+                    view.session
+                        .transcript
+                        .get(at)
+                        .map(|other| split_speaker(split_line(other).1.trim_start(), &labels).0)
+                };
+                let same = |other: Option<Option<&str>>| {
+                    speaker.is_some() && other.is_some_and(|other| other == speaker)
+                };
+                let edge = TurnEdge {
+                    first: !same(index.checked_sub(1).and_then(speaker_of)),
+                    last: !same(speaker_of(index + 1)),
+                };
+                let colors = TurnColors {
+                    fill,
+                    marked: mine.then_some(marked),
+                    muted,
+                };
                 transcript_line(
                     stamp.to_string(),
-                    speaker.filter(|_| turn).map(|name| name.to_string().into()),
+                    speaker.map(|name| name.to_string().into()),
                     words.to_string(),
-                    mine.then_some(marked),
-                    muted,
+                    edge,
+                    colors,
                 )
                 .into_any_element()
             }),

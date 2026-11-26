@@ -241,51 +241,66 @@ pub fn title_field(
         )
 }
 
-/// One transcript entry: the time in fixed-width digits, then the text.
-/// One line height for both, so the time sits on a wrapped entry's first
-/// line. `speaker` heads a new turn, as a chat names a new sender; the
-/// caller passes it only where the speaker changes. `marked` tints the entry
-/// while its speaker is pointed at.
+/// Where a line sits in its speaker's turn. A turn draws as one rounded
+/// block: the first line opens it under the speaker's name and time, the last
+/// line closes it. A line with no speaker is a turn of its own.
+#[derive(Clone, Copy)]
+pub struct TurnEdge {
+    pub first: bool,
+    pub last: bool,
+}
+
+/// The colors of a transcript line: the block fill, the fill while its
+/// speaker is pointed at, and the muted color of the time.
+#[derive(Clone, Copy)]
+pub struct TurnColors {
+    pub fill: Hsla,
+    pub marked: Option<Hsla>,
+    pub muted: Hsla,
+}
+
+/// One transcript line, as a slice of its turn's block.
 pub fn transcript_line(
     time: impl Into<SharedString>,
     speaker: Option<SharedString>,
     line: impl Into<SharedString>,
-    marked: Option<Hsla>,
-    muted: Hsla,
+    edge: TurnEdge,
+    colors: TurnColors,
 ) -> Div {
-    let body = div()
-        .flex_1()
-        .min_w_0()
-        .flex()
-        .flex_col()
-        .when_some(speaker, |body, name| {
-            body.child(
+    let header = edge.first.then(|| {
+        div()
+            .flex()
+            .items_baseline()
+            .gap(space::SM)
+            .px(space::XS)
+            .pb(space::XS)
+            .text_size(text::CAPTION)
+            .when_some(speaker, |header, name| {
+                header.child(div().font_weight(text::STRONG).child(name))
+            })
+            .child(
                 div()
-                    .text_size(text::CAPTION)
-                    .font_weight(text::STRONG)
-                    .child(name),
+                    .font_family(text::MONO)
+                    .text_color(colors.muted)
+                    .child(time.into()),
             )
+    });
+    let block = div()
+        .px(space::MD)
+        .line_height(text::READING_LINE)
+        .bg(colors.marked.unwrap_or(colors.fill))
+        .when(edge.first, |block| {
+            block.pt(space::SM).rounded_t(radius::LG)
         })
+        .when(edge.last, |block| block.pb(space::SM).rounded_b(radius::LG))
+        .when(!edge.last, |block| block.pb(space::XXS))
         .child(line.into());
     div()
         .w_full()
-        .flex()
-        .items_start()
-        .line_height(text::READING_LINE)
-        .gap(space::MD)
         .px(space::SM)
-        .py(space::XXS)
-        .rounded(radius::SM)
-        .when_some(marked, |row, tint| row.bg(tint))
-        .child(
-            div()
-                .flex_none()
-                .font_family(text::MONO)
-                .text_size(text::CAPTION)
-                .text_color(muted)
-                .child(time.into()),
-        )
-        .child(body)
+        .when(edge.first, |row| row.pt(space::MD))
+        .children(header)
+        .child(block)
 }
 
 /// A speaker with their spoken time. A click names them.

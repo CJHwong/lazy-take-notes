@@ -144,6 +144,8 @@ pub mod tint {
     pub const FAINT: f32 = 0.4;
     /// The fill of a Settings card over the window background.
     pub const CARD: f32 = 0.025;
+    /// The fill of a speaker's turn in the transcript.
+    pub const BLOCK: f32 = 0.05;
 }
 
 /// The macOS accent colors, light then dark, as `AppleAccentColor` numbers
