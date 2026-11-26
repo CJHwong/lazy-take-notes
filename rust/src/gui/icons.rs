@@ -8,7 +8,15 @@ use gpui_kit::*;
 
 gpui_kit::assets::icon_assets!(
     ToolbarIcons,
-    [SquareStop, MicOff, Sparkles, Zap, Pencil, Trash]
+    [
+        SquareStop,
+        MicOff,
+        Sparkles,
+        Zap,
+        Pencil,
+        Trash,
+        CircleDashed
+    ]
 );
 
 /// The kit's assets, with the toolbar icons first.

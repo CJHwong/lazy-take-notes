@@ -8,7 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme, Icon, IconName};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use tracing::{error, info};
@@ -32,20 +32,22 @@ use crate::app::template_builder::{TemplateBuilderRuntime, config_setup};
 use crate::domain::template::SessionTemplate;
 use crate::gui::bridge::notify;
 use crate::gui::builder::{BuilderEvent, BuilderView};
+use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs;
 use crate::gui::preflight::{PreflightEvent, PreflightView};
 use crate::gui::session::{SHORTCUTS, SessionEvent, SessionView};
 use crate::gui::settings::{SettingsEvent, SettingsView, ask_discard};
-use crate::gui::template_picker::{TemplatePickerEvent, TemplatePickerView};
+use crate::gui::template_picker::{StartAction, TemplatePickerEvent, TemplatePickerView};
 use crate::gui::view::{ReaderEvent, SessionReader};
-use crate::gui::widgets::{DragArm, brand, mascot, title_strip};
+use crate::gui::widgets::{
+    DragArm, brand, caption, empty_state, mascot, pane_header, pane_title, title_strip,
+};
 
 const START_ERROR_TIMEOUT: Duration = Duration::from_secs(12);
-const SIDEBAR_WIDTH: Pixels = px(240.);
-/// The traffic lights sit in the sidebar's title strip.
+/// The traffic lights sit in the sidebar's title strip, at the pane inset.
 pub const TRAFFIC_LIGHTS: Point<Pixels> = Point {
-    x: px(16.),
-    y: px(16.),
+    x: space::LG,
+    y: size::TRAFFIC_LIGHTS_Y,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -284,8 +286,25 @@ impl Shell {
             Err(e) => return self.failed("open_picker", &e, window, cx),
         };
         let action = match self.flow() {
-            Some(Flow::Transcribe) => ("Transcribe", IconName::FileText),
-            _ => ("Start Recording", IconName::Mic),
+            Some(Flow::Transcribe) => {
+                let name = self.audio_path.as_ref().and_then(|path| path.file_name());
+                let title = match name {
+                    Some(name) => format!("Transcribe {}", name.to_string_lossy()),
+                    None => "Transcribe File".into(),
+                };
+                StartAction {
+                    title: title.into(),
+                    label: "Transcribe",
+                    icon: IconName::FileText,
+                    record: false,
+                }
+            }
+            _ => StartAction {
+                title: "New Recording".into(),
+                label: "Start Recording",
+                icon: IconName::Mic,
+                record: true,
+            },
         };
         let picker = cx.new(|cx| TemplatePickerView::new(&loaded, Some(action), window, cx));
         self.loaded = Some(loaded);
@@ -379,7 +398,7 @@ impl Shell {
         if let Some(live) = self.live.as_mut() {
             live._checks = Some(subscription);
         }
-        picker.update(cx, |picker, cx| picker.show_checks(preflight.into(), cx));
+        picker.update(cx, |picker, cx| picker.show_checks(preflight.clone(), cx));
     }
 
     /// The template picker of the flow, while it shows.
@@ -692,26 +711,29 @@ impl Shell {
         let theme = cx.theme();
         // As the Finder sidebar: a soft grey under the selected row, the text unchanged.
         let (text, muted) = (theme.sidebar_foreground, theme.muted_foreground);
-        let hover = theme.sidebar_foreground.opacity(0.05);
-        let selected_bg = theme.sidebar_foreground.opacity(0.1);
+        let hover = theme.sidebar_foreground.opacity(tint::SUBTLE);
+        let selected_bg = theme.sidebar_foreground.opacity(tint::STRONG);
+        let height = if detail.is_some() {
+            size::ROW_TWO_LINE
+        } else {
+            size::ROW
+        };
         div()
             .id(id)
             .flex()
+            .flex_none()
             .items_center()
-            .gap_2()
-            .mx_2()
-            .px_2()
-            .py(px(5.))
-            .rounded(px(6.))
-            .text_sm()
+            .gap(space::SM)
+            .mx(space::SM)
+            .px(space::SM)
+            .h(height)
+            .rounded(radius::MD)
+            .text_size(text::BODY)
             .text_color(text)
             .when(selected, |row| row.bg(selected_bg))
             .when(!selected, |row| row.hover(|row| row.bg(hover)))
             .when_some(icon, |row, icon| {
-                row.child(Icon::new(icon).size_4().text_color(theme.primary))
-            })
-            .when_some(dot, |row, dot| {
-                row.child(div().flex_none().size(px(8.)).rounded_full().bg(dot))
+                row.child(Icon::new(icon).size(size::ICON).text_color(theme.primary))
             })
             .child(
                 div()
@@ -721,9 +743,19 @@ impl Shell {
                     .flex_1()
                     .child(div().truncate().child(title))
                     .when_some(detail, |column, detail| {
-                        column.child(div().text_xs().text_color(muted).truncate().child(detail))
+                        column.child(
+                            div()
+                                .text_size(text::CAPTION)
+                                .text_color(muted)
+                                .truncate()
+                                .child(detail),
+                        )
                     }),
             )
+            // The live dot sits at the end, so a live row's title lines up with the rest.
+            .when_some(dot, |row, dot| {
+                row.child(div().flex_none().size(size::DOT).rounded_full().bg(dot))
+            })
             .on_click(cx.listener(move |shell, _, window, cx| {
                 // A click on the open page's own row keeps it as it is.
                 if selected {
@@ -765,11 +797,11 @@ impl Shell {
         for (group, entries) in grouped(sessions, today) {
             rows.push(
                 div()
-                    .px_4()
-                    .pt_3()
-                    .pb_1()
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
+                    .px(space::LG)
+                    .pt(space::MD)
+                    .pb(space::XS)
+                    .text_size(text::CAPTION)
+                    .font_weight(text::STRONG)
                     .text_color(cx.theme().muted_foreground)
                     .child(group.title())
                     .into_any_element(),
@@ -806,12 +838,9 @@ impl Shell {
                 .clone()
                 .unwrap_or_else(|| "No saved sessions yet.".into());
             rows.push(
-                div()
-                    .px_4()
-                    .pt_3()
-                    .text_xs()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(note)
+                caption(note, cx)
+                    .px(space::LG)
+                    .pt(space::MD)
                     .into_any_element(),
             );
         }
@@ -819,8 +848,6 @@ impl Shell {
     }
 
     fn sidebar(&self, cx: &mut Context<Self>) -> Div {
-        let flow = self.flow();
-        let on_live = matches!(self.detail, Detail::Live);
         let record: OnClick = Rc::new(|shell, window, cx| shell.start(Flow::Record, window, cx));
         let transcribe: OnClick =
             Rc::new(|shell, window, cx| shell.start(Flow::Transcribe, window, cx));
@@ -834,46 +861,29 @@ impl Shell {
             .flex()
             .flex_col()
             .flex_none()
-            .w(SIDEBAR_WIDTH)
+            .w(size::SIDEBAR)
             .h_full()
             .bg(background)
             .border_r_1()
             .border_color(border)
             .child(title_strip("sidebar-title", &self.sidebar_drag).w_full())
-            .child(self.nav_row(
-                NavRow {
-                    icon: Some(IconName::Mic),
-                    selected: on_live && flow == Some(Flow::Record),
-                    ..nav("new-recording", "New Recording")
-                },
-                record,
-                cx,
-            ))
-            .child(self.nav_row(
-                NavRow {
-                    icon: Some(IconName::File),
-                    selected: on_live && flow == Some(Flow::Transcribe),
-                    ..nav("transcribe-file", "Transcribe File…")
-                },
-                transcribe,
-                cx,
-            ))
+            .child(self.start_buttons(record, transcribe, cx))
             .child(
                 div()
                     .id("sessions")
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .pb_2()
+                    .pb(space::SM)
                     .children(self.session_rows(cx)),
             )
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1()
-                    .py_2()
-                    .border_t_1()
+                    .gap(space::XS / 2.)
+                    .py(space::SM)
+                    .border_t(size::HAIRLINE)
                     .border_color(border)
                     .child(self.nav_row(
                         NavRow {
@@ -896,6 +906,36 @@ impl Shell {
             )
     }
 
+    /// The two ways to start, over the session list. Recording is the app's
+    /// main act, so it is the one red, full-width button in the window.
+    fn start_buttons(&self, record: OnClick, transcribe: OnClick, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_col()
+            .flex_none()
+            .gap(space::XS)
+            .pb(space::SM)
+            .child(
+                Button::new("new-recording")
+                    .danger()
+                    .with_size(control::HERO)
+                    .mx(space::SM)
+                    .icon(IconName::Mic)
+                    .label("New Recording")
+                    .on_click(cx.listener(move |shell, _, window, cx| {
+                        shell.leave_page_then(record.clone(), window, cx)
+                    })),
+            )
+            .child(self.nav_row(
+                NavRow {
+                    icon: Some(IconName::File),
+                    ..nav("transcribe-file", "Transcribe File…")
+                },
+                transcribe,
+                cx,
+            ))
+    }
+
     /// The mascot, and the two ways to start.
     fn empty_state(&self, cx: &Context<Self>) -> AnyElement {
         div()
@@ -904,17 +944,18 @@ impl Shell {
             .flex_col()
             .items_center()
             .justify_center()
-            .gap_4()
-            .child(mascot(px(6.)))
-            .child(brand(px(22.)))
+            .gap(space::LG)
+            .child(mascot(size::MASCOT_PIXEL))
+            .child(brand(text::LARGE_TITLE))
             .child(
                 div()
                     .flex()
-                    .gap_2()
-                    .pt_2()
+                    .gap(space::SM)
+                    .pt(space::SM)
                     .child(
                         Button::new("start-recording")
-                            .primary()
+                            .danger()
+                            .with_size(control::HERO)
                             .icon(IconName::Mic)
                             .label("New Recording")
                             .on_click(cx.listener(|shell, _, window, cx| {
@@ -923,6 +964,7 @@ impl Shell {
                     )
                     .child(
                         Button::new("start-transcribe")
+                            .with_size(control::HERO)
                             .icon(IconName::File)
                             .label("Transcribe File…")
                             .on_click(cx.listener(|shell, _, window, cx| {
@@ -936,30 +978,13 @@ impl Shell {
     /// The pane's title and its body. A body with no title draws its own
     /// title bar row.
     fn pane(&self, cx: &Context<Self>) -> (Option<SharedString>, AnyElement) {
-        let muted = |text: &'static str| {
-            div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(cx.theme().muted_foreground)
-                .child(text)
-                .into_any_element()
-        };
+        let muted =
+            |line: &'static str| empty_state(IconName::LoaderCircle, line, cx).into_any_element();
         match &self.detail {
             Detail::Empty => (Some("".into()), self.empty_state(cx)),
             Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
-                Some((Stage::TemplatePicker(view), flow)) => {
-                    let title = match (flow, &self.audio_path) {
-                        (Flow::Transcribe, Some(path)) => {
-                            let name = path.file_name().unwrap_or_default().to_string_lossy();
-                            format!("Transcribe {name}")
-                        }
-                        (Flow::Transcribe, None) => "Transcribe File".into(),
-                        (Flow::Record, _) => "New Recording".into(),
-                    };
-                    (Some(title.into()), view.clone().into_any_element())
-                }
+                // The picker draws its own title bar, with the start button.
+                Some((Stage::TemplatePicker(view), _)) => (None, view.clone().into_any_element()),
                 Some((Stage::Builder(view), _)) => (None, view.clone().into_any_element()),
                 Some((Stage::Checking, Flow::Transcribe)) => (
                     Some("Transcribe File".into()),
@@ -997,10 +1022,7 @@ impl Render for Shell {
                     .h_full()
                     .when_some(title, |pane, title| {
                         pane.child(
-                            title_strip("pane-title", &self.pane_drag)
-                                .px_4()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(div().truncate().child(title)),
+                            pane_header("pane-title", &self.pane_drag).child(pane_title(title)),
                         )
                     })
                     .child(div().flex_1().min_h_0().child(body)),

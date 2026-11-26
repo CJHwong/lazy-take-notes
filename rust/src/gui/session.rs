@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::text::{TextView, TextViewState};
+use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -28,9 +28,12 @@ use crate::app::session_start::{FileStart, RecordStart};
 use crate::app::tasks::Payload;
 use crate::domain::transcript::format_wall_time;
 use crate::gui::bridge::{Bridge, GuiIo, Incoming, notify};
+use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
-use crate::gui::widgets::{DragArm, title_strip};
+use crate::gui::widgets::{
+    DragArm, column_header, empty_state, markdown, pane_header, status_strip, tag,
+};
 use crate::gui::{
     CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
     QuickAction4, QuickAction5, RenameSession, SESSION_CONTEXT, ShowHelp, ShowInFinder,
@@ -41,8 +44,6 @@ const COPY_TIMEOUT: Duration = Duration::from_secs(2);
 const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
 /// How often the status strip redraws its timer and level meter.
 const TICK: Duration = Duration::from_millis(250);
-const CONTEXT_HEIGHT: Pixels = px(140.);
-const STATUS_HEIGHT: Pixels = px(28.);
 
 /// The window's keys, for the Help menu.
 pub const SHORTCUTS: &str = "\
@@ -210,7 +211,7 @@ impl SessionView {
             cx.subscribe_in(&context, window, Self::on_context),
             cx.subscribe_in(&title, window, Self::on_title),
         ];
-        let transcript = ListState::new(0, ListAlignment::Top, px(400.));
+        let transcript = ListState::new(0, ListAlignment::Top, size::LIST_OVERDRAW);
         transcript.set_follow_mode(FollowMode::Tail);
         let mut status = StatusLine::default();
         status.silence_threshold = silence_threshold;
@@ -817,80 +818,104 @@ fn is_thread_end(payload: &Payload) -> bool {
     payload.is::<()>()
 }
 
-/// A small heading over a column, as the sidebar's group titles.
-fn heading(title: &'static str, cx: &App) -> Div {
-    div()
-        .flex_none()
-        .px_4()
-        .pt_3()
-        .pb_1()
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(cx.theme().muted_foreground)
-        .child(title)
-}
-
 /// A toolbar button: an icon and a word, flat until the pointer is over it.
 fn tool(id: &'static str, icon: impl Into<Icon>, label: &'static str) -> Button {
     Button::new(id).ghost().small().icon(icon).label(label)
 }
 
-/// A pill in the status strip.
+/// An alert in the status strip.
 fn badge(text: impl Into<SharedString>, background: Hsla, foreground: Hsla) -> Div {
     div()
         .flex()
         .items_center()
-        .gap_1()
-        .px_2()
-        .rounded(px(4.))
+        .gap(space::XS)
+        .px(space::XS)
+        .rounded(radius::SM)
         .bg(background)
         .text_color(foreground)
-        .font_weight(FontWeight::SEMIBOLD)
+        .font_weight(text::STRONG)
         .child(text.into())
 }
 
 impl SessionView {
     /// The title field, the template's name, then the commands.
     fn render_title_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
-        let template = &self.mode.session().controller.template().metadata.name;
-        let theme = cx.theme();
-        let (muted, hover) = (theme.muted_foreground, theme.foreground.opacity(0.06));
-        title_strip("session-title", &self.drag)
-            .gap_2()
-            .px_4()
+        let hover = cx.theme().foreground.opacity(tint::SUBTLE);
+        pane_header("session-title", &self.drag)
             .child(
                 // A press in the field selects text; it must not move the window.
+                // The field's text starts at the pane inset, as every pane title does.
                 div()
                     .id("title-field")
-                    .w(px(360.))
-                    .min_w(px(120.))
+                    .w(size::TITLE_FIELD)
+                    .min_w(size::TITLE_FIELD_MIN)
                     .flex_shrink(1.)
-                    .px_1()
-                    .rounded(px(6.))
+                    .rounded(radius::MD)
                     .hover(|field| field.bg(hover))
-                    .font_weight(FontWeight::SEMIBOLD)
                     .tooltip(|window, cx| Tooltip::new("Rename").build(window, cx))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(Input::new(&self.title).appearance(false)),
+                    .child(
+                        Input::new(&self.title)
+                            .appearance(false)
+                            .px(space::NONE)
+                            .text_size(text::TITLE)
+                            .font_weight(text::STRONG),
+                    ),
             )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .text_color(muted)
-                    .child(template.clone()),
-            )
-            .child(self.render_toolbar(cx))
+            .child(div().flex_1())
+            .child(self.render_live_state(cx))
+            .child(self.render_controls(cx))
     }
 
-    fn render_toolbar(&self, cx: &mut Context<Self>) -> Div {
+    /// The state, the clock, the level and any audio alert: the one place to
+    /// glance at during a call.
+    fn render_live_state(&self, cx: &App) -> Div {
+        let theme = cx.theme();
+        let status = &self.status;
+        let (state, dot) = self.state_label(cx);
+        let mut live = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(space::SM)
+            .mr(space::SM)
+            .child(div().size(size::DOT).rounded_full().bg(dot))
+            .child(div().text_color(theme.foreground).child(state))
+            .child(
+                div()
+                    .font_family(text::MONO)
+                    .text_color(theme.muted_foreground)
+                    .child(status.format_elapsed(Instant::now())),
+            );
+        if status.recording && self.is_record() {
+            live = live.child(self.render_meter(cx));
+        }
+        if !status.audio_alert.is_empty() {
+            live = live.child(badge(
+                status.audio_alert.clone(),
+                theme.danger,
+                theme.danger_foreground,
+            ));
+        }
+        live
+    }
+
+    /// Show in Finder, then the controls of the recording itself. Stop is
+    /// red, as a record control; Finish is the accent once audio stops.
+    fn render_controls(&self, cx: &mut Context<Self>) -> Div {
         let active = self.active();
         let paused = self.state() == "paused";
         let muted = self.status.mic_muted;
         let finishing = self.mode.session().flow.pending_quit;
-        let mut tools = div().flex().flex_none().items_center().gap_1();
+        let mut tools = div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(space::XS)
+            .child(
+                tool("finder", IconName::FolderOpen, "Show in Finder")
+                    .on_click(cx.listener(|view, _, _, cx| view.show_in_finder(cx))),
+            );
         if self.is_record() && active {
             let (icon, label) = match paused {
                 true => (IconName::Play, "Resume"),
@@ -910,10 +935,11 @@ impl SessionView {
                     .on_click(cx.listener(|view, _, window, cx| view.toggle_mute(window, cx))),
             );
         }
-        tools = match active {
+        match active {
             true => tools.child(
                 Button::new("stop")
-                    .small()
+                    .danger()
+                    .with_size(control::CONTROL)
                     .icon(icons::extra("square-stop"))
                     .label("Stop")
                     .on_click(cx.listener(|view, _, window, cx| view.stop(window, cx))),
@@ -921,28 +947,13 @@ impl SessionView {
             false => tools.child(
                 Button::new("finish")
                     .primary()
-                    .small()
+                    .with_size(control::CONTROL)
                     .label(if finishing { "Finishing…" } else { "Finish" })
                     .loading(finishing)
                     .tooltip("Write the final digest and save")
                     .on_click(cx.listener(|view, _, window, cx| view.finish(window, cx))),
             ),
-        };
-        tools
-            .child(div().w(px(1.)).h(px(18.)).mx_1().bg(cx.theme().border))
-            .child(
-                tool("digest", icons::extra("sparkles"), "Digest Now")
-                    .on_click(cx.listener(|view, _, window, cx| view.digest_now(window, cx))),
-            )
-            .children(self.render_quick_actions())
-            .child(
-                Button::new("finder")
-                    .ghost()
-                    .small()
-                    .icon(IconName::FolderOpen)
-                    .tooltip("Show in Finder")
-                    .on_click(cx.listener(|view, _, _, cx| view.show_in_finder(cx))),
-            )
+        }
     }
 
     /// The template's quick actions, in one menu.
@@ -960,7 +971,11 @@ impl SessionView {
             return None;
         }
         let handle = self.focus_handle.clone();
-        let button = tool("quick-actions", icons::extra("zap"), "Quick Actions");
+        let button = Button::new("quick-actions")
+            .ghost()
+            .with_size(control::INLINE)
+            .icon(icons::extra("zap"))
+            .label("Quick Actions");
         Some(button.dropdown_menu(move |menu, _, _| {
             let mut menu = menu.action_context(handle.clone());
             for (index, label) in labels.iter().enumerate() {
@@ -972,27 +987,14 @@ impl SessionView {
         }))
     }
 
-    /// A column heading with a Copy button at its end.
-    fn heading_with_copy(
-        &self,
-        title: &'static str,
-        copied: Copied,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        heading(title, cx)
-            .flex()
-            .items_center()
-            .justify_between()
-            .child(
-                Button::new(title)
-                    .ghost()
-                    .xsmall()
-                    .icon(IconName::Copy)
-                    .label("Copy")
-                    .on_click(
-                        cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)),
-                    ),
-            )
+    /// The Copy button at the end of a column header.
+    fn copy_button(&self, id: &'static str, copied: Copied, cx: &mut Context<Self>) -> Button {
+        Button::new(id)
+            .ghost()
+            .with_size(control::INLINE)
+            .icon(IconName::Copy)
+            .label("Copy")
+            .on_click(cx.listener(move |view, _, window, cx| view.copy(copied, window, cx)))
     }
 
     fn render_transcript(&self, cx: &mut Context<Self>) -> Div {
@@ -1011,7 +1013,7 @@ impl SessionView {
                 .unwrap_or_else(|| format!("S{speaker}"));
             format!("{name}: ")
         });
-        let marked = cx.theme().primary.opacity(0.12);
+        let marked = cx.theme().primary.opacity(tint::STRONG);
         let muted = cx.theme().muted_foreground;
         let list = list(
             self.transcript.clone(),
@@ -1022,19 +1024,23 @@ impl SessionView {
                 let mine = highlight
                     .as_deref()
                     .is_some_and(|label| line.plain.starts_with(label));
+                // One line height for the time and the text, so the time sits
+                // on the first line of a wrapped entry.
                 div()
                     .w_full()
                     .flex()
-                    .gap_3()
-                    .px_2()
-                    .py(px(3.))
-                    .rounded(px(4.))
+                    .items_start()
+                    .line_height(text::READING_LINE)
+                    .gap(space::MD)
+                    .px(space::SM)
+                    .py(space::XXS)
+                    .rounded(radius::SM)
                     .when(mine, |row| row.bg(marked))
                     .child(
                         div()
                             .flex_none()
-                            .text_xs()
-                            .pt(px(1.))
+                            .font_family(text::MONO)
+                            .text_size(text::CAPTION)
                             .text_color(muted)
                             .child(line.time.clone()),
                     )
@@ -1046,29 +1052,35 @@ impl SessionView {
         div()
             .flex()
             .flex_col()
-            .flex_1()
+            .flex_none()
+            .w(relative(0.4))
             .min_w_0()
-            .child(self.heading_with_copy("Transcript", Copied::Transcript, cx))
+            .child(column_header("Transcript", cx).child(self.copy_button(
+                "copy-transcript",
+                Copied::Transcript,
+                cx,
+            )))
             .child(
                 div()
                     .id("transcript")
                     .flex_1()
                     .min_h_0()
-                    .px_2()
+                    .px(space::SM)
+                    .text_size(text::READING)
                     .on_click(cx.listener(|view, _, window, cx| {
                         view.selected_speaker = None;
                         view.set_focus(Focus::Transcript, window, cx);
                     }))
-                    .child(list),
+                    .map(|column| match self.lines.is_empty() {
+                        true => column.child(self.transcript_empty(cx)),
+                        false => column.child(list),
+                    }),
             )
-            .children(self.render_speakers(cx))
     }
 
-    fn render_speakers(&self, cx: &mut Context<Self>) -> Option<Div> {
+    /// The speakers, as chips at the strip's start.
+    fn render_speakers(&self, cx: &mut Context<Self>) -> Div {
         let chips = self.speakers();
-        if chips.is_empty() {
-            return None;
-        }
         let focused = self.focus == Focus::Speakers;
         let theme = cx.theme();
         let (chosen, chosen_text) = (theme.primary, theme.primary_foreground);
@@ -1088,12 +1100,12 @@ impl SessionView {
             };
             div()
                 .id(("speaker", speaker as usize))
-                .px_2()
-                .py(px(2.))
+                .px(space::SM)
+                .py(space::XXS)
                 .rounded_full()
                 .bg(background)
                 .text_color(text)
-                .text_xs()
+                .text_size(text::CAPTION)
                 .cursor_pointer()
                 .when(!selected, |chip| chip.hover(|chip| chip.bg(hover)))
                 .tooltip(|window, cx| Tooltip::new("Name this speaker").build(window, cx))
@@ -1112,22 +1124,20 @@ impl SessionView {
                     cx.listener(move |view, _, window, cx| view.click_speaker(speaker, window, cx)),
                 )
         });
-        Some(
-            div()
-                .flex()
-                .flex_wrap()
-                .flex_none()
-                .gap_2()
-                .px_4()
-                .py_2()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .children(items),
-        )
+        div()
+            .flex()
+            .flex_1()
+            .min_w_0()
+            .items_center()
+            .gap(space::XS)
+            .overflow_hidden()
+            .children(items)
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
         let context_focused = self.focus == Focus::Context;
+        // An empty context folds to its header; a click opens it.
+        let context_open = context_focused || !self.context.read(cx).value().is_empty();
         let border = cx.theme().border;
         let background = cx.theme().background;
         div()
@@ -1135,35 +1145,78 @@ impl SessionView {
             .flex_col()
             .flex_1()
             .min_w_0()
-            .child(self.heading_with_copy("Digest", Copied::Digest, cx))
+            .child(
+                column_header("Notes", cx).child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::XS)
+                        .child(
+                            Button::new("digest")
+                                .ghost()
+                                .with_size(control::INLINE)
+                                .icon(icons::extra("sparkles"))
+                                .label("Digest Now")
+                                .on_click(
+                                    cx.listener(|view, _, window, cx| view.digest_now(window, cx)),
+                                ),
+                        )
+                        .children(self.render_quick_actions())
+                        .child(self.copy_button("copy-digest", Copied::Digest, cx)),
+                ),
+            )
             .child(
                 div()
                     .id("digest")
                     .flex_1()
                     .min_h_0()
-                    .px_4()
-                    .pb_2()
+                    .px(space::LG)
+                    .pb(space::SM)
+                    .text_size(text::READING)
                     .overflow_y_scroll()
-                    .child(TextView::new(&self.digest).selectable(true)),
+                    .map(|column| match self.has_digest() {
+                        true => column.child(markdown(&self.digest)),
+                        false => column.child(self.digest_empty(cx)),
+                    }),
             )
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .flex_none()
-                    .border_t_1()
+                    .border_t(size::HAIRLINE)
                     .border_color(border)
                     .when(context_focused, |column| column.h(relative(0.45)))
-                    .when(!context_focused, |column| column.h(CONTEXT_HEIGHT))
-                    .child(heading("Session Context", cx))
+                    .when(!context_focused && context_open, |column| {
+                        column.h(size::CONTEXT_PANEL)
+                    })
                     .child(
-                        div().flex_1().min_h_0().px_2().pb_2().child(
-                            Textarea::new(&self.context)
-                                .bordered(false)
-                                .h_full()
-                                .bg(background),
-                        ),
-                    ),
+                        div()
+                            .id("context-header")
+                            .cursor_pointer()
+                            .on_click(cx.listener(|view, _, window, cx| {
+                                view.set_focus(Focus::Context, window, cx)
+                            }))
+                            .child(
+                                column_header("Session Context", cx).child(
+                                    Icon::new(match context_open {
+                                        true => IconName::ChevronDown,
+                                        false => IconName::ChevronRight,
+                                    })
+                                    .size(size::ICON_SM),
+                                ),
+                            ),
+                    )
+                    .when(context_open, |column| {
+                        column.child(
+                            div().flex_1().min_h_0().px(space::SM).pb(space::SM).child(
+                                Textarea::new(&self.context)
+                                    .bordered(false)
+                                    .h_full()
+                                    .bg(background),
+                            ),
+                        )
+                    }),
             )
     }
 
@@ -1197,62 +1250,65 @@ impl SessionView {
     /// The input level, one bar per recent reading. Flat means silence.
     fn render_meter(&self, cx: &App) -> Div {
         let theme = cx.theme();
-        let (quiet, loud) = (theme.muted_foreground.opacity(0.4), theme.success);
+        let (quiet, loud) = (theme.muted_foreground.opacity(tint::FAINT), theme.success);
+        let rise = size::METER_HEIGHT - size::METER_BAR;
         let bars = self.status.level_steps().into_iter().map(move |step| {
-            let height = 3. + 11. * step as f32 / LEVEL_TOP as f32;
+            let height = size::METER_BAR + rise * (step as f32 / LEVEL_TOP as f32);
             div()
-                .w(px(3.))
-                .h(px(height))
-                .rounded(px(1.))
+                .w(size::METER_BAR)
+                .h(height)
+                .rounded_full()
                 .bg(if step == 0 { quiet } else { loud })
         });
         div()
             .flex()
             .items_end()
-            .gap(px(2.))
-            .h(px(14.))
+            .gap(space::XXS)
+            .h(size::METER_HEIGHT)
             .children(bars)
     }
 
-    fn render_status(&self, cx: &App) -> Div {
-        let theme = cx.theme();
+    /// The transcript before its first line.
+    fn transcript_empty(&self, cx: &App) -> Div {
+        let line = match self.is_record() {
+            true => "Listening. Lines appear here as people speak.",
+            false => "Transcribing. Lines appear here as the file plays.",
+        };
+        empty_state(IconName::Mic, line, cx)
+    }
+
+    fn has_digest(&self) -> bool {
+        self.mode.session().controller.latest_digest.is_some()
+    }
+
+    /// The notes before the first digest.
+    fn digest_empty(&self, cx: &App) -> Div {
+        let line = match self.status.ai_notes {
+            true => format!(
+                "Notes appear after {} lines, or when you press Digest Now.",
+                self.status.buf_max
+            ),
+            false => "AI notes are off for this session.".into(),
+        };
+        empty_state(icons::extra("sparkles"), line, cx)
+    }
+
+    /// Speakers at the start; the work in progress and the digest count at
+    /// the end.
+    fn render_status(&self, cx: &mut Context<Self>) -> Div {
         let status = &self.status;
-        let now = Instant::now();
-        let (state, dot) = self.state_label(cx);
-        let mut left = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap_1p5()
-                    .child(div().size(px(8.)).rounded_full().bg(dot))
-                    .child(div().text_color(theme.foreground).child(state)),
-            )
-            .child(div().font_family("Menlo").child(status.format_elapsed(now)));
-        if status.recording && self.is_record() {
-            left = left.child(self.render_meter(cx));
-        }
-        if !status.audio_alert.is_empty() {
-            left = left.child(badge(
-                status.audio_alert.clone(),
-                theme.danger,
-                theme.danger_foreground,
-            ));
-        }
+        let mut right = div().flex().flex_none().items_center().gap(space::MD);
         if status.mic_muted {
-            left = left.child(
+            let theme = cx.theme();
+            right = right.child(
                 badge("Mic muted", theme.secondary, theme.secondary_foreground)
-                    .child(icons::extra("mic-off").size_3()),
+                    .child(icons::extra("mic-off").size(size::ICON_SM)),
             );
         }
-        let mut right = div().flex().items_center().gap_3();
         for (busy, text) in [
             (status.transcribing, "Transcribing…".to_string()),
             (status.labeling_speakers, "Labeling speakers…".into()),
-            (!status.activity.is_empty(), format!("{}…", status.activity)),
+            (!status.activity.is_empty(), status.activity.clone()),
         ] {
             if busy {
                 right = right.child(text);
@@ -1266,25 +1322,26 @@ impl SessionView {
             false => "AI notes off".into(),
         });
         if let Some(last) = status.last_digest_time {
-            let since = (now - last).as_secs();
+            let since = (Instant::now() - last).as_secs();
             right = right.child(match since {
                 0..60 => format!("Last digest {since}s ago"),
                 _ => format!("Last digest {}m ago", since / 60),
             });
         }
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
+        let template = &self.mode.session().controller.template().metadata.name;
+        status_strip(cx)
             .justify_between()
-            .gap_3()
-            .h(STATUS_HEIGHT)
-            .px_4()
-            .border_t_1()
-            .border_color(theme.border)
-            .text_xs()
-            .text_color(theme.muted_foreground)
-            .child(left)
+            .gap(space::MD)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap(space::SM)
+                    .child(tag(template.clone(), cx))
+                    .child(self.render_speakers(cx)),
+            )
             .child(right)
     }
 }
@@ -1405,10 +1462,10 @@ impl Render for SessionView {
                     .flex()
                     .flex_1()
                     .min_h_0()
-                    .border_t_1()
+                    .border_t(size::HAIRLINE)
                     .border_color(border)
                     .child(self.render_transcript(cx))
-                    .child(div().w(px(1.)).h_full().bg(border))
+                    .child(div().w(size::HAIRLINE).h_full().bg(border))
                     .child(self.render_notes(cx)),
             )
             .child(self.render_status(cx))

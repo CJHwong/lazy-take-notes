@@ -2,14 +2,16 @@
 //! check, a fix under each failure, the summary, then the buttons.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName};
+use gpui_kit::component::{ActiveTheme as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::preflight::{Check, PreflightOutcome, Status};
 use crate::app::preflight_runtime::{PreflightRuntime, Summary};
 use crate::gui::bridge::{Bridge, Incoming};
-use crate::gui::template_picker::BAR_HEIGHT;
+use crate::gui::design::{control, size, space, tint};
+use crate::gui::icons;
+use crate::gui::widgets::{page_title, section_heading};
 
 const TITLE: &str = "Checking your setup";
 
@@ -71,6 +73,11 @@ impl PreflightView {
         cx.notify();
     }
 
+    /// The checks are still running: the start button waits on them.
+    pub fn running(&self) -> bool {
+        self.runtime.running
+    }
+
     fn back(&mut self, cx: &mut Context<Self>) {
         if self.runtime.back() {
             cx.emit(PreflightEvent::Back);
@@ -85,28 +92,28 @@ impl PreflightView {
 
     fn check_row(check: &Check, cx: &App) -> Div {
         let theme = cx.theme();
+        let faint = theme.muted_foreground.opacity(tint::FAINT);
         let (icon, tint) = match check.status {
-            Status::Pass => (IconName::CircleCheck, theme.success),
-            Status::Warn => (IconName::TriangleAlert, theme.warning),
-            Status::Fail => (IconName::CircleX, theme.danger),
-            Status::Skip => (IconName::Minus, theme.muted_foreground),
-            Status::Running => (IconName::LoaderCircle, theme.muted_foreground),
-            Status::Pending => (IconName::Dash, theme.muted_foreground.opacity(0.5)),
+            Status::Pass => (Icon::new(IconName::CircleCheck), theme.success),
+            Status::Warn => (Icon::new(IconName::TriangleAlert), theme.warning),
+            Status::Fail => (Icon::new(IconName::CircleX), theme.danger),
+            Status::Skip => (Icon::new(IconName::Minus), theme.muted_foreground),
+            Status::Running => (Icon::new(IconName::LoaderCircle), theme.primary),
+            Status::Pending => (icons::extra("circle-dashed"), faint),
         };
         let shows_fix =
             matches!(check.status, Status::Fail | Status::Warn) && !check.fix.is_empty();
         let muted = theme.muted_foreground;
         div()
             .flex()
-            .gap_3()
-            .py_2()
-            .border_b_1()
+            .gap(space::MD)
+            .py(space::MD)
+            .border_b(size::HAIRLINE)
             .border_color(theme.border)
             .child(
                 div()
                     .flex_none()
-                    .pt(px(2.))
-                    .child(Icon::new(icon).text_color(tint)),
+                    .child(icon.size(size::ICON).text_color(tint)),
             )
             .child(
                 div()
@@ -114,16 +121,13 @@ impl PreflightView {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap_1()
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(check.title))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(muted)
-                            .child(check.detail.clone()),
-                    )
+                    .gap(space::XS)
+                    .child(section_heading(check.title))
+                    .when(!check.detail.is_empty(), |row| {
+                        row.child(div().text_color(muted).child(check.detail.clone()))
+                    })
                     .when(shows_fix, |row| {
-                        row.child(div().text_sm().child(format!("Fix: {}", check.fix)))
+                        row.child(div().child(format!("Fix: {}", check.fix)))
                     }),
             )
     }
@@ -152,51 +156,43 @@ impl Render for PreflightView {
             .map(|check| Self::check_row(check, cx))
             .collect();
         let theme = cx.theme();
+        let summary_shown = !matches!(self.runtime.summary, Summary::None);
         let summary = match &self.runtime.summary {
             Summary::None => None,
             Summary::Red(message) => Some((message.clone(), theme.danger)),
             Summary::Yellow(message) => Some((message.clone(), theme.warning)),
         };
-        let border = theme.border;
         let running = self.runtime.running;
-        let buttons = div()
+        // The way on from a failed check sits under its result. While the
+        // checks run, the title bar's start button shows the wait.
+        let actions = div()
             .flex()
-            .flex_none()
             .items_center()
-            .gap_2()
-            .h(BAR_HEIGHT)
-            .px_4()
-            .border_t_1()
-            .border_color(border)
+            .gap(space::SM)
+            .pt(space::MD)
             .child(
                 Button::new("preflight-back")
-                    .ghost()
+                    .with_size(control::CONTROL)
                     .icon(IconName::ArrowLeft)
                     .label("Back")
-                    .tooltip("Back to the template")
                     .on_click(cx.listener(|view, _, _, cx| view.back(cx))),
             )
-            .child(div().flex_1())
-            .when(self.runtime.show_override, |buttons| {
-                buttons.child(
+            .child(
+                Button::new("retry")
+                    .with_size(control::CONTROL)
+                    .icon(IconName::RefreshCw)
+                    .label("Check Again")
+                    .on_click(cx.listener(|view, _, _, cx| view.retry(cx))),
+            )
+            .when(self.runtime.show_override, |actions| {
+                actions.child(
                     Button::new("start-anyway")
+                        .primary()
+                        .with_size(control::CONTROL)
                         .label("Start Anyway")
                         .on_click(cx.listener(|view, _, _, cx| view.start_anyway(cx))),
                 )
-            })
-            .child(
-                Button::new("retry")
-                    .primary()
-                    .icon(IconName::RefreshCw)
-                    .label(if running {
-                        "Checking…"
-                    } else {
-                        "Check Again"
-                    })
-                    .loading(running)
-                    .disabled(running)
-                    .on_click(cx.listener(|view, _, _, cx| view.retry(cx))),
-            );
+            });
         div()
             .key_context("Preflight")
             .track_focus(&self.focus)
@@ -213,27 +209,15 @@ impl Render for PreflightView {
                     .id("checks")
                     .flex_1()
                     .min_h_0()
-                    .px_6()
-                    .py_4()
+                    .px(space::XL)
+                    .pb(space::LG)
                     .overflow_y_scroll()
-                    .child(
-                        div()
-                            .pb_2()
-                            .text_lg()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(TITLE),
-                    )
+                    .child(page_title(TITLE).pt(space::XL).pb(space::SM))
                     .children(rows)
                     .when_some(summary, |checks, (message, tint)| {
-                        checks.child(
-                            div()
-                                .pt_3()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(tint)
-                                .child(message),
-                        )
-                    }),
+                        checks.child(section_heading(message).pt(space::MD).text_color(tint))
+                    })
+                    .when(!running && summary_shown, |checks| checks.child(actions)),
             )
-            .child(buttons)
     }
 }

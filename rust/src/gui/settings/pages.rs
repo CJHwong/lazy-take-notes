@@ -17,7 +17,7 @@ use crate::app::session::status_line::{LEVEL_TOP, level_step};
 use crate::app::settings::rows::{RowAction, row_actions, row_detail, row_status, status_color};
 use crate::app::settings::{Meter, SPEAKER, open_privacy};
 use crate::domain::model_asset::AssetStatus;
-use crate::gui::template_picker::BAR_HEIGHT;
+use crate::gui::design::size;
 
 const NAV_WIDTH: Pixels = px(180.);
 const LABEL_WIDTH: Pixels = px(190.);
@@ -682,7 +682,7 @@ impl SettingsView {
             .flex_none()
             .items_center()
             .gap_2()
-            .h(BAR_HEIGHT)
+            .h(size::ACTION_BAR)
             .px_4()
             .border_t_1()
             .border_color(cx.theme().border)

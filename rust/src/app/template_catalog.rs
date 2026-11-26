@@ -90,7 +90,7 @@ impl TemplateCatalog {
         } else {
             "\\[built-in]"
         };
-        let mut lines = vec![
+        let header = [
             format!("## {}  {source}", meta.name),
             String::new(),
             match meta.description.is_empty() {
@@ -100,6 +100,18 @@ impl TemplateCatalog {
             String::new(),
             format!("**Locale:** `{}`", meta.locale),
         ];
+        Some(format!(
+            "{}\n{}",
+            header.join("\n"),
+            self.preview_body(name)?
+        ))
+    }
+
+    /// The preview under its heading: the quick actions, the hints and the
+    /// system prompt. The window draws the name, the source and the locale itself.
+    pub fn preview_body(&self, name: &str) -> Option<String> {
+        let template = self.loaded.get(name)?;
+        let mut lines: Vec<String> = Vec::new();
         if !template.quick_actions.is_empty() {
             lines.extend([String::new(), "### Quick Actions".into()]);
             for (index, action) in template.quick_actions.iter().enumerate() {
@@ -162,5 +174,26 @@ impl TemplateCatalog {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::adapters::paths::Paths;
+    use crate::adapters::templates::YamlTemplates;
+
+    use super::TemplateCatalog;
+
+    #[test]
+    fn the_terminal_preview_is_the_heading_then_the_window_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = TemplateCatalog::new(YamlTemplates::new(&Paths::under(dir.path())), true);
+        let name = catalog.loaded.keys().next().unwrap().clone();
+        let full = catalog.preview_markdown(&name).unwrap();
+        let body = catalog.preview_body(&name).unwrap();
+        assert!(full.starts_with("## "));
+        assert!(full.contains("\\[built-in]"));
+        assert!(full.ends_with(&format!("\n{body}")));
+        assert!(body.contains("### System Prompt"));
     }
 }

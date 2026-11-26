@@ -5,7 +5,7 @@ use gpui_kit::component::Theme;
 use gpui_kit::*;
 
 use crate::app::theme::Rgb;
-use crate::gui::widgets::TITLE_BAR_HEIGHT;
+use crate::gui::design::{self, size, space};
 
 pub fn hsla(color: Rgb) -> Hsla {
     rgb((u32::from(color.0) << 16) | (u32::from(color.1) << 8) | u32::from(color.2)).into()
@@ -18,14 +18,15 @@ pub fn follow_system(window: &mut Window, cx: &mut App) -> Subscription {
     window.observe_window_appearance(sync)
 }
 
-/// macOS body text is 13 pt; the kit starts at 16.
-const FONT_SIZE: Pixels = px(13.);
-
 fn sync(window: &mut Window, cx: &mut App) {
     Theme::sync_system_appearance(Some(window), cx);
+    let dark = matches!(
+        window.appearance(),
+        WindowAppearance::Dark | WindowAppearance::VibrantDark
+    );
     Theme::update(cx, |theme| {
-        theme.font_size = FONT_SIZE;
+        design::apply(theme, dark);
         // Toasts start below the title bar row, where the toolbar is.
-        theme.notification.margins.top = TITLE_BAR_HEIGHT + px(8.);
+        theme.notification.margins.top = size::TITLE_BAR + space::SM;
     });
 }

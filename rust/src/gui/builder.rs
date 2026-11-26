@@ -16,7 +16,7 @@ use crate::app::session::Severity;
 use crate::app::template_builder::{Role, TemplateBuilderRuntime};
 use crate::gui::bridge::{Bridge, Incoming, notify};
 use crate::gui::dialogs;
-use crate::gui::template_picker::BAR_HEIGHT;
+use crate::gui::design::size;
 use crate::gui::widgets::{DragArm, title_strip};
 
 /// As long as the TUI's notices stay.
@@ -370,7 +370,7 @@ impl BuilderView {
                     .flex_none()
                     .items_center()
                     .gap_2()
-                    .h(BAR_HEIGHT)
+                    .h(size::ACTION_BAR)
                     .px_4()
                     .border_t_1()
                     .border_color(border)

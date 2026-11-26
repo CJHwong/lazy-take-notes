@@ -4,6 +4,7 @@
 
 mod bridge;
 mod builder;
+mod design;
 mod dialogs;
 mod env;
 pub(crate) mod icons;

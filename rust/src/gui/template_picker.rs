@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::text::{TextView, TextViewState};
+use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -20,13 +20,15 @@ use crate::app::notices::BUILTIN_NOTICE_BODY;
 use crate::app::session::Severity;
 use crate::app::template_catalog::{NO_TEMPLATES, Row, TemplateCatalog};
 use crate::gui::bridge::notify;
+use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs::{self, Extra};
 use crate::gui::icons;
+use crate::gui::preflight::PreflightView;
+use crate::gui::widgets::{
+    DragArm, action_bar, markdown, page_title, pane_header, pane_title, tag,
+};
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
-/// The bars under the list and the preview line up.
-pub const BAR_HEIGHT: Pixels = px(52.);
-
 pub enum TemplatePickerEvent {
     Picked(String),
     Create,
@@ -44,20 +46,31 @@ pub struct TemplatePickerView {
     scroll: ScrollHandle,
     /// The list has the keys; otherwise the filter box has them.
     list_focused: bool,
-    /// The button that starts a session from the chosen template, in a flow.
-    action: Option<(&'static str, IconName)>,
+    /// The pane title and the start button, in a flow.
+    action: Option<StartAction>,
     /// The setup checks of the chosen template, in place of its preview.
-    checks: Option<AnyView>,
+    checks: Option<Entity<PreflightView>>,
     focus: FocusHandle,
+    drag: DragArm,
     _subscription: Subscription,
 }
 
 impl EventEmitter<TemplatePickerEvent> for TemplatePickerView {}
 
+/// What a flow starts from the picker: the pane title, and the start button
+/// at the title bar's right end. A recording starts from the red button.
+#[derive(Clone)]
+pub struct StartAction {
+    pub title: SharedString,
+    pub label: &'static str,
+    pub icon: IconName,
+    pub record: bool,
+}
+
 impl TemplatePickerView {
     pub fn new(
         loaded: &Loaded,
-        action: Option<(&'static str, IconName)>,
+        action: Option<StartAction>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -81,6 +94,7 @@ impl TemplatePickerView {
             action,
             checks: None,
             focus: cx.focus_handle(),
+            drag: DragArm::default(),
             _subscription: subscription,
         };
         view.rebuild("", cx);
@@ -106,7 +120,8 @@ impl TemplatePickerView {
     }
 
     /// The checks run for the chosen template; a click on another one ends them.
-    pub fn show_checks(&mut self, checks: AnyView, cx: &mut Context<Self>) {
+    pub fn show_checks(&mut self, checks: Entity<PreflightView>, cx: &mut Context<Self>) {
+        cx.observe(&checks, |_, _, cx| cx.notify()).detach();
         self.checks = Some(checks);
         cx.notify();
     }
@@ -159,7 +174,7 @@ impl TemplatePickerView {
 
     fn show_preview(&mut self, cx: &mut Context<Self>) {
         let markdown = match self.current() {
-            Some(name) => self.catalog.preview_markdown(&name).unwrap_or_default(),
+            Some(name) => self.catalog.preview_body(&name).unwrap_or_default(),
             None if self.catalog.loaded.is_empty() => NO_TEMPLATES.to_string(),
             None => "*No matching templates*".to_string(),
         };
@@ -324,11 +339,11 @@ impl TemplatePickerView {
         let name = match row {
             Row::Locale(locale) => {
                 return div()
-                    .px_2()
-                    .pt_3()
-                    .pb_1()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_xs()
+                    .px(space::SM)
+                    .pt(space::MD)
+                    .pb(space::XS)
+                    .font_weight(text::STRONG)
+                    .text_size(text::CAPTION)
                     .text_color(theme.muted_foreground)
                     .child(locale.to_uppercase())
                     .into_any_element();
@@ -336,33 +351,31 @@ impl TemplatePickerView {
             Row::Template(name) => name.clone(),
         };
         let selected = self.selected == Some(index);
-        let (background, text, muted) = match (selected, self.list_focused) {
-            (true, true) => (
-                theme.primary,
-                theme.primary_foreground,
-                theme.primary_foreground.opacity(0.75),
-            ),
-            (true, false) => (theme.secondary, theme.foreground, theme.muted_foreground),
-            (false, _) => (theme.transparent, theme.foreground, theme.muted_foreground),
+        // As a macOS list: the accent under the selected row while the list has
+        // focus, a grey without it.
+        let (background, foreground) = match (selected, self.list_focused) {
+            (true, true) => (theme.primary, theme.primary_foreground),
+            (true, false) => (theme.foreground.opacity(tint::STRONG), theme.foreground),
+            (false, _) => (theme.transparent, theme.foreground),
         };
-        let hover = theme.foreground.opacity(0.06);
-        let locale = self
-            .catalog
-            .loaded
-            .get(&name)
-            .map(|template| template.metadata.locale.clone())
-            .unwrap_or_default();
+        let hover = theme.foreground.opacity(tint::SUBTLE);
         let user = self.catalog.user_names.contains(&name);
+        let label = self.catalog.label(&name);
+        let user_tag = tag("User", cx).when(selected && self.list_focused, |tag| {
+            tag.text_color(foreground)
+                .bg(foreground.opacity(tint::STRONG))
+        });
         div()
             .id(("template", index))
             .flex()
             .items_center()
-            .gap_2()
-            .px_2()
-            .py_1()
-            .rounded(px(6.))
+            .gap(space::SM)
+            .h(size::ROW)
+            .px(space::SM)
+            .rounded(radius::MD)
+            .text_size(text::BODY)
             .bg(background)
-            .text_color(text)
+            .text_color(foreground)
             .when(!selected, |row| row.hover(move |row| row.bg(hover)))
             .child(
                 div()
@@ -370,12 +383,9 @@ impl TemplatePickerView {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(self.catalog.label(&name)),
+                    .child(label),
             )
-            .when(user, |row| {
-                row.child(div().text_xs().text_color(muted).child("User"))
-            })
-            .child(div().text_xs().text_color(muted).child(locale))
+            .when(user, |row| row.child(user_tag))
             .on_click(cx.listener(move |view, event: &ClickEvent, window, cx| {
                 view.focus_part(true, window, cx);
                 view.select(index, cx);
@@ -386,6 +396,41 @@ impl TemplatePickerView {
             .into_any_element()
     }
 
+    /// The selected template's name, source, locale and description.
+    fn render_heading(&self, cx: &App) -> Option<Div> {
+        let name = self.current()?;
+        let template = self.catalog.loaded.get(&name)?;
+        let meta = &template.metadata;
+        let source = if self.catalog.user_names.contains(&name) {
+            "User"
+        } else {
+            "Built-in"
+        };
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::SM)
+                .pt(space::XL)
+                .pb(space::MD)
+                .child(page_title(meta.name.clone()))
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::XS)
+                        .child(tag(source, cx))
+                        .child(tag(meta.locale.clone(), cx)),
+                )
+                .when(!meta.description.is_empty(), |heading| {
+                    heading.child(
+                        div()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(meta.description.clone()),
+                    )
+                }),
+        )
+    }
+
     /// New, Edit, Edit with AI and Delete, under the list.
     fn render_tools(&self, cx: &mut Context<Self>) -> Div {
         let current = self.current();
@@ -393,15 +438,9 @@ impl TemplatePickerView {
         let user = current
             .as_ref()
             .is_some_and(|name| self.catalog.user_names.contains(name));
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap_1()
-            .h(BAR_HEIGHT)
-            .px_2()
-            .border_t_1()
-            .border_color(cx.theme().border)
+        action_bar(cx)
+            .gap(space::XS)
+            .px(space::SM)
             .child(
                 Button::new("new-template")
                     .ghost()
@@ -446,31 +485,39 @@ impl TemplatePickerView {
             )
     }
 
-    /// Cancel and the start button, under the preview in a flow.
-    fn render_action(&self, label: &'static str, icon: IconName, cx: &mut Context<Self>) -> Div {
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_end()
-            .gap_2()
-            .h(BAR_HEIGHT)
-            .px_4()
-            .border_t_1()
-            .border_color(cx.theme().border)
+    /// The flow's title bar: the title, then Cancel and the start button at
+    /// the right end. While the checks run, the start button waits.
+    fn render_header(&self, action: StartAction, cx: &mut Context<Self>) -> Stateful<Div> {
+        let checking = self
+            .checks
+            .as_ref()
+            .is_some_and(|checks| checks.read(cx).running());
+        let start = Button::new("start")
+            .with_size(control::CONTROL)
+            .icon(action.icon)
+            .label(if checking {
+                "Checking…"
+            } else {
+                action.label
+            })
+            .loading(checking)
+            .disabled(self.current().is_none() || checking)
+            .on_click(cx.listener(|view, _, _, cx| view.pick(cx)));
+        let start = match action.record {
+            true => start.danger(),
+            false => start.primary(),
+        };
+        pane_header("picker-title", &self.drag)
+            .child(pane_title(action.title))
+            .child(div().flex_1())
             .child(
                 Button::new("cancel-start")
+                    .ghost()
+                    .with_size(control::CONTROL)
                     .label("Cancel")
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Cancelled))),
             )
-            .child(
-                Button::new("start")
-                    .primary()
-                    .icon(icon)
-                    .label(label)
-                    .disabled(self.current().is_none())
-                    .on_click(cx.listener(|view, _, _, cx| view.pick(cx))),
-            )
+            .child(start)
     }
 }
 
@@ -517,17 +564,17 @@ impl Render for TemplatePickerView {
             .collect();
         let border = cx.theme().border;
         let list = div()
-            .w(relative(0.32))
-            .min_w(px(260.))
-            .max_w(px(380.))
+            .w(size::LIST_COLUMN)
+            .flex_none()
             .flex()
             .flex_col()
-            .border_r_1()
+            .border_r(size::HAIRLINE)
             .border_color(border)
             .child(
                 div()
                     .flex_none()
-                    .p_2()
+                    .px(space::SM)
+                    .pb(space::SM)
                     .child(Input::new(&self.search).cleanable(true)),
             )
             .child(
@@ -535,42 +582,48 @@ impl Render for TemplatePickerView {
                     .id("templates")
                     .flex_1()
                     .min_h_0()
-                    .px_2()
-                    .pb_2()
+                    .px(space::SM)
+                    .pb(space::SM)
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .on_click(cx.listener(|view, _, window, cx| view.focus_part(true, window, cx)))
                     .children(rows),
             )
             .child(self.render_tools(cx));
-        let detail = match (&self.checks, self.action.clone()) {
-            (Some(checks), _) => checks.clone().into_any_element(),
-            (None, action) => div()
+        let detail = match &self.checks {
+            Some(checks) => checks.clone().into_any_element(),
+            None => div()
+                .id("preview")
                 .size_full()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .id("preview")
-                        .flex_1()
-                        .min_h_0()
-                        .px_6()
-                        .py_4()
-                        .overflow_y_scroll()
-                        .child(TextView::new(&self.preview).selectable(true)),
-                )
-                .when_some(action, |detail, (label, icon)| {
-                    detail.child(self.render_action(label, icon, cx))
-                })
+                .px(space::XL)
+                .pb(space::LG)
+                .overflow_y_scroll()
+                .children(self.render_heading(cx))
+                .child(markdown(&self.preview))
                 .into_any_element(),
         };
+        let header = self
+            .action
+            .clone()
+            .map(|action| self.render_header(action, cx));
         div()
             .key_context("TemplatePicker")
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::on_capture_key))
             .size_full()
             .flex()
-            .child(list)
-            .child(div().flex_1().min_w_0().h_full().child(detail))
+            .flex_col()
+            .children(header)
+            .child(
+                div()
+                    .flex()
+                    .flex_1()
+                    .min_h_0()
+                    .when(self.action.is_some(), |body| {
+                        body.border_t(size::HAIRLINE).border_color(border)
+                    })
+                    .child(list)
+                    .child(div().flex_1().min_w_0().h_full().child(detail)),
+            )
     }
 }

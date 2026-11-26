@@ -243,3 +243,5 @@ An error is `{code, message, data: {type}}`, where `type` is the Python exceptio
 75. The `.app` Appearance page keeps the terminal theme select, and says that it colors the terminal app only. The window follows the macOS light or dark appearance.
 76. In the `.app` Settings pane, Esc in a field focuses the pane, as the terminal app goes back to its page list. Esc on the pane leaves Settings, and asks first when a change is not saved. The sidebar, ⌘N, ⌘O and ⌘, ask the same question. Quit, ⌘W and the close button do not ask.
 77. When the terminal app's saved session viewer cannot read a file, its log line is now `<message> (<folder>)`, the same text the `.app` reader logs. It was `Cannot read <path>: <error>`.
+78. The `.app` live session folds an empty Session Context to its header. A click on the header opens it, and text in it keeps it open. The terminal app always shows the field.
+79. The `.app` live session shows the state, the clock, the level meter and an audio alert in the title row, with Show in Finder, Pause, Mute and Stop. Digest Now, Quick Actions and Copy sit in the notes heading. The terminal app shows the state in its status bar.
