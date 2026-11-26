@@ -42,11 +42,15 @@ impl Open {
 }
 
 fn open(root: &Path, cx: &mut TestAppContext) -> Open {
+    open_with(root, CONFIG, cx)
+}
+
+fn open_with(root: &Path, text: &str, cx: &mut TestAppContext) -> Open {
     cx.update(gpui_kit::init);
     let paths = Paths::under(root);
     std::fs::create_dir_all(&paths.config_dir).unwrap();
     let config = paths.config_dir.join("config.yaml");
-    std::fs::write(&config, CONFIG).unwrap();
+    std::fs::write(&config, text).unwrap();
     let store = Arc::new(CachedModelStore::new(&paths));
     let (window, view) = cx.update(|cx| {
         gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
@@ -111,7 +115,13 @@ fn marking_a_model_row_clears_the_custom_path(cx: &mut TestAppContext) {
     let form = open(root.path(), cx);
     form.set("cfg-trans-custom-path", "/models/own.bin", cx);
     form.run(cx, |view, window, cx| {
-        let id = view.assets[0].id;
+        // A row other than the config's own, so the choice is a change.
+        let id = view
+            .assets
+            .iter()
+            .map(|asset| asset.id)
+            .find(|id| Some(*id) != view.loaded_choice)
+            .unwrap();
         view.choose_model(id, window, cx);
         assert_eq!(view.inputs["cfg-trans-custom-path"].read(cx).value(), "");
         assert!(!view.snapshot(cx).chosen.is_empty());
@@ -141,4 +151,20 @@ fn esc_in_a_field_goes_back_to_the_pane_and_esc_there_leaves(cx: &mut TestAppCon
     form.run(cx, |view, window, _| assert!(view.focus.is_focused(window)));
     cx.simulate_keystrokes(form.window, "escape");
     assert_eq!(closed.get(), 1);
+}
+
+#[gpui_kit::test]
+fn a_short_model_name_marks_its_row_and_saves_unchanged(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let text = format!("{CONFIG}transcription:\n  model: large-v3-turbo-q8_0\n");
+    let form = open_with(root.path(), &text, cx);
+    form.run(cx, |view, _, cx| {
+        assert!(view.chosen.is_some(), "the short name marks its row");
+        assert!(!view.has_unsaved_changes(cx));
+    });
+    form.set("cfg-digest-model", "qwen3", cx);
+    form.run(cx, |view, window, cx| view.save(window, cx));
+    let config = Paths::under(root.path()).config_dir.join("config.yaml");
+    let saved = std::fs::read_to_string(&config).unwrap();
+    assert!(saved.contains("model: large-v3-turbo-q8_0"), "{saved}");
 }

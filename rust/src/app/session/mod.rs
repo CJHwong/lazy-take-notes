@@ -57,6 +57,14 @@ pub trait SessionIo {
     fn tasks(&self) -> Tasks;
     /// End the app now.
     fn exit(&mut self);
+    /// The notice when the final digest ends. The terminal names its quit
+    /// key; a front end with no such key says less.
+    fn final_digest_notice(&self, ok: bool) -> &'static str {
+        match ok {
+            true => "Final digest ready. Press q to quit.",
+            false => "Final digest failed. Press q to quit.",
+        }
+    }
 }
 
 /// Shorthands for `notify`.
@@ -510,10 +518,8 @@ impl SessionRuntime {
         match result {
             Ok(markdown) => {
                 if flight.is_final && !self.flow.pending_quit {
-                    io.info(
-                        "Final digest ready. Press q to quit.",
-                        Duration::from_secs(10),
-                    );
+                    let text = io.final_digest_notice(true);
+                    io.info(text, Duration::from_secs(10));
                 }
                 self.digest_ready(&markdown, flight.is_final, worker, io)
             }
@@ -562,10 +568,8 @@ impl SessionRuntime {
         io: &mut dyn SessionIo,
     ) -> Step {
         if is_final && !self.flow.pending_quit {
-            io.error(
-                "Final digest failed. Press q to quit.",
-                Duration::from_secs(10),
-            );
+            let text = io.final_digest_notice(false);
+            io.error(text, Duration::from_secs(10));
         }
         // Allow a retry after a failed final.
         self.flow.final_started = false;

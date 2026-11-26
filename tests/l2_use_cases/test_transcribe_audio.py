@@ -465,7 +465,9 @@ class TestLineStartsAtTheSpeech:
 
 
 class TestNotSpeechLines:
-    @pytest.mark.parametrize('text', ['*clap*', '*sad music*', '[BLANK_AUDIO]', '(laughs)', '♪', '.', '...', ' - '])
+    @pytest.mark.parametrize(
+        'text', ['*clap*', '*sad music*', '*chip* *chip*', '[BLANK_AUDIO]', '(laughs)', '♪', '.', '...', ' - ']
+    )
     def test_an_annotation_or_punctuation_line_is_dropped(self, text):
         uc, _ = _use_case([_seg(text), _seg('Real words.', 1.0)])
         uc.feed_audio(speech_like(SAMPLE_RATE * 3))

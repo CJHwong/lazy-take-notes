@@ -21,8 +21,9 @@ _FRAME = SAMPLE_RATE // 10
 # the gate on loudness alone, and it raises the noise floor under quiet speech.
 # The gate measures loudness above this frequency. Whisper still gets every sample.
 _HIGH_PASS_HZ = 100.0
-# A line that is only an annotation (*clap*, [music], (laughs), ♪) or only punctuation.
-_NOT_SPEECH = re.compile(r'\s*(?:[*\[(♪][^\]*)♪]*[*\])♪]\s*|[\W_]*)')
+# A line that is only annotations (*clap*, [music], (laughs), ♪, or several: *chip* *chip*)
+# or only punctuation.
+_NOT_SPEECH = re.compile(r'\s*(?:(?:[*\[(♪][^\]*)♪]*[*\])♪]\s*)+|[\W_]*)')
 # Hold back a cut chunk's last segment only when another one is sent; one long segment is sent as is.
 _MIN_SEGMENTS_TO_HOLD = 2
 # A sentence said this many times in a row is a decoding loop, not speech.

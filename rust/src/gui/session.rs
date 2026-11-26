@@ -863,7 +863,7 @@ impl SessionView {
                 div()
                     .font_family(text::MONO)
                     .text_color(theme.muted_foreground)
-                    .child(status.format_elapsed(Instant::now())),
+                    .child(self.clock()),
             );
         if status.recording && self.is_record() {
             live = live.child(self.render_meter(cx));
@@ -1191,10 +1191,23 @@ impl SessionView {
     }
 
     /// The state with its color, as the strip's first item.
+    /// A recording shows how long it has run. A file shows where in the
+    /// audio it is: the end of the last line, so it ends at the audio's
+    /// length. The time spent on the work would mean nothing to the user.
+    fn clock(&self) -> String {
+        if self.is_record() {
+            return self.status.format_elapsed(Instant::now());
+        }
+        let segments = &self.mode.session().controller.all_segments;
+        format_wall_time(segments.last().map_or(0.0, |segment| segment.wall_end))
+    }
+
     fn state_label(&self, cx: &App) -> (String, Hsla) {
         let status = &self.status;
         let theme = cx.theme();
-        if status.stopped {
+        if status.stopped && !self.is_record() {
+            ("Done".into(), theme.muted_foreground)
+        } else if status.stopped {
             ("Stopped".into(), theme.muted_foreground)
         } else if status.paused {
             ("Paused".into(), theme.warning)

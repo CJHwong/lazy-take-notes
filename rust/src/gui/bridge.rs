@@ -101,6 +101,14 @@ impl SessionIo for GuiIo<'_> {
     fn exit(&mut self) {
         self.exited = true;
     }
+
+    /// The window has no quit key to name, and calls the digest the notes.
+    fn final_digest_notice(&self, ok: bool) -> &'static str {
+        match ok {
+            true => "Final notes ready.",
+            false => "Final notes failed. Update Notes tries again.",
+        }
+    }
 }
 
 /// The id type of the notices this app shows.

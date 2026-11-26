@@ -18,7 +18,7 @@ use crate::adapters::templates::YamlTemplates;
 use crate::app::container::Loaded;
 use crate::app::notices::BUILTIN_NOTICE_BODY;
 use crate::app::session::Severity;
-use crate::app::template_catalog::{NO_TEMPLATES, Row, TemplateCatalog};
+use crate::app::template_catalog::{Row, TemplateCatalog};
 use crate::gui::bridge::notify;
 use crate::gui::design::{control, radius, size, space, text, tint};
 use crate::gui::dialogs::{self, Extra};
@@ -30,6 +30,8 @@ use crate::gui::widgets::{
 };
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The list with no note types, in the window's words and controls.
+const NO_NOTE_TYPES: &str = "**No note types yet.**\n\nUse New to create one, or turn on Show built-in note types in Settings > Sessions.";
 pub enum TemplatePickerEvent {
     Record(String),
     Transcribe(String),
@@ -176,7 +178,7 @@ impl TemplatePickerView {
                 .get(&name)
                 .map(|template| template.system_prompt.clone())
                 .unwrap_or_default(),
-            None if self.catalog.loaded.is_empty() => NO_TEMPLATES.to_string(),
+            None if self.catalog.loaded.is_empty() => NO_NOTE_TYPES.to_string(),
             None => "*No matching note types*".to_string(),
         };
         self.preview

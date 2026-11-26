@@ -27,9 +27,10 @@ const MIN_SEGMENTS_TO_HOLD: usize = 2;
 /// Audio a buffer needs before a pause can end it, and before a flush sends it.
 const MIN_SPEECH_S: f64 = 2.0;
 
-/// A line that is only an annotation (*clap*, [music], (laughs), ♪) or only punctuation.
+/// A line that is only annotations (*clap*, [music], (laughs), ♪, or several:
+/// *chip* *chip*) or only punctuation.
 static NOT_SPEECH: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:\s*(?:[*\[(♪][^\]*)♪]*[*\])♪]\s*|[\W_]*))$").expect("valid regex")
+    Regex::new(r"^(?:\s*(?:(?:[*\[(♪][^\]*)♪]*[*\])♪]\s*)+|[\W_]*))$").expect("valid regex")
 });
 /// A phrase said three or more times in a row is a decoding loop, not speech.
 static LOOP: LazyLock<BacktrackingRegex> =

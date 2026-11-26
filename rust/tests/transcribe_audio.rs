@@ -289,6 +289,7 @@ mod cleaning {
         for text in [
             "*clap*",
             "*sad music*",
+            "*chip* *chip*",
             "[BLANK_AUDIO]",
             "(laughs)",
             "♪",

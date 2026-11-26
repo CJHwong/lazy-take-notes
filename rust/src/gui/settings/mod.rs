@@ -21,6 +21,7 @@ use indexmap::IndexMap;
 use tracing::error;
 
 use crate::adapters::assets::store::CachedModelStore;
+use crate::adapters::model_catalog::asset_for_model;
 use crate::adapters::paths::Paths;
 use crate::app::session::Severity;
 use crate::app::settings::form::{
@@ -219,6 +220,9 @@ pub struct SettingsView {
     languages: Vec<LanguageRow>,
     /// The marked speech model row, by asset id.
     chosen: Option<&'static str>,
+    /// The row the config's own model value names: a short name, an id or
+    /// an `hf://` URI. While it stays chosen, Save keeps that value as written.
+    loaded_choice: Option<&'static str>,
     /// A key is stored, so the clear-key button shows.
     key_stored: bool,
     focus: FocusHandle,
@@ -288,6 +292,7 @@ impl SettingsView {
             hints,
             languages: Vec::new(),
             chosen: None,
+            loaded_choice: None,
             key_stored: false,
             focus: cx.focus_handle(),
             drag: DragArm::default(),
@@ -344,11 +349,8 @@ impl SettingsView {
             .iter()
             .map(|(locale, uri)| self.language_row(locale, uri, window, cx))
             .collect();
-        self.chosen = self
-            .assets
-            .iter()
-            .find(|asset| model_uri(asset) == values.model)
-            .map(|asset| asset.id);
+        self.chosen = asset_for_model(&values.model, &self.assets).map(|asset| asset.id);
+        self.loaded_choice = self.chosen;
         self.key_stored = values.api_key_stored;
         cx.notify();
     }
@@ -389,12 +391,16 @@ impl SettingsView {
                 languages.insert(locale, model);
             }
         }
-        let chosen = self
-            .assets
-            .iter()
-            .find(|asset| Some(asset.id) == self.chosen)
-            .map(model_uri)
-            .unwrap_or_default();
+        // Empty keeps the saved value, so an unchanged short name stays short.
+        let chosen = match self.chosen == self.loaded_choice {
+            true => String::new(),
+            false => self
+                .assets
+                .iter()
+                .find(|asset| Some(asset.id) == self.chosen)
+                .map(model_uri)
+                .unwrap_or_default(),
+        };
         Snapshot {
             text,
             switches: self.switches.clone(),
