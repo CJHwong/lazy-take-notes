@@ -85,6 +85,8 @@ pub struct SavedSession {
     pub speakers: Option<SavedSpeakers>,
     /// The session has no transcript file, only its audio.
     pub audio_only: bool,
+    /// The note type the session ran with, when it was saved.
+    pub template: Option<String>,
     pub errors: Vec<String>,
 }
 
@@ -96,6 +98,7 @@ impl SavedSession {
             Err(message) => session.errors.push(message),
         }
         session.reload_transcript(dir);
+        session.template = crate::adapters::session_reader::template_name(dir);
         session.audio_only = TRANSCRIPT.resolve(dir).is_none() && has_recording(dir);
         if let Some(path) = NOTES.resolve(dir) {
             match read_saved(&path) {

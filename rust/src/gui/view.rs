@@ -22,7 +22,7 @@ use crate::gui::dialogs;
 use crate::gui::icons;
 use crate::gui::widgets::{
     DragArm, column_header, empty_state, inline_tool, markdown, pane_header, speaker_chip,
-    status_strip, title_field, tool, transcript_line,
+    status_strip, tag, title_field, tool, transcript_line,
 };
 use crate::gui::{CopyDigest, CopyTranscript, RenameSession, SESSION_CONTEXT, ShowInFinder};
 
@@ -342,7 +342,8 @@ impl SessionReader {
         )
     }
 
-    /// The speakers, in the strip under both columns, as in a live session.
+    /// The note type and the speakers, in the strip under both columns, as in
+    /// a live session.
     fn render_speakers(&self, cx: &mut Context<Self>) -> Option<Div> {
         let chips = self
             .session
@@ -350,7 +351,8 @@ impl SessionReader {
             .as_ref()
             .map(|saved| saved.chips())
             .unwrap_or_default();
-        if chips.is_empty() {
+        let template = self.session.template.clone();
+        if chips.is_empty() && template.is_none() {
             return None;
         }
         let items = chips.into_iter().map(|(speaker, _, seconds)| {
@@ -374,6 +376,7 @@ impl SessionReader {
             status_strip(cx)
                 .gap(space::XS)
                 .overflow_hidden()
+                .children(template.map(|name| tag(name, cx)))
                 .children(items),
         )
     }

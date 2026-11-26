@@ -126,6 +126,7 @@ mod tests {
             name: name.into(),
             has_notes: false,
             has_transcript: true,
+            template: None,
         }
     }
 

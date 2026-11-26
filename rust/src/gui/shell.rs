@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -674,6 +675,8 @@ struct NavRow {
     selected: bool,
     /// The live session's mark.
     dot: Option<Hsla>,
+    /// Shown on hover: the session's note type.
+    tooltip: Option<SharedString>,
 }
 
 fn nav(id: impl Into<ElementId>, title: impl Into<SharedString>) -> NavRow {
@@ -684,6 +687,7 @@ fn nav(id: impl Into<ElementId>, title: impl Into<SharedString>) -> NavRow {
         detail: None,
         selected: false,
         dot: None,
+        tooltip: None,
     }
 }
 
@@ -697,6 +701,7 @@ impl Shell {
             detail,
             selected,
             dot,
+            tooltip,
         } = row;
         let theme = cx.theme();
         let muted = theme.muted_foreground;
@@ -719,6 +724,9 @@ impl Shell {
                         .text_color(muted)
                         .child(detail),
                 )
+            })
+            .when_some(tooltip, |row, tooltip| {
+                row.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             })
             .on_click(cx.listener(move |shell, _, window, cx| {
                 // A click on the open page's own row keeps it as it is.
@@ -743,6 +751,7 @@ impl Shell {
                     name: name.to_string_lossy().into_owned(),
                     has_notes: false,
                     has_transcript: false,
+                    template: None,
                 },
             );
         }
@@ -787,8 +796,13 @@ impl Shell {
                 let on_click: OnClick =
                     Rc::new(move |shell, window, cx| shell.open_saved(&dir, window, cx));
                 let id = ElementId::Name(info.dir.to_string_lossy().into_owned().into());
+                let tooltip = info
+                    .template
+                    .as_ref()
+                    .map(|name| SharedString::from(format!("Note type: {name}")));
                 let row = NavRow {
                     detail: Some(when.into()),
+                    tooltip,
                     selected,
                     dot,
                     ..nav(id, title)

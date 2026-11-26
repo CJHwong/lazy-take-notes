@@ -121,7 +121,7 @@ The audio worker posts `AudioHealth` on each change. `RecordApp` shows `MIC LOST
 
 0. **Preflight**: `preflight.run_preflight` checks the output folder, template, mic, system audio, speech model, speaker assets, and AI model before the session folder exists
 1. **Audio capture**: AudioSource → numpy float32 buffer → VAD trigger → whisper transcribe (off-thread) → TranscriptSegment
-2. **Transcript buffering**: App receives TranscriptChunk → updates panel, persists to disk, appends to DigestState.buffer
+2. **Transcript buffering**: App receives TranscriptChunk → updates panel, persists to disk, appends to DigestState.buffer. With the first lines, the controller writes the template name to `template.txt` in the session folder (once), so a viewer can show which template a session ran with. Older sessions have no such file
 3. **Digest trigger**: When buffer >= min_lines AND elapsed >= min_interval, or buffer >= max_lines (force) → launch async digest task
 4. **Digest cycle**: Template-driven prompt (with user session context) → LLMClient.chat → JSON parse → DigestData → persist + update panel
 5. **Token compaction**: When prompt_tokens exceeds threshold, conversation history is compacted to 3 messages (system, compressed state, last response)

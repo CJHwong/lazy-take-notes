@@ -1,4 +1,6 @@
-//! The mascot both front ends draw on the welcome screen: a pig in headphones.
+//! The mascot the terminal app draws on its welcome screen, a pig in
+//! headphones, and the brand colors both front ends use. The window draws
+//! `assets/icon.png` instead.
 
 use crate::app::theme::Rgb;
 
