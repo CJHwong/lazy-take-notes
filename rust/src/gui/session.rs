@@ -29,6 +29,7 @@ use crate::app::tasks::Payload;
 use crate::domain::transcript::format_wall_time;
 use crate::gui::bridge::{Bridge, GuiIo, Incoming, notify};
 use crate::gui::dialogs::{self, Extra};
+use crate::gui::icons;
 use crate::gui::widgets::{DragArm, title_strip};
 use crate::gui::{
     CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
@@ -808,10 +809,6 @@ fn shown_title(label: &str) -> String {
 }
 
 /// A toolbar icon outside the kit's default set; `icons.rs` embeds it.
-fn extra_icon(name: &'static str) -> Icon {
-    Icon::default().path(format!("icons/{name}.svg"))
-}
-
 /// A small heading over a column, as the sidebar's group titles.
 fn heading(title: &'static str, cx: &App) -> Div {
     div()
@@ -895,7 +892,7 @@ impl SessionView {
                 cx.listener(|view, _, window, cx| view.toggle_pause("button", window, cx)),
             ));
             let (icon, label) = match muted {
-                true => (extra_icon("mic-off"), "Unmute"),
+                true => (icons::extra("mic-off"), "Unmute"),
                 false => (Icon::new(IconName::Mic), "Mute"),
             };
             tools = tools.child(
@@ -909,7 +906,7 @@ impl SessionView {
             true => tools.child(
                 Button::new("stop")
                     .small()
-                    .icon(extra_icon("square-stop"))
+                    .icon(icons::extra("square-stop"))
                     .label("Stop")
                     .on_click(cx.listener(|view, _, window, cx| view.stop(window, cx))),
             ),
@@ -926,7 +923,7 @@ impl SessionView {
         tools
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(cx.theme().border))
             .child(
-                tool("digest", extra_icon("sparkles"), "Digest Now")
+                tool("digest", icons::extra("sparkles"), "Digest Now")
                     .on_click(cx.listener(|view, _, window, cx| view.digest_now(window, cx))),
             )
             .children(self.render_quick_actions())
@@ -955,7 +952,7 @@ impl SessionView {
             return None;
         }
         let handle = self.focus_handle.clone();
-        let button = tool("quick-actions", extra_icon("zap"), "Quick Actions");
+        let button = tool("quick-actions", icons::extra("zap"), "Quick Actions");
         Some(button.dropdown_menu(move |menu, _, _| {
             let mut menu = menu.action_context(handle.clone());
             for (index, label) in labels.iter().enumerate() {
@@ -1240,7 +1237,7 @@ impl SessionView {
         if status.mic_muted {
             left = left.child(
                 badge("Mic muted", theme.secondary, theme.secondary_foreground)
-                    .child(extra_icon("mic-off").size_3()),
+                    .child(icons::extra("mic-off").size_3()),
             );
         }
         let mut right = div().flex().items_center().gap_3();

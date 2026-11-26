@@ -1,11 +1,15 @@
-//! The template list with its preview, as the TUI's template picker: a filter
-//! box and the templates by locale on the left, the preview on the right.
+//! The template list with its preview: a filter box, the templates by
+//! locale and their buttons on the left, the preview on the right. In a flow
+//! it is the start panel: a start button under the preview, and the setup
+//! checks in place of the preview once they run.
 
 use std::rc::Rc;
 use std::time::Duration;
 
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::text::{TextView, TextViewState};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use tracing::warn;
@@ -17,10 +21,11 @@ use crate::app::session::Severity;
 use crate::app::template_catalog::{NO_TEMPLATES, Row, TemplateCatalog};
 use crate::gui::bridge::notify;
 use crate::gui::dialogs::{self, Extra};
-use crate::gui::theme::{color, on};
-use crate::gui::widgets::{footer, header, hint, panel};
+use crate::gui::icons;
 
 const NOTICE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The bars under the list and the preview line up.
+pub const BAR_HEIGHT: Pixels = px(52.);
 
 pub enum TemplatePickerEvent {
     Picked(String),
@@ -39,6 +44,10 @@ pub struct TemplatePickerView {
     scroll: ScrollHandle,
     /// The list has the keys; otherwise the filter box has them.
     list_focused: bool,
+    /// The button that starts a session from the chosen template, in a flow.
+    action: Option<(&'static str, IconName)>,
+    /// The setup checks of the chosen template, in place of its preview.
+    checks: Option<AnyView>,
     focus: FocusHandle,
     _subscription: Subscription,
 }
@@ -46,15 +55,21 @@ pub struct TemplatePickerView {
 impl EventEmitter<TemplatePickerEvent> for TemplatePickerView {}
 
 impl TemplatePickerView {
-    pub fn new(loaded: &Loaded, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        loaded: &Loaded,
+        action: Option<(&'static str, IconName)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let catalog = TemplateCatalog::new(
             YamlTemplates::new(&loaded.paths),
             loaded.infra.show_builtin_templates,
         );
-        let search = cx.new(|cx| InputState::new(window, cx).placeholder("Filter templates..."));
-        let subscription = cx.subscribe_in(&search, window, Self::on_search);
         let preview = cx.new(|cx| TextViewState::markdown("", cx));
         let list_focused = catalog.loaded.is_empty();
+        let placeholder = format!("Filter {} templates", catalog.loaded.len());
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder));
+        let subscription = cx.subscribe_in(&search, window, Self::on_search);
         let mut view = Self {
             catalog,
             rows: Vec::new(),
@@ -63,6 +78,8 @@ impl TemplatePickerView {
             preview,
             scroll: ScrollHandle::new(),
             list_focused,
+            action,
+            checks: None,
             focus: cx.focus_handle(),
             _subscription: subscription,
         };
@@ -88,6 +105,19 @@ impl TemplatePickerView {
         cx.notify();
     }
 
+    /// The checks run for the chosen template; a click on another one ends them.
+    pub fn show_checks(&mut self, checks: AnyView, cx: &mut Context<Self>) {
+        self.checks = Some(checks);
+        cx.notify();
+    }
+
+    /// Back to the preview. Dropping the checks view cancels its checks.
+    pub fn close_checks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.checks.take().is_some() {
+            self.focus_part(true, window, cx);
+        }
+    }
+
     fn query(&self, cx: &App) -> String {
         self.search.read(cx).value().trim().to_lowercase()
     }
@@ -111,6 +141,7 @@ impl TemplatePickerView {
     }
 
     fn rebuild(&mut self, query: &str, cx: &mut Context<Self>) {
+        self.checks = None;
         self.rows = self.catalog.rows(query);
         self.selected = self
             .rows
@@ -155,35 +186,38 @@ impl TemplatePickerView {
     }
 
     fn select(&mut self, row: usize, cx: &mut Context<Self>) {
+        if self.selected != Some(row) {
+            self.checks = None;
+        }
         self.selected = Some(row);
         self.scroll.scroll_to_item(row);
         self.show_preview(cx);
         cx.notify();
     }
 
-    /// A key, or a click on its hint. The letter commands act only while the list has the keys.
+    /// A key or a button. While the checks show, the keys belong to them.
     fn press(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
         match name {
             "up" | "down" => self.step(name == "down", cx),
-            "enter" => {
-                if let Some(key) = self.current() {
-                    cx.emit(TemplatePickerEvent::Picked(key));
-                }
-            }
+            "enter" => self.pick(cx),
             "escape" => cx.emit(TemplatePickerEvent::Cancelled),
             "tab" => {
                 let list = !self.list_focused;
                 self.focus_part(list, window, cx);
             }
-            "n" => cx.emit(TemplatePickerEvent::Create),
-            "a" => {
-                if let Some(key) = self.current() {
-                    cx.emit(TemplatePickerEvent::EditWithAi(key));
-                }
-            }
-            "e" => self.edit(window, cx),
-            "x" => self.ask_delete(window, cx),
             _ => {}
+        }
+    }
+
+    fn pick(&mut self, cx: &mut Context<Self>) {
+        if let Some(key) = self.current() {
+            cx.emit(TemplatePickerEvent::Picked(key));
+        }
+    }
+
+    fn edit_with_ai(&mut self, cx: &mut Context<Self>) {
+        if let Some(key) = self.current() {
+            cx.emit(TemplatePickerEvent::EditWithAi(key));
         }
     }
 
@@ -196,13 +230,11 @@ impl TemplatePickerView {
     ) {
         let keystroke = &event.keystroke;
         let modifiers = keystroke.modifiers;
-        if modifiers.control || modifiers.platform || modifiers.alt {
+        if self.checks.is_some() || modifiers.control || modifiers.platform || modifiers.alt {
             return;
         }
         let key = keystroke.key.as_str();
-        let navigation = matches!(key, "up" | "down" | "enter" | "escape" | "tab");
-        let command = self.list_focused && matches!(key, "n" | "a" | "e" | "x");
-        if navigation || command {
+        if matches!(key, "up" | "down" | "enter" | "escape" | "tab") {
             cx.stop_propagation();
             self.press(key, window, cx);
         }
@@ -288,14 +320,16 @@ impl TemplatePickerView {
     }
 
     fn render_row(&self, index: usize, row: &Row, cx: &mut Context<Self>) -> AnyElement {
+        let theme = cx.theme();
         let name = match row {
             Row::Locale(locale) => {
                 return div()
                     .px_2()
-                    .pt_2()
-                    .font_weight(FontWeight::BOLD)
-                    .text_color(color(cx, "text-muted"))
+                    .pt_3()
+                    .pb_1()
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_xs()
+                    .text_color(theme.muted_foreground)
                     .child(locale.to_uppercase())
                     .into_any_element();
             }
@@ -303,21 +337,15 @@ impl TemplatePickerView {
         };
         let selected = self.selected == Some(index);
         let (background, text, muted) = match (selected, self.list_focused) {
-            (true, true) => {
-                let text = on(cx, "block-cursor-foreground", "block-cursor-background");
-                (color(cx, "block-cursor-background"), text, text)
-            }
-            (true, false) => (
-                color(cx, "block-cursor-blurred-background"),
-                color(cx, "foreground"),
-                color(cx, "text-muted"),
+            (true, true) => (
+                theme.primary,
+                theme.primary_foreground,
+                theme.primary_foreground.opacity(0.75),
             ),
-            (false, _) => (
-                color(cx, "background"),
-                color(cx, "foreground"),
-                color(cx, "text-muted"),
-            ),
+            (true, false) => (theme.secondary, theme.foreground, theme.muted_foreground),
+            (false, _) => (theme.transparent, theme.foreground, theme.muted_foreground),
         };
+        let hover = theme.foreground.opacity(0.06);
         let locale = self
             .catalog
             .loaded
@@ -328,26 +356,121 @@ impl TemplatePickerView {
         div()
             .id(("template", index))
             .flex()
+            .items_center()
             .gap_2()
             .px_2()
             .py_1()
-            .rounded(px(4.))
+            .rounded(px(6.))
             .bg(background)
             .text_color(text)
-            .cursor_pointer()
-            .child(self.catalog.label(&name))
-            .child(div().text_color(muted).child(format!("({locale})")))
+            .when(!selected, |row| row.hover(move |row| row.bg(hover)))
+            .child(
+                div()
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(self.catalog.label(&name)),
+            )
             .when(user, |row| {
-                row.child(div().text_color(muted).child("[user]"))
+                row.child(div().text_xs().text_color(muted).child("User"))
             })
+            .child(div().text_xs().text_color(muted).child(locale))
             .on_click(cx.listener(move |view, event: &ClickEvent, window, cx| {
                 view.focus_part(true, window, cx);
                 view.select(index, cx);
                 if event.click_count() > 1 {
-                    view.press("enter", window, cx);
+                    view.pick(cx);
                 }
             }))
             .into_any_element()
+    }
+
+    /// New, Edit, Edit with AI and Delete, under the list.
+    fn render_tools(&self, cx: &mut Context<Self>) -> Div {
+        let current = self.current();
+        let none = current.is_none();
+        let user = current
+            .as_ref()
+            .is_some_and(|name| self.catalog.user_names.contains(name));
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap_1()
+            .h(BAR_HEIGHT)
+            .px_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("new-template")
+                    .ghost()
+                    .small()
+                    .icon(IconName::Plus)
+                    .label("New")
+                    .tooltip("Create a template with AI")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Create))),
+            )
+            .child(
+                Button::new("edit-template")
+                    .ghost()
+                    .small()
+                    .icon(icons::extra("pencil"))
+                    .label("Edit")
+                    .tooltip("Open the template in your text editor")
+                    .disabled(none)
+                    .on_click(cx.listener(|view, _, window, cx| view.edit(window, cx))),
+            )
+            .child(
+                Button::new("edit-template-ai")
+                    .ghost()
+                    .small()
+                    .icon(icons::extra("sparkles"))
+                    .label("Edit with AI")
+                    .disabled(none)
+                    .on_click(cx.listener(|view, _, _, cx| view.edit_with_ai(cx))),
+            )
+            .child(div().flex_1())
+            .child(
+                Button::new("delete-template")
+                    .ghost()
+                    .small()
+                    .icon(icons::extra("trash"))
+                    .tooltip(if user {
+                        "Delete this template"
+                    } else {
+                        "Only your own templates can be deleted"
+                    })
+                    .disabled(!user)
+                    .on_click(cx.listener(|view, _, window, cx| view.ask_delete(window, cx))),
+            )
+    }
+
+    /// Cancel and the start button, under the preview in a flow.
+    fn render_action(&self, label: &'static str, icon: IconName, cx: &mut Context<Self>) -> Div {
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_end()
+            .gap_2()
+            .h(BAR_HEIGHT)
+            .px_4()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child(
+                Button::new("cancel-start")
+                    .label("Cancel")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(TemplatePickerEvent::Cancelled))),
+            )
+            .child(
+                Button::new("start")
+                    .primary()
+                    .icon(icon)
+                    .label(label)
+                    .disabled(self.current().is_none())
+                    .on_click(cx.listener(|view, _, _, cx| view.pick(cx))),
+            )
     }
 }
 
@@ -392,77 +515,62 @@ impl Render for TemplatePickerView {
             .enumerate()
             .map(|(index, row)| self.render_row(index, row, cx))
             .collect();
-        let title = format!(
-            "Select a template ({} available)",
-            self.catalog.loaded.len()
-        );
-        let list = panel("", self.list_focused, cx).flex_1().child(
-            div()
-                .id("templates")
-                .flex_1()
-                .min_h_0()
-                .overflow_y_scroll()
-                .track_scroll(&self.scroll)
-                .on_click(cx.listener(|view, _, window, cx| view.focus_part(true, window, cx)))
-                .children(rows),
-        );
-        let entity = cx.entity().downgrade();
-        let on_press = Rc::new(
-            move |name: &'static str, window: &mut Window, cx: &mut App| {
-                let _ = entity.update(cx, |view, cx| view.press(name, window, cx));
-            },
-        );
+        let border = cx.theme().border;
+        let list = div()
+            .w(relative(0.32))
+            .min_w(px(260.))
+            .max_w(px(380.))
+            .flex()
+            .flex_col()
+            .border_r_1()
+            .border_color(border)
+            .child(
+                div()
+                    .flex_none()
+                    .p_2()
+                    .child(Input::new(&self.search).cleanable(true)),
+            )
+            .child(
+                div()
+                    .id("templates")
+                    .flex_1()
+                    .min_h_0()
+                    .px_2()
+                    .pb_2()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .on_click(cx.listener(|view, _, window, cx| view.focus_part(true, window, cx)))
+                    .children(rows),
+            )
+            .child(self.render_tools(cx));
+        let detail = match (&self.checks, self.action.clone()) {
+            (Some(checks), _) => checks.clone().into_any_element(),
+            (None, action) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .id("preview")
+                        .flex_1()
+                        .min_h_0()
+                        .px_6()
+                        .py_4()
+                        .overflow_y_scroll()
+                        .child(TextView::new(&self.preview).selectable(true)),
+                )
+                .when_some(action, |detail, (label, icon)| {
+                    detail.child(self.render_action(label, icon, cx))
+                })
+                .into_any_element(),
+        };
         div()
             .key_context("TemplatePicker")
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(Self::on_capture_key))
             .size_full()
             .flex()
-            .flex_col()
-            .child(header(title, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .gap_3()
-                    .p_3()
-                    .pt_4()
-                    .child(
-                        div()
-                            .w(relative(0.35))
-                            .min_w(px(260.))
-                            .max_w(px(420.))
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(Input::new(&self.search).cleanable(true))
-                            .child(list),
-                    )
-                    .child(
-                        panel("Preview", false, cx).flex_1().child(
-                            div()
-                                .id("preview")
-                                .flex_1()
-                                .min_h_0()
-                                .overflow_y_scroll()
-                                .child(TextView::new(&self.preview).selectable(true)),
-                        ),
-                    ),
-            )
-            .child(footer(
-                vec![
-                    hint("⏎", "Select", "enter"),
-                    hint("↑↓", "Navigate", "down"),
-                    hint("tab", "List/Filter", "tab"),
-                    hint("n", "New", "n"),
-                    hint("e", "Edit", "e"),
-                    hint("a", "Edit with AI", "a"),
-                    hint("x", "Delete", "x"),
-                    hint("esc", "Cancel", "escape"),
-                ],
-                on_press,
-                cx,
-            ))
+            .child(list)
+            .child(div().flex_1().min_w_0().h_full().child(detail))
     }
 }

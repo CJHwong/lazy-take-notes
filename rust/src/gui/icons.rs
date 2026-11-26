@@ -3,9 +3,13 @@
 
 use std::borrow::Cow;
 
+use gpui_kit::component::Icon;
 use gpui_kit::*;
 
-gpui_kit::assets::icon_assets!(ToolbarIcons, [SquareStop, MicOff, Sparkles, Zap]);
+gpui_kit::assets::icon_assets!(
+    ToolbarIcons,
+    [SquareStop, MicOff, Sparkles, Zap, Pencil, Trash]
+);
 
 /// The kit's assets, with the toolbar icons first.
 pub struct AppAssets;
@@ -23,4 +27,9 @@ impl AssetSource for AppAssets {
         paths.extend(assets::Assets.list(path)?);
         Ok(paths)
     }
+}
+
+/// An icon the kit's `IconName` lacks, from the set above.
+pub fn extra(name: &'static str) -> Icon {
+    Icon::default().path(format!("icons/{name}.svg"))
 }

@@ -93,48 +93,6 @@ pub fn header(title: impl Into<SharedString>, cx: &App) -> Div {
         )
 }
 
-/// A box with a rounded border and its title in the top edge. The border
-/// takes the primary color while the panel holds the focus.
-pub fn panel(title: impl Into<SharedString>, focused: bool, cx: &App) -> Div {
-    let border = if focused {
-        color(cx, "primary")
-    } else {
-        color(cx, "border-blurred")
-    };
-    let title_color = if focused {
-        color(cx, "primary")
-    } else {
-        color(cx, "text-muted")
-    };
-    let title: SharedString = title.into();
-    div()
-        .relative()
-        .flex()
-        .flex_col()
-        .min_h_0()
-        .min_w_0()
-        .border_1()
-        .border_color(border)
-        .rounded(px(8.))
-        .pt_3()
-        .px_3()
-        .pb_2()
-        .when(!title.is_empty(), |panel| {
-            panel.child(
-                div()
-                    .absolute()
-                    .top(px(-9.))
-                    .left(px(12.))
-                    .px_1()
-                    .bg(color(cx, "background"))
-                    .text_xs()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(title_color)
-                    .child(title),
-            )
-        })
-}
-
 /// One key the footer offers: the key as shown, and what it does.
 #[derive(Clone)]
 pub struct Hint {

@@ -58,7 +58,6 @@ enum Flow {
 enum Stage {
     TemplatePicker(Entity<TemplatePickerView>),
     Builder(Entity<BuilderView>),
-    Preflight(Entity<PreflightView>),
     /// The AI check of a transcription runs.
     Checking,
     Session(Entity<SessionView>),
@@ -69,6 +68,8 @@ struct Live {
     flow: Flow,
     stage: Stage,
     _subscription: Option<Subscription>,
+    /// The setup checks inside the template picker, while they show.
+    _checks: Option<Subscription>,
 }
 
 /// What the detail pane shows.
@@ -213,6 +214,7 @@ impl Shell {
             flow,
             stage: Stage::Checking,
             _subscription: None,
+            _checks: None,
         });
         match flow {
             Flow::Record => self.open_picker(window, cx),
@@ -254,7 +256,11 @@ impl Shell {
             Ok(loaded) => loaded,
             Err(e) => return self.failed("open_picker", &e, window, cx),
         };
-        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, window, cx));
+        let action = match self.flow() {
+            Some(Flow::Transcribe) => ("Transcribe", IconName::FileText),
+            _ => ("Start Recording", IconName::Mic),
+        };
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, Some(action), window, cx));
         self.loaded = Some(loaded);
         let subscription = cx.subscribe_in(&picker, window, Self::on_template);
         self.set_stage(Stage::TemplatePicker(picker), subscription, cx);
@@ -337,10 +343,24 @@ impl Shell {
             Ok(runtime) => runtime,
             Err(e) => return self.failed("start_record", &e, window, cx),
         };
+        let Some(picker) = self.picker() else {
+            return self.failed("start_record", "no template picker", window, cx);
+        };
         self.template = Some(template);
         let preflight = cx.new(|cx| PreflightView::new(runtime, window, cx));
         let subscription = cx.subscribe_in(&preflight, window, Self::on_preflight);
-        self.set_stage(Stage::Preflight(preflight), subscription, cx);
+        if let Some(live) = self.live.as_mut() {
+            live._checks = Some(subscription);
+        }
+        picker.update(cx, |picker, cx| picker.show_checks(preflight.into(), cx));
+    }
+
+    /// The template picker of the flow, while it shows.
+    fn picker(&self) -> Option<Entity<TemplatePickerView>> {
+        match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::TemplatePicker(picker)) => Some(picker.clone()),
+            _ => None,
+        }
     }
 
     fn on_preflight(
@@ -351,7 +371,10 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         if let PreflightEvent::Back = event {
-            return self.finished(None, window, cx);
+            if let Some(picker) = self.picker() {
+                picker.update(cx, |picker, cx| picker.close_checks(window, cx));
+            }
+            return;
         }
         let Some(outcome) = view.update(cx, |view, _| view.take_outcome()) else {
             return self.finished(None, window, cx);
@@ -487,7 +510,7 @@ impl Shell {
             Ok(loaded) => loaded,
             Err(e) => return self.failed("open_templates", &e, window, cx),
         };
-        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, window, cx));
+        let picker = cx.new(|cx| TemplatePickerView::new(&loaded, None, window, cx));
         let subscription = cx.subscribe_in(&picker, window, move |shell, _, event, window, cx| {
             let base = match event {
                 TemplatePickerEvent::Cancelled => {
@@ -882,17 +905,20 @@ impl Shell {
         match &self.detail {
             Detail::Empty => (Some("".into()), self.empty_state(cx)),
             Detail::Live => match self.live.as_ref().map(|live| (&live.stage, live.flow)) {
-                Some((Stage::TemplatePicker(view), _)) => (
-                    Some("Choose a Template".into()),
-                    view.clone().into_any_element(),
-                ),
+                Some((Stage::TemplatePicker(view), flow)) => {
+                    let title = match (flow, &self.audio_path) {
+                        (Flow::Transcribe, Some(path)) => {
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            format!("Transcribe {name}")
+                        }
+                        (Flow::Transcribe, None) => "Transcribe File".into(),
+                        (Flow::Record, _) => "New Recording".into(),
+                    };
+                    (Some(title.into()), view.clone().into_any_element())
+                }
                 Some((Stage::Builder(view), _)) => {
                     (Some("New Template".into()), view.clone().into_any_element())
                 }
-                Some((Stage::Preflight(view), _)) => (
-                    Some("Checking Your Setup".into()),
-                    view.clone().into_any_element(),
-                ),
                 Some((Stage::Checking, Flow::Transcribe)) => (
                     Some("Transcribe File".into()),
                     muted("Checking the AI provider…"),

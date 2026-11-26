@@ -1,26 +1,17 @@
-//! The checks before a recording starts, as the TUI's preflight screen: one
-//! row per check, a fix under each failure, the summary, then the buttons.
+//! The checks before a recording starts, inside the start panel: one row per
+//! check, a fix under each failure, the summary, then the buttons.
 
-use std::rc::Rc;
-
-use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::{ActiveTheme as _, Disableable as _, Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::app::preflight::{Check, PreflightOutcome, Status};
 use crate::app::preflight_runtime::{PreflightRuntime, Summary};
 use crate::gui::bridge::{Bridge, Incoming};
-use crate::gui::theme::{color, hsla};
-use crate::gui::widgets::{footer, header, hint, panel};
+use crate::gui::template_picker::BAR_HEIGHT;
 
-const TITLE: &str = "Checking everything before the meeting starts";
-
-/// The mark colors the TUI takes from Textual's markup color names.
-const GREEN: crate::app::theme::Rgb = crate::app::theme::Rgb(0x00, 0x80, 0x00);
-const YELLOW: crate::app::theme::Rgb = crate::app::theme::Rgb(0xff, 0xff, 0x00);
-const RED: crate::app::theme::Rgb = crate::app::theme::Rgb(0xff, 0x00, 0x00);
-const CYAN: crate::app::theme::Rgb = crate::app::theme::Rgb(0x00, 0xff, 0xff);
+const TITLE: &str = "Checking your setup";
 
 pub enum PreflightEvent {
     Back,
@@ -73,68 +64,76 @@ impl PreflightView {
         cx.emit(PreflightEvent::Start);
     }
 
-    fn press(&mut self, name: &str, cx: &mut Context<Self>) {
-        match name {
-            "r" if !self.runtime.running => self.runtime.retry(&self.bridge.tasks),
-            "escape" => {
-                if self.runtime.back() {
-                    cx.emit(PreflightEvent::Back);
-                }
-            }
-            "start" => {
-                if let Some(outcome) = self.runtime.start_anyway() {
-                    self.start(outcome, cx);
-                }
-            }
-            _ => {}
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        if !self.runtime.running {
+            self.runtime.retry(&self.bridge.tasks);
         }
         cx.notify();
     }
 
+    fn back(&mut self, cx: &mut Context<Self>) {
+        if self.runtime.back() {
+            cx.emit(PreflightEvent::Back);
+        }
+    }
+
+    fn start_anyway(&mut self, cx: &mut Context<Self>) {
+        if let Some(outcome) = self.runtime.start_anyway() {
+            self.start(outcome, cx);
+        }
+    }
+
     fn check_row(check: &Check, cx: &App) -> Div {
-        let (mark, mark_color) = match check.status {
-            Status::Pass => ("✓", hsla(GREEN)),
-            Status::Warn => ("!", hsla(YELLOW)),
-            Status::Fail => ("✗", hsla(RED)),
-            Status::Skip => ("-", color(cx, "text-muted")),
-            Status::Running => ("…", hsla(CYAN)),
-            Status::Pending => ("·", color(cx, "text-muted")),
+        let theme = cx.theme();
+        let (icon, tint) = match check.status {
+            Status::Pass => (IconName::CircleCheck, theme.success),
+            Status::Warn => (IconName::TriangleAlert, theme.warning),
+            Status::Fail => (IconName::CircleX, theme.danger),
+            Status::Skip => (IconName::Minus, theme.muted_foreground),
+            Status::Running => (IconName::LoaderCircle, theme.muted_foreground),
+            Status::Pending => (IconName::Dash, theme.muted_foreground.opacity(0.5)),
         };
         let shows_fix =
             matches!(check.status, Status::Fail | Status::Warn) && !check.fix.is_empty();
+        let muted = theme.muted_foreground;
         div()
             .flex()
-            .flex_col()
-            .gap_1()
+            .gap_3()
+            .py_2()
+            .border_b_1()
+            .border_color(theme.border)
             .child(
                 div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        div()
-                            .w(px(14.))
-                            .flex_none()
-                            .text_color(mark_color)
-                            .child(mark),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .font_weight(FontWeight::BOLD)
-                            .child(check.title),
-                    )
-                    .child(div().flex_1().child(check.detail.clone())),
+                    .flex_none()
+                    .pt(px(2.))
+                    .child(Icon::new(icon).text_color(tint)),
             )
-            .when(shows_fix, |row| {
-                row.child(
-                    div()
-                        .pl(px(22.))
-                        .flex()
-                        .gap_1()
-                        .child(div().text_color(color(cx, "text-muted")).child("Fix:"))
-                        .child(div().flex_1().child(check.fix.clone())),
-                )
-            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(check.title))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(muted)
+                            .child(check.detail.clone()),
+                    )
+                    .when(shows_fix, |row| {
+                        row.child(div().text_sm().child(format!("Fix: {}", check.fix)))
+                    }),
+            )
+    }
+}
+
+impl Drop for PreflightView {
+    /// A click on another template, Cancel or the end of the flow drops the
+    /// view: its checks stop and the speech model it loaded closes.
+    fn drop(&mut self) {
+        self.runtime.back();
     }
 }
 
@@ -152,84 +151,89 @@ impl Render for PreflightView {
             .iter()
             .map(|check| Self::check_row(check, cx))
             .collect();
+        let theme = cx.theme();
         let summary = match &self.runtime.summary {
             Summary::None => None,
-            Summary::Red(message) => Some((message.clone(), hsla(RED))),
-            Summary::Yellow(message) => Some((message.clone(), hsla(YELLOW))),
+            Summary::Red(message) => Some((message.clone(), theme.danger)),
+            Summary::Yellow(message) => Some((message.clone(), theme.warning)),
         };
+        let border = theme.border;
         let running = self.runtime.running;
         let buttons = div()
             .flex()
+            .flex_none()
+            .items_center()
             .gap_2()
-            .pt_2()
+            .h(BAR_HEIGHT)
+            .px_4()
+            .border_t_1()
+            .border_color(border)
             .child(
-                Button::new("retry")
-                    .primary()
-                    .label("Retry")
-                    .disabled(running)
-                    .on_click(cx.listener(|view, _, _, cx| view.press("r", cx))),
+                Button::new("preflight-back")
+                    .ghost()
+                    .icon(IconName::ArrowLeft)
+                    .label("Back")
+                    .tooltip("Back to the template")
+                    .on_click(cx.listener(|view, _, _, cx| view.back(cx))),
             )
+            .child(div().flex_1())
             .when(self.runtime.show_override, |buttons| {
                 buttons.child(
                     Button::new("start-anyway")
-                        .warning()
-                        .label("Start anyway")
-                        .on_click(cx.listener(|view, _, _, cx| view.press("start", cx))),
+                        .label("Start Anyway")
+                        .on_click(cx.listener(|view, _, _, cx| view.start_anyway(cx))),
                 )
             })
             .child(
-                Button::new("back")
-                    .label("Back")
-                    .on_click(cx.listener(|view, _, _, cx| view.press("escape", cx))),
-            );
-        let body = panel(TITLE, true, cx)
-            .w(relative(0.9))
-            .max_w(px(900.))
-            .max_h(relative(0.9))
-            .px_5()
-            .pt_5()
-            .pb_4()
-            .child(
-                div()
-                    .id("checks")
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .overflow_y_scroll()
-                    .children(rows)
-                    .when_some(summary, |checks, (message, tint)| {
-                        checks.child(div().pt_2().text_color(tint).child(message))
+                Button::new("retry")
+                    .primary()
+                    .icon(IconName::RefreshCw)
+                    .label(if running {
+                        "Checking…"
+                    } else {
+                        "Check Again"
                     })
-                    .child(buttons),
+                    .loading(running)
+                    .disabled(running)
+                    .on_click(cx.listener(|view, _, _, cx| view.retry(cx))),
             );
-        let entity = cx.entity().downgrade();
-        let on_press = Rc::new(move |name: &'static str, _: &mut Window, cx: &mut App| {
-            let _ = entity.update(cx, |view, cx| view.press(name, cx));
-        });
-        let mut hints = vec![hint("esc", "Back", "escape")];
-        if !running {
-            hints.insert(0, hint("r", "Retry", "r"));
-        }
         div()
             .key_context("Preflight")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|view, event: &KeyDownEvent, _, cx| {
-                let key = event.keystroke.key.clone();
-                view.press(&key, cx);
+                if event.keystroke.key == "escape" {
+                    view.back(cx);
+                }
             }))
             .size_full()
             .flex()
             .flex_col()
-            .child(header("lazy-take-notes", cx))
             .child(
                 div()
+                    .id("checks")
                     .flex_1()
                     .min_h_0()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(body),
+                    .px_6()
+                    .py_4()
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .pb_2()
+                            .text_lg()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(TITLE),
+                    )
+                    .children(rows)
+                    .when_some(summary, |checks, (message, tint)| {
+                        checks.child(
+                            div()
+                                .pt_3()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(tint)
+                                .child(message),
+                        )
+                    }),
             )
-            .child(footer(hints, on_press, cx))
+            .child(buttons)
     }
 }

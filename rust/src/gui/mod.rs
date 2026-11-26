@@ -6,7 +6,7 @@ mod bridge;
 mod builder;
 mod dialogs;
 mod env;
-mod icons;
+pub(crate) mod icons;
 mod preflight;
 mod session;
 mod settings;
