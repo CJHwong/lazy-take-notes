@@ -108,9 +108,8 @@ pub(crate) fn runtime() -> tokio::runtime::Handle {
 /// Open the window and run until it closes. Returns the exit code.
 pub fn run() -> i32 {
     env::import_login_environment();
-    // As the Trolley app set them: a Finder start runs in `/`, so the default
-    // `./output` cannot work, and the kiosk flag lets the system audio helper
-    // ask for its permission.
+    // A Finder start runs in `/`, so the default `./output` cannot work, and
+    // the kiosk flag lets the system audio helper ask for its permission.
     // SAFETY: no other thread runs yet.
     unsafe {
         if std::env::var_os("LTN_OUTPUT_DIR").is_none() {

@@ -68,9 +68,11 @@ The Rust app in `rust/` keeps the same four layers under role names:
 | `l1_entities` | `domain/` |
 | `l2_use_cases` | `ports/`, `usecases/` |
 | `l3_interface_adapters` | `adapters/`, `config.rs` |
-| `l4_frameworks_and_drivers` | `app/` (no UI), then `tui/`, then `cli/` |
+| `l4_frameworks_and_drivers` | `app/` (no UI), then `tui/` and `gui/`, then `cli/` |
 
-Each layer imports only the layers above it in the table, and `app/` only before `tui/` and `cli/`. ratatui and crossterm stay in `tui/` and `cli/`. `rust/scripts/check_layers.py` enforces both rules in prek.
+Each layer imports only the layers above it in the table. `app/` comes before `tui/`, `gui/` and `cli/`. `tui/` and `gui/` share a rank and never import each other. ratatui and crossterm stay in `tui/` and `cli/`. gpui and gpui_kit stay in `gui/`. `rust/scripts/check_layers.py` enforces these rules in prek.
+
+`gui/` is the native macOS window, built only with the Cargo feature `gui` (`lazy-take-notes-gui`, packaged by `rust/scripts/package_app.sh`). Each of its screens is a view over the same `app/` runtime that a TUI screen drives, so a fix to session, preflight, settings or builder behavior goes in `app/` and both front ends get it. The window is driven by the pointer first: every command is a labeled control on screen, and keyboard shortcuts show only in the menu bar and Help.
 
 `app/session/` runs a session without a screen: digests, quick actions, the label, speakers, workers and the quit flow. A front end implements `SessionIo` (notices, tasks, exit), forwards input and worker events, shows each `Step` it gets back, and draws the runtime's `Status`. The TUI screens in `tui/screens/{session,record,transcribe}.rs` are such views.
 

@@ -2,7 +2,7 @@
 
 The script is a release tool, so these tests run it for real against a throwaway
 tree and stub the macOS tooling it shells out to. The real ``plutil`` is used,
-because the Info.plist patch is the part worth proving.
+because the check of the Info.plist usage strings is the part worth proving.
 """
 
 from __future__ import annotations
@@ -16,21 +16,26 @@ import pytest
 
 REPO_ROOT = Path(__file__).parents[2]
 RELEASE_SCRIPT = REPO_ROOT / 'scripts' / 'release.sh'
-BUILD_SCRIPT = REPO_ROOT / 'scripts' / 'trolley' / 'build.sh'
+ENTITLEMENTS = REPO_ROOT / 'rust' / 'scripts' / 'app.entitlements'
 
 pytestmark = pytest.mark.skipif(
     os.name != 'posix' or os.uname().sysname != 'Darwin',
     reason='the release script targets macOS and needs the system plutil',
 )
 
-APP_RELATIVE = 'trolley/build/com.cjhwong.lazy-take-notes/aarch64-macos/dist/Lazy Take Notes.app'
+APP_RELATIVE = 'rust/target/app/Lazy Take Notes.app'
+USAGE_KEYS = """    <key>NSMicrophoneUsageDescription</key>
+    <string>mic</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>audio</string>
+"""
 PLIST_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
     <string>com.cjhwong.lazy-take-notes</string>
-</dict>
+{usage}</dict>
 </plist>
 """
 
@@ -56,29 +61,34 @@ class Tree:
         (root / 'scripts' / 'release.sh').write_text(RELEASE_SCRIPT.read_text())
         (root / 'scripts' / 'release.sh').chmod(0o755)
 
-        (root / 'scripts' / 'trolley').mkdir()
-        (root / 'scripts' / 'trolley' / 'build.sh').write_text(BUILD_SCRIPT.read_text())
-        (root / 'scripts' / 'trolley' / 'build.sh').chmod(0o755)
-
-        self._write_project_files('0.1.0', trolley_version='0.1.0')
-        self._write_tools()
-
-    def _write_project_files(self, version: str, *, trolley_version: str) -> None:
-        self.project_version = version
-        (self.root / 'pyproject.toml').write_text(f'[project]\nname = "x"\nversion = "{version}"\n')
-        (self.root / 'trolley.toml').write_text(f'[app]\nversion = "{trolley_version}"\n')
-
-    def _write_tools(self) -> None:
+        (root / 'rust' / 'scripts').mkdir(parents=True)
+        (root / 'rust' / 'scripts' / 'app.entitlements').write_text(ENTITLEMENTS.read_text())
+        # The real package_app.sh runs cargo; this stand-in makes the bundle it would.
         _executable(
-            self.bin / 'trolley',
+            root / 'rust' / 'scripts' / 'package_app.sh',
             '#!/bin/sh\n'
             '[ "${FAKE_SKIP_BUILD:-0}" = "1" ] && exit 0\n'
+            f'cd "{root}"\n'
             f'mkdir -p "{APP_RELATIVE}/Contents/MacOS" "{APP_RELATIVE}/Contents/Resources"\n'
-            f'printf "#!/bin/sh\\n" > "{APP_RELATIVE}/Contents/MacOS/lazy-take-notes_runtime"\n'
-            f'printf "#!/bin/sh\\n" > "{APP_RELATIVE}/Contents/MacOS/lazy-take-notes_core"\n'
-            f'cat > "{APP_RELATIVE}/Contents/Info.plist" <<\'PLIST\'\n{PLIST_XML}PLIST\n'
+            f'printf "#!/bin/sh\\n" > "{APP_RELATIVE}/Contents/MacOS/lazy-take-notes"\n'
+            f'printf "#!/bin/sh\\n" > "{APP_RELATIVE}/Contents/MacOS/coreaudio-tap"\n'
+            'if [ "${FAKE_NO_USAGE:-0}" = "1" ]; then\n'
+            f'cat > "{APP_RELATIVE}/Contents/Info.plist" <<\'PLIST\'\n{PLIST_XML.format(usage="")}PLIST\n'
+            'else\n'
+            f'cat > "{APP_RELATIVE}/Contents/Info.plist" <<\'PLIST\'\n{PLIST_XML.format(usage=USAGE_KEYS)}PLIST\n'
+            'fi\n'
             'exit 0\n',
         )
+
+        self._write_project_files('0.1.0', rust_version='0.1.0')
+        self._write_tools()
+
+    def _write_project_files(self, version: str, *, rust_version: str) -> None:
+        self.project_version = version
+        (self.root / 'pyproject.toml').write_text(f'[project]\nname = "x"\nversion = "{version}"\n')
+        (self.root / 'rust' / 'Cargo.toml').write_text(f'[package]\nname = "x"\nversion = "{rust_version}"\n')
+
+    def _write_tools(self) -> None:
         _executable(
             self.bin / 'security',
             '#!/bin/sh\n[ -n "${FAKE_IDENTITY:-}" ] && printf \'  1) ABC123 "%s"\\n\' "$FAKE_IDENTITY"\nexit 0\n',
@@ -122,7 +132,7 @@ class Tree:
 
     @property
     def zip_path(self) -> Path:
-        return self.root / 'trolley' / 'release' / f'LazyTakeNotes-{self.project_version}.zip'
+        return self.root / 'rust' / 'target' / 'release-app' / f'LazyTakeNotes-{self.project_version}.zip'
 
 
 @pytest.fixture
@@ -141,17 +151,11 @@ def test_script_has_valid_shell_syntax() -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_plist_gets_the_microphone_usage_description(tree: Tree) -> None:
-    result = tree.run()
+def test_a_bundle_without_the_usage_strings_aborts(tree: Tree) -> None:
+    result = tree.run(FAKE_NO_USAGE='1')
 
-    assert result.returncode == 0, result.stderr
-    extracted = subprocess.run(  # noqa: S603 -- fixed arg list, no shell
-        ['plutil', '-extract', 'NSMicrophoneUsageDescription', 'raw', str(tree.app / 'Contents' / 'Info.plist')],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert extracted.stdout.strip()
+    assert result.returncode == 1
+    assert 'NSMicrophoneUsageDescription' in result.stderr
 
 
 def test_unsigned_build_still_produces_an_archive(tree: Tree) -> None:
@@ -173,14 +177,16 @@ def test_no_signing_without_an_identity(tree: Tree) -> None:
     assert 'codesign' not in tree.calls
 
 
-def test_signing_covers_the_core_runtime_then_the_bundle(tree: Tree) -> None:
+def test_signing_covers_the_audio_helper_then_the_bundle(tree: Tree) -> None:
     result = tree.run(LTN_SIGN_IDENTITY='Developer ID Application: Test (TEAMID)')
 
     assert result.returncode == 0, result.stderr
     signed = [line for line in tree.calls.splitlines() if line.startswith('codesign --force')]
-    assert 'lazy-take-notes_core' in signed[0]
-    assert 'lazy-take-notes_runtime' in signed[1]
-    assert signed[2].rstrip().endswith('Lazy Take Notes.app')
+    assert len(signed) == 2
+    assert 'coreaudio-tap' in signed[0]
+    assert signed[1].rstrip().endswith('Lazy Take Notes.app')
+    # The hardened runtime blocks the microphone without the entitlement.
+    assert all('--options runtime' in line and 'app.entitlements' in line for line in signed)
 
 
 def test_identity_is_detected_from_the_keychain(tree: Tree) -> None:
@@ -215,7 +221,7 @@ def test_dmg_flag_builds_a_disk_image(tree: Tree) -> None:
 
     assert result.returncode == 0, result.stderr
     assert 'hdiutil' in tree.calls
-    assert (tree.root / 'trolley' / 'release' / f'LazyTakeNotes-{tree.project_version}.dmg').is_file()
+    assert (tree.root / 'rust' / 'target' / 'release-app' / f'LazyTakeNotes-{tree.project_version}.dmg').is_file()
 
 
 def test_missing_bundle_aborts(tree: Tree) -> None:
@@ -226,12 +232,12 @@ def test_missing_bundle_aborts(tree: Tree) -> None:
 
 
 def test_version_mismatch_aborts(tree: Tree) -> None:
-    tree._write_project_files('0.2.0', trolley_version='0.1.0')
+    tree._write_project_files('0.2.0', rust_version='0.1.0')
 
     result = tree.run()
 
     assert result.returncode == 1
-    assert 'does not match' in result.stderr or 'but trolley.toml says' in result.stderr
+    assert 'but rust/Cargo.toml says' in result.stderr
 
 
 def test_unknown_argument_is_rejected(tree: Tree) -> None:

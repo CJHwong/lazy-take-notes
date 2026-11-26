@@ -29,11 +29,13 @@ The native app captures system audio through Core Audio, which exists only on ma
 
 The `take-note` command from setup.sh runs the package from `main` through uvx, so it follows the pin on `main`.
 
-An install with `uv tool install`, including the desktop app, is a fixed copy. It never updates. To update it:
+An install with `uv tool install` is a fixed copy. It never updates. To update it:
 
 ```bash
 uv tool install --force --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes
 ```
+
+The desktop app is a fixed build too. To update it, pull and build it again ([Build the desktop app](howto_desktop_app.md)).
 
 ## Where they differ
 
