@@ -113,3 +113,19 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
       - run: uv run --script scripts/check_layers.py
+
+  rust-windows:
+    name: Rust (Windows x86_64)
+    runs-on: windows-2022
+    env:
+      # whisper.cpp defaults to -march=native; keep the build portable.
+      GGML_NATIVE: OFF
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        run: rustup toolchain install
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
