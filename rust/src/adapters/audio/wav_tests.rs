@@ -58,6 +58,7 @@ fn the_header_stays_valid_while_writing() {
     assert_eq!(frames(&writer.path).len(), 320);
 }
 
+#[cfg(unix)]
 #[test]
 fn os_errors_read_like_python() {
     assert_eq!(

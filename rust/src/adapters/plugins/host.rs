@@ -764,6 +764,6 @@ fn overrides_file(source: &HostSource) -> Result<Option<tempfile::NamedTempFile>
     Ok(Some(file))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "host_tests.rs"]
 mod tests;

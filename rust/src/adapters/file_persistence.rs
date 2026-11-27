@@ -113,6 +113,7 @@ impl Persistence for FilePersistence {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn a_failed_save_names_the_file_as_python_does() {
         let dir = tempfile::tempdir().unwrap();

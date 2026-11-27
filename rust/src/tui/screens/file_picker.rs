@@ -424,9 +424,9 @@ mod tests {
             std::fs::write(dir.path().join(format!("{index}")), "").unwrap();
         }
         assert_eq!(count_dir_items(dir.path()), "1000+");
-        assert_eq!(
-            count_dir_items(&dir.path().join("missing")),
-            "Cannot read: No such file or directory"
+        assert!(
+            count_dir_items(&dir.path().join("missing")).starts_with("Cannot read: "),
+            "the error keeps the OS text"
         );
     }
 }

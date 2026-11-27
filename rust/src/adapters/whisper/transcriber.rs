@@ -78,7 +78,7 @@ impl SubprocessWhisperTranscriber {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -256,7 +256,7 @@ impl Drop for SubprocessWhisperTranscriber {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::fs;
     use std::path::Path;

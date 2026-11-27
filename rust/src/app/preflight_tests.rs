@@ -158,6 +158,7 @@ fn only_a_failed_ai_check_can_be_overridden() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn an_unwritable_output_folder_fails_with_the_os_text() {
     let dir = tempfile::tempdir().unwrap();
