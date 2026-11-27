@@ -38,7 +38,7 @@ uv run lint-imports
 docker build -f scripts/linux-smoke/Dockerfile -t ltn-linux-smoke .
 docker run --rm ltn-linux-smoke
 ```
-Runs the full pytest suite on Linux (Debian bookworm) with PulseAudio, then exercises `SoundCardLoopbackSource` against a real PulseAudio null-sink loopback device. Verifies device discovery, audio capture, and clean shutdown.
+Runs the Rust binary on Linux (Debian bookworm) with PulseAudio. It records the null sink's monitor while a LibriVox sentence plays, then checks the transcript and the exit code.
 
 
 ## Code Style
