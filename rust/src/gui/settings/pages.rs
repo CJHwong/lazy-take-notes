@@ -249,7 +249,7 @@ impl SettingsView {
             speech.push(self.model_row(index, cx).into_any_element());
         }
         if self.removal_locked {
-            speech.push(note(REMOVAL_LOCKED, cx).into_any_element());
+            speech.push(wide_row(note(REMOVAL_LOCKED, cx)).into_any_element());
         }
         speech.push(
             buttons()

@@ -12,7 +12,6 @@ use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
 use gpui_kit::component::menu::DropdownMenu as _;
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
@@ -1134,7 +1133,8 @@ impl SessionView {
                     cx.listener(move |view, _, window, cx| view.click_speaker(speaker, window, cx)),
                 )
         });
-        // A long list of speakers scrolls sideways, like the panes above it.
+        // A long list of speakers scrolls sideways. No bar: the strip has no
+        // room below the chips, and a bar there would take their clicks.
         div()
             .flex()
             .flex_1()
@@ -1142,8 +1142,8 @@ impl SessionView {
             .items_center()
             .gap(space::XS)
             .children(items)
-            .overflow_x_scrollbar()
             .id("speakers")
+            .overflow_x_scroll()
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {

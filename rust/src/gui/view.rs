@@ -9,7 +9,6 @@ use std::time::Duration;
 use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme, IconName};
 use gpui_kit::*;
@@ -417,14 +416,15 @@ impl SessionReader {
                     view.ask_speaker_name(speaker, window, cx)
                 }))
         });
-        // A long list of speakers scrolls sideways.
+        // A long list of speakers scrolls sideways. No bar: the strip has no
+        // room below the chips, and a bar there would take their clicks.
         Some(
             status_strip(cx)
                 .gap(space::XS)
                 .children(template.map(|name| tag(name, cx)))
                 .children(items)
-                .overflow_x_scrollbar()
                 .id("reader-speakers")
+                .overflow_x_scroll()
                 .into_any_element(),
         )
     }
