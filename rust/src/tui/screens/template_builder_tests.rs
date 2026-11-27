@@ -131,6 +131,20 @@ impl Run {
         }
     }
 
+    /// The screen once `text` appears, or the last screen after five seconds.
+    fn until(&mut self, text: &str) -> String {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let screen = self.screen();
+            if screen.contains(text) {
+                return screen;
+            }
+            self.settle();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.screen()
+    }
+
     fn screen(&mut self) -> String {
         let backend = ratatui::backend::TestBackend::new(110, 32);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
@@ -394,10 +408,11 @@ fn a_panicking_call_shows_an_error_and_the_builder_still_works() {
         None,
     );
     run.send("first");
-    let screen = run.screen();
+    let screen = run.until("client bug");
     assert!(screen.contains("client bug"), "{screen}");
     run.send("second");
-    assert!(run.screen().contains("AI: Which language?"));
+    let screen = run.until("AI: Which language?");
+    assert!(screen.contains("AI: Which language?"), "{screen}");
 }
 
 #[test]
