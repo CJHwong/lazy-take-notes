@@ -172,6 +172,7 @@ pub struct HeadlessSession {
     /// False after a failed AI check: transcript only, as in the TUI.
     ai_notes: bool,
     /// The mixer, for mute on SIGUSR1. None for a file.
+    #[cfg_attr(windows, allow(dead_code))] // no SIGUSR1 on Windows
     mic: Option<Arc<MixedAudioSource>>,
     writer: Writer,
     status: SessionStatus,
