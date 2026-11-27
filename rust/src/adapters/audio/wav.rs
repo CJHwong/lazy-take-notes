@@ -88,17 +88,17 @@ impl StreamingWav {
     }
 
     fn still_at_path(&self) -> Result<bool, OsError> {
-        let on_disk = match std::fs::metadata(&self.path) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(e) => return Err(OsError::from_io(&e, Some(&self.path), None)),
-        };
-        let opened = self
-            .file
-            .metadata()
+        if let Err(e) = std::fs::metadata(&self.path) {
+            if e.kind() == io::ErrorKind::NotFound {
+                return Ok(false);
+            }
+            return Err(OsError::from_io(&e, Some(&self.path), None));
+        }
+        let on_disk = crate::adapters::fs_meta::file_key(&self.path)
+            .map_err(|e| OsError::from_io(&e, Some(&self.path), None))?;
+        let opened = crate::adapters::fs_meta::file_key_of(&self.file)
             .map_err(|e| OsError::from_io(&e, None, None))?;
-        Ok(crate::adapters::fs_meta::file_key(&on_disk)
-            == crate::adapters::fs_meta::file_key(&opened))
+        Ok(on_disk == opened)
     }
 }
 

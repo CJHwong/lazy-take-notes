@@ -24,6 +24,7 @@ use crate::app::events::{Cancel, Event, Poster, WorkerState};
 use crate::app::workers::diarization::diarize_snapshot;
 use crate::domain::session_files::{DEBUG_LOG, NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
 use crate::domain::session_status::{self as st, SessionStatus};
+#[cfg(unix)]
 use crate::ports::audio_source::AudioSource as _; // set_mic_muted on the mixer
 use crate::ports::diarizer::Diarizer;
 

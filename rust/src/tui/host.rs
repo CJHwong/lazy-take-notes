@@ -1072,6 +1072,7 @@ fn keep_default_actions(list: &[i32]) {
     }
 }
 
+#[cfg(unix)]
 fn has_default_action(signum: i32) -> bool {
     // SAFETY: a null new action only reads the current one into `current`.
     unsafe {

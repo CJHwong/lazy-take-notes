@@ -832,9 +832,11 @@ fn freed_bytes(paths: &[PathBuf]) -> u64 {
         let Ok(meta) = fs::metadata(&file) else {
             continue;
         };
-        let seen = inodes
-            .entry(file_key(&meta))
-            .or_insert((meta.len(), link_count(&meta), 0));
+        let Ok(key) = file_key(&file) else {
+            continue;
+        };
+        let links = link_count(&file).unwrap_or(1);
+        let seen = inodes.entry(key).or_insert((meta.len(), links, 0));
         seen.2 += 1;
     }
     inodes

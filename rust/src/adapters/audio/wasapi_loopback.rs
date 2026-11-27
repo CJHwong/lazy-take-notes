@@ -100,7 +100,7 @@ fn loopback_loop(
     ready: mpsc::Sender<Result<(), String>>,
 ) {
     let result = (|| -> Result<(), String> {
-        initialize_mta().map_err(|e| e.to_string())?;
+        initialize_mta().ok().map_err(|e| e.to_string())?;
         let enumerator = DeviceEnumerator::new().map_err(|e| e.to_string())?;
         let device = enumerator
             .get_default_device(Direction::Render)

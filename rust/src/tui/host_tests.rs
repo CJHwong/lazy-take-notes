@@ -361,6 +361,7 @@ fn a_signal_stops_the_session_and_exits_after_the_audio_flush() {
     assert!(exit_at <= Instant::now() + SHUTDOWN_GRACE);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_signal_exits_even_if_the_audio_worker_never_stops() {
     let runtime = runtime();
