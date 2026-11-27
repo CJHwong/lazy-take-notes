@@ -3,6 +3,7 @@
 //! It looks like the live session pane. The files are `app::saved_session`.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
 use crate::gui::widgets::scroll_area;
@@ -179,17 +180,25 @@ impl SessionReader {
             .and_then(|saved| saved.names.get(&speaker).cloned())
             .unwrap_or_default();
         let view = cx.entity().downgrade();
+        let name_as = move |name: String, window: &mut Window, cx: &mut App| {
+            let _ = view.update(cx, |view, cx| {
+                view.rename_speaker(speaker, &name, window, cx)
+            });
+        };
+        let clear = name_as.clone();
+        let on_clear: Option<dialogs::OnClear> = (!current.is_empty()).then(|| {
+            let clear: dialogs::ClearFn =
+                Rc::new(move |window, cx| clear(String::new(), window, cx));
+            ("Clear Name", clear)
+        });
         dialogs::prompt(
             window,
             cx,
             format!("Name for S{speaker}"),
             &current,
             "Speaker name...",
-            move |name, window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.rename_speaker(speaker, &name, window, cx)
-                });
-            },
+            name_as,
+            on_clear,
         );
     }
 

@@ -98,8 +98,15 @@ pub fn markdown(
     });
 }
 
+/// What the Clear button of a prompt does.
+pub type ClearFn = Rc<dyn Fn(&mut Window, &mut App)>;
+
+/// The Clear button of a prompt: its label and what it does.
+pub type OnClear = (&'static str, ClearFn);
+
 /// A one-line prompt. Enter or Save hands the trimmed text to `on_submit`;
-/// an empty text keeps the old value, as the TUI's LabelModal does.
+/// an empty text keeps the old value, as the TUI's LabelModal does. With
+/// `on_clear`, a button at the left of the footer clears the value instead.
 pub fn prompt(
     window: &mut Window,
     cx: &mut App,
@@ -107,6 +114,7 @@ pub fn prompt(
     current: &str,
     placeholder: &'static str,
     on_submit: impl Fn(String, &mut Window, &mut App) + 'static,
+    on_clear: Option<OnClear>,
 ) {
     let input = cx.new(|cx| {
         InputState::new(window, cx)
@@ -143,14 +151,33 @@ pub fn prompt(
         }
         let submit = submit.clone();
         let save = submit.clone();
+        let on_save = move |window: &mut Window, cx: &mut App| {
+            save(window, cx);
+            true
+        };
+        let footer = match on_clear.clone() {
+            None => buttons("Save", false, on_save),
+            // Clear stands apart at the left: it is not the way to save.
+            Some((label, clear)) => DialogFooter::new()
+                .justify_between()
+                .child(
+                    button("dialog-clear", label, Kind::Plain).on_click(move |_, window, cx| {
+                        clear(window, cx);
+                        window.close_dialog(cx);
+                    }),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::SM)
+                        .children(cancel_and("Save", false, on_save)),
+                ),
+        };
         dialog
             .w(size::DIALOG)
             .title(title_text(title.clone()))
             .child(Input::new(&input).with_size(control::CONTROL))
-            .footer(buttons("Save", false, move |window, cx| {
-                save(window, cx);
-                true
-            }))
+            .footer(footer)
             .on_ok(move |_, window, cx| {
                 submit(window, cx);
                 true
@@ -204,23 +231,30 @@ pub fn buttons(
     danger: bool,
     on_action: impl Fn(&mut Window, &mut App) -> bool + 'static,
 ) -> DialogFooter {
+    DialogFooter::new()
+        .justify_end()
+        .children(cancel_and(action, danger, on_action))
+}
+
+/// Cancel, then the action, as every dialog footer ends.
+fn cancel_and(
+    action: &'static str,
+    danger: bool,
+    on_action: impl Fn(&mut Window, &mut App) -> bool + 'static,
+) -> [Button; 2] {
     let kind = match danger {
         true => Kind::Danger,
         false => Kind::Primary,
     };
-    DialogFooter::new()
-        .justify_end()
-        .child(
-            button("dialog-cancel", "Cancel", Kind::Plain)
-                .on_click(|_, window, cx| window.close_dialog(cx)),
-        )
-        .child(
-            button("dialog-action", action, kind).on_click(move |_, window, cx| {
-                if on_action(window, cx) {
-                    window.close_dialog(cx);
-                }
-            }),
-        )
+    [
+        button("dialog-cancel", "Cancel", Kind::Plain)
+            .on_click(|_, window, cx| window.close_dialog(cx)),
+        button("dialog-action", action, kind).on_click(move |_, window, cx| {
+            if on_action(window, cx) {
+                window.close_dialog(cx);
+            }
+        }),
+    ]
 }
 
 /// How a dialog button reads: Cancel, the action, or a destructive action.

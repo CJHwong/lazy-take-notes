@@ -90,10 +90,24 @@ pub fn rename(session_dir: &Path, speaker: u32, name: &str) -> Result<SavedSpeak
     let Some(names) = names.as_object_mut() else {
         return Err(format!("{SPEAKERS_JSON}: names is not an object"));
     };
-    names.insert(speaker.to_string(), Value::String(name.to_string()));
+    // An empty name clears the speaker's name: the label is `S<n>` again.
+    let new_label = match name.is_empty() {
+        true => {
+            names.remove(&speaker.to_string());
+            format!("S{speaker}")
+        }
+        false => {
+            names.insert(speaker.to_string(), Value::String(name.to_string()));
+            name.to_string()
+        }
+    };
     let text = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| format!("Cannot write {SPEAKERS_JSON}: {e}"))?;
-    relabel_transcript(&session_dir.join(SPEAKER_TRANSCRIPT), &old_label, name)?;
+    relabel_transcript(
+        &session_dir.join(SPEAKER_TRANSCRIPT),
+        &old_label,
+        &new_label,
+    )?;
     load(session_dir)?.ok_or_else(|| format!("{SPEAKERS_JSON} is missing"))
 }
 
@@ -156,6 +170,18 @@ mod tests {
         assert!(text.contains("[00:00:05] 安迪: hi\n"), "{text}");
         let json = std::fs::read_to_string(dir.path().join(SPEAKERS_JSON)).unwrap();
         assert!(json.contains("\"2\": \"安迪\""), "{json}");
+    }
+
+    #[test]
+    fn an_empty_name_clears_the_speaker_in_both_files() {
+        let dir = session();
+        rename(dir.path(), 2, "Andy").unwrap();
+        let saved = rename(dir.path(), 2, "").unwrap();
+        assert_eq!(saved.label(2), "S2");
+        let text = std::fs::read_to_string(dir.path().join(SPEAKER_TRANSCRIPT)).unwrap();
+        assert!(text.contains("[00:00:05] S2: hi\n"), "{text}");
+        let json = std::fs::read_to_string(dir.path().join(SPEAKERS_JSON)).unwrap();
+        assert!(!json.contains("\"2\""), "{json}");
     }
 
     #[test]

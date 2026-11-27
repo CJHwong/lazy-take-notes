@@ -651,20 +651,28 @@ impl SessionView {
             .cloned()
             .unwrap_or_default();
         let view = cx.entity().downgrade();
+        let name_as = move |name: String, window: &mut Window, cx: &mut App| {
+            let _ = view.update(cx, |view, cx| {
+                view.run(window, cx, |mode, io| {
+                    mode.session_mut().set_speaker_name(speaker, name, io);
+                    Step::None
+                });
+            });
+        };
+        let clear = name_as.clone();
+        let on_clear: Option<dialogs::OnClear> = (!current.is_empty()).then(|| {
+            let clear: dialogs::ClearFn =
+                Rc::new(move |window, cx| clear(String::new(), window, cx));
+            ("Clear Name", clear)
+        });
         dialogs::prompt(
             window,
             cx,
             format!("Name for S{speaker}"),
             &current,
             "Speaker name...",
-            move |name, window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.run(window, cx, |mode, io| {
-                        mode.session_mut().set_speaker_name(speaker, name, io);
-                        Step::None
-                    });
-                });
-            },
+            name_as,
+            on_clear,
         );
     }
 
