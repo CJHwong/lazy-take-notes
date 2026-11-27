@@ -349,12 +349,16 @@ fn the_fixed_lines_read_like_python() {
         digest_count: 0,
         error: "boom".into(),
     };
+    let transcript = Path::new("/o/s")
+        .join("transcript.txt")
+        .display()
+        .to_string();
     assert_eq!(
         summary_lines(Path::new("/o/s"), &status),
-        [
-            "■ error | 01:05 | 2 seg | 0 digests",
-            "  transcript: /o/s/transcript.txt",
-            "  error:      boom"
+        vec![
+            "■ error | 01:05 | 2 seg | 0 digests".to_string(),
+            format!("  transcript: {transcript}"),
+            "  error:      boom".to_string(),
         ]
     );
 }
