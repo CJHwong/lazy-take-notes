@@ -92,19 +92,322 @@ Existing installs keep their command: setup.sh's `take-note` wrapper runs `uvx -
 - No data migration: both versions use the same config folder, cache, sessions and plugins.txt. The wrapper is not rewritten: it keeps fetching `main`, which is how users get updates.
 - The plugin host stays a Python script outside the launcher, and `plugin_api` imports no launcher code.
 
-### Two tracks (decided 2026-11-24)
+### Platforms and Python removal (decided 2026-11-27)
 
-`v0.2.0` is pinned: Apple silicon Macs run the Rust app, and every other platform runs the Python app. Both stay until the Rust app is tested on more platforms. The Python app is not removed before then, because it is the only app those platforms have.
+This replaces "Two tracks" (2026-11-24). The Rust app covers Intel Macs and Linux, terminal and window app both. Then the Python app goes. A small Python package stays, for the launcher that existing installs run and for the plugin host.
 
-What another platform needs, found when the switch landed:
+Decisions:
 
-| Platform | Build | System audio | Speaker labels runtime | setup.sh |
-|---|---|---|---|---|
-| Intel Mac | `coreaudio-tap` is already universal; a `x86_64-apple-darwin` build is untried | `coreaudio-tap` | pinned | yes |
-| Linux x86_64, arm64 | `whisper-rs` always enables `metal`, which is macOS only | no backend (Python uses PulseAudio loopback through `soundcard`) | pinned | yes |
-| Windows | Unix-only code: signals, `flock`, `statvfs`, process groups | no backend (Python uses WASAPI loopback) | no NeMo build | no installer |
+- Platforms: macOS arm64 (done), macOS x86_64, Linux x86_64, Linux arm64. No Windows.
+- The window app ships on all four.
+- Install: `setup.sh` downloads the release tarball for the machine and checks its SHA-256. Homebrew stays for the Mac window app.
+- Plugins keep working unchanged, through the Python plugin host.
 
-A pinned platform also needs a `release.yml` job, a target in `package.sh`, and a key in `pin_rust_release.py`.
+Non-goals:
+
+- Windows.
+- Linux packages beyond a tarball and a `.desktop` file: no AppImage, Flatpak, deb or rpm.
+- GPU transcription on Linux (Vulkan, CUDA).
+- Any change to the plugin contract or its JSON-RPC protocol.
+- A Developer ID signature or notarization.
+- New features. Apple silicon behavior stays the same, except where a shared helper replaces a macOS call.
+
+#### Rules for every phase
+
+1. One branch and one PR per phase. Branch from the newest `origin/main`.
+2. Before the PR, run all of these with `rust/` as the working folder. Each must pass:
+   ```bash
+   cargo fmt --check
+   cargo clippy --all-targets -- -D warnings
+   cargo clippy --features gui --all-targets -- -D warnings
+   cargo test
+   cargo test --features gui
+   uv run scripts/check_layers.py
+   uv run scripts/check_design.py
+   ```
+   Then `actionlint .github/workflows/*.yml` in the repo root.
+3. A real run on the target platform is the proof. A green CI run is a gate, not the proof. Each phase lists its proof run.
+4. Before a tag, run the Release workflow by hand on the branch (Actions > Release > Run workflow). It is a dry run and publishes nothing.
+5. Record each new behavior difference between platforms in "Known differences" below, numbered after the last one.
+6. If a step fails twice in the same way, stop and write down what the run showed before trying a third time.
+
+#### What each platform lacks today
+
+| Area | Today | Where |
+|---|---|---|
+| GPU | `whisper-rs` always turns on `metal`, which builds only on macOS | `Cargo.toml` |
+| System audio | `CoreAudioTapSource` only, built unconditionally | `src/app/container.rs:139-147` (the preflight pair), `src/app/container.rs:150-155` (`build_mixed_source`), `src/app/preflight.rs:495-501` (`check_system_audio`) |
+| System audio check | the test tone and the 30 s silence check are Core Audio tap features | `src/adapters/audio/mixed.rs`, `src/adapters/audio/microphone.rs:273` |
+| Keep awake | runs `caffeinate` | `src/app/keep_awake.rs:13` |
+| Open a file, window app | runs `open -W -t` | `src/gui/template_picker.rs:291`, `src/gui/settings/mod.rs:538` |
+| Open a file, terminal app | already handles Linux (`xdg-open`) | `src/tui/screens/template_picker.rs:43-48` |
+| Clipboard, open a folder (terminal) | already handles Linux: `wl-copy`, `xclip`, `xdg-open` | `src/tui/system.rs` |
+| Window chrome | traffic lights, transparent title bar, Dock icon through cocoa and objc | `src/gui/mod.rs:126,172-175`, `src/gui/dock_icon.rs`, `src/gui/shell.rs:50`, `src/gui/design.rs:52-55` |
+| Packaging | `package.sh` stops on anything but Darwin and names the tarball `<uname -m>-macos` | `scripts/package.sh:15,18` |
+| `.app` packaging | arm64 only | `scripts/package_app.sh`, `.github/workflows/release.yml` |
+| Python launcher pin | `PLATFORMS` maps one asset name to `('Darwin', 'arm64')` | `../scripts/pin_rust_release.py:19-21` |
+| Built-in templates | the Rust binary embeds the Python package's YAML files | `src/adapters/templates.rs:20` |
+| Window icon | the Dock icon reads `assets/icon.png` at build time | `src/gui/dock_icon.rs:22` |
+| Speaker labels runtime | already pinned for macOS x86_64, Linux x86_64 and Linux arm64 | `src/adapters/model_catalog.rs:123-157` |
+| Unix calls (`flock`, `statvfs`, signals, process groups) | work on Linux as they are | no change |
+
+#### Phase 0: release 0.3.3 (window opens before the session list)
+
+1. Merge PR #81 when CI passes.
+2. Bump `rust/Cargo.toml` and `rust/Cargo.lock` to `0.3.3`, commit "chore: release 0.3.3", push `main`.
+3. `git tag -a v0.3.3 -m "lazy-take-notes v0.3.3" && git push origin v0.3.3`.
+4. When the Release run ends, check three things:
+   - the log line `designated => identifier "com.cjhwong.lazy-take-notes" and certificate leaf = H"f334a7e3…"`;
+   - `Casks/lazy-take-notes.rb` in CJHwong/homebrew-tap says `0.3.3`;
+   - its `sha256` equals `shasum -a 256` of the released zip.
+5. Run `brew update && brew upgrade --cask lazy-take-notes`.
+
+**Proof:** this is the first upgrade between two certificate-signed builds. Open the app. The window shows at once, and macOS asks for no permission again. Start a 10 s recording: the mic and system audio work without a prompt.
+
+#### Phase 1: Linux terminal app (x86_64 and arm64), release 0.4.0 together with Phases 2 and 4
+
+Branch: `linux-terminal`.
+
+1. **Metal only on macOS.** In `Cargo.toml`, change `whisper-rs = { version = "0.16.0", features = ["metal"] }` to `whisper-rs = "0.16.0"`, and add:
+   ```toml
+   [target.'cfg(target_os = "macos")'.dependencies]
+   whisper-rs = { version = "0.16.0", features = ["metal"] }
+   ```
+   Check: `cargo tree -e features -i whisper-rs` on the Mac still lists `metal`.
+2. **cpal's PulseAudio host on Linux.** Add:
+   ```toml
+   [target.'cfg(target_os = "linux")'.dependencies]
+   cpal = { version = "0.18.2", features = ["pulseaudio"] }
+   ```
+   Cargo merges this with the base line `cpal = "0.18.2"` (`Cargo.toml:27`), so Linux gets the base dependency plus the feature. With the feature on, `cpal::default_host()` picks PulseAudio when its server runs (`cpal-0.18.2/src/platform/mod.rs:840`). PipeWire desktops run `pipewire-pulse`, so this covers them too. The feature adds the `pulseaudio` crate as a transitive dependency, a pure Rust client.
+3. **System audio source.** Add `src/adapters/audio/pulse_monitor.rs`, behind `#[cfg(target_os = "linux")]`, with `PulseMonitorSource`, which implements `AudioSource` (`src/ports/audio_source.rs:46`):
+   - `open()`: take `default_host().default_output_device()`, read its id with `device.id()`, and find the input device whose id is `<name>.monitor`. A `DeviceId` holds `HostId::PulseAudio` and the PulseAudio name (`cpal-0.18.2/src/host/pulseaudio/mod.rs:515-523`). Compare the name part through `DeviceId`'s accessor; do not parse its `Display` string (`pulseaudio:<name>`). Open it with the same stream code `MicrophoneSource` uses. Move that code into a shared function in `microphone.rs`; do not copy it.
+   - No PulseAudio server, or no monitor: return `AudioError` with the text "No PulseAudio or PipeWire monitor for the default output". Preflight shows that text.
+   - `continuous_capture()` returns `true`: a monitor delivers silence all the time, so a gap means the stream is stuck.
+   - Tests in `pulse_monitor_tests.rs`: the pure function `monitor_id(output: &str) -> String`, and the pick from a list of ids (match, no match, two sinks).
+4. **One place picks the system source.** In `src/app/container.rs`, add `pub fn system_audio_source(ensure_permission: bool) -> Arc<dyn AudioSource>`:
+   - macOS: `CoreAudioTapSource::new(ensure_permission)`;
+   - Linux: `PulseMonitorSource::new()`.
+
+   Replace the uses in `container.rs:139-147`, `container.rs:150-155` and `preflight.rs:495-501`. The `coreaudio_tap` module, and its `use` lines, become `#[cfg(target_os = "macos")]`.
+5. **Silence check and test tone, macOS only.** `play_test_tone` (`microphone.rs:273`) and the 30 s system-silence check in `mixed.rs` exist because the tap can hang silently. Put them behind `#[cfg(target_os = "macos")]`. On Linux, `SYS LOST` comes only from a failed read or no delivery for 3 s. Add a known difference.
+6. **Hide monitors from the mic list.** On Linux, `list_input_devices()` (`microphone.rs:30-40`) would list "Monitor of …" sources. It collects names, and the config and `match_device` use names. In its loop, skip a device whose `device.id()` name part ends in `.monitor`, then keep the name as now. Test the pure filter on `(id, name)` pairs.
+7. **Keep awake on Linux.** In `src/app/keep_awake.rs`:
+   - Linux: run `systemd-inhibit --what=idle:sleep --who=lazy-take-notes --why=Recording --mode=block sleep infinity`, and kill it on drop, like `caffeinate`.
+   - Not found: log one `debug!` line and go on.
+   - Keep the macOS branch as it is.
+8. **Open a file.** Add `src/app/open_path.rs` with `pub fn open_path(path: &Path, text_editor: bool) -> std::io::Result<std::process::Child>`:
+   - macOS: `open` (with `-t` when `text_editor`). The window app waits with `-W`, so add a `wait: bool` argument that adds `-W`.
+   - Linux: `xdg-open` (the `text_editor` and `wait` arguments do nothing).
+
+   Replace the two window-app call sites, `gui/template_picker.rs:291` and `gui/settings/mod.rs:538`. Both run `open -W -t`. Leave `tui/screens/template_picker.rs` and `tui/system.rs` as they are: they already handle Linux. Test the argument list per OS with a pure `fn command(path, text_editor, wait, os) -> Vec<String>`.
+9. **Package for Linux.** `scripts/package.sh`:
+   - Remove the Darwin-only stop.
+   - Name the tarball `lazy-take-notes-<arch>-<os>.tar.gz`, with `<arch>` from `uname -m` mapped as `x86_64 -> x86_64`, `aarch64|arm64 -> arm64`, and `<os>` `macos` or `linux`.
+   - Copy `coreaudio-tap` only on macOS.
+10. **CI.** In `.github/workflows/ci.yml`, add a job `Rust (Linux ${{ matrix.arch }})` with a matrix of `ubuntu-24.04` (x86_64) and `ubuntu-24.04-arm` (arm64):
+    - `sudo apt-get install -y cmake clang libclang-dev libpulse-dev libasound2-dev`
+    - `rustup toolchain install`
+    - `cargo test`, `cargo clippy --all-targets -- -D warnings`
+    - `uv run scripts/check_layers.py`
+11. **Release.** In `.github/workflows/release.yml`:
+    - Add a job `linux` with the same matrix and apt packages. It runs `package.sh` and checks `--version` and `--help` from the extracted tarball.
+    - Each build job uploads its tarball and `.sha256` as a workflow artifact.
+    - Today "Publish the release" is a step inside job `macos-arm64` (`release.yml:93`), and job `homebrew` has `needs: macos-arm64` (`release.yml:111`). Move publishing into a new job `publish` with `needs: [macos-arm64, linux]` and the same `if:` as the old step. It downloads every artifact and publishes once. Change `homebrew` to `needs: publish`.
+12. **Python launcher pin.** `PLATFORMS` in `../scripts/pin_rust_release.py:19-21` maps a release asset name to `(platform.system(), platform.machine())`. Add these entries, so `uvx` users on Linux run the Rust build after the 0.4.0 pin:
+    - `'lazy-take-notes-x86_64-linux.tar.gz': ('Linux', 'x86_64')`
+    - `'lazy-take-notes-arm64-linux.tar.gz': ('Linux', 'aarch64')`
+
+    Add the Intel entry in Phase 2, not here: the script fails on an asset the release does not have.
+13. **Smoke test in Docker.** Replace `../scripts/linux-smoke/Dockerfile` and `smoke_test.py`:
+    - `FROM rust:1-bookworm`. Install `pulseaudio pulseaudio-utils libpulse-dev libasound2-dev cmake clang libclang-dev curl`. Copy the repo, run `rustup toolchain install` in `rust/`, then `cargo build --release`, then `install -m755 rust/target/release/lazy-take-notes /usr/local/bin/`.
+    - Download the speech model in the image, so the test needs no model catalog:
+      ```bash
+      curl -fL -o /models/ggml-base.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+      ```
+    - Write the test config `/home/testuser/ltn.yaml`, mode 0600:
+      ```yaml
+      transcription:
+        model: /models/ggml-base.en.bin
+      llm_provider: ollama
+      ollama:
+        host: http://127.0.0.1:9
+      ```
+      Port 9 has no server, so the AI check fails and headless runs transcript-only.
+    - As a non-root user (PulseAudio refuses root), run:
+      ```bash
+      pulseaudio --start --exit-idle-time=-1
+      pactl load-module module-null-sink sink_name=test_loopback
+      pactl set-default-sink test_loopback
+      lazy-take-notes record --headless --config ~/ltn.yaml --template default_en --output-dir /tmp/out &
+      sleep 8   # the speech model loads first
+      paplay scripts/linux-smoke/speech.wav
+      sleep 5
+      kill -TERM %1; wait %1
+      ```
+    - SIGTERM in headless mode still runs the last chunk and the final digest (AGENTS.md "Shutdown signals"). The digest fails here, because no AI server runs. Run the container once by hand and write down the exit code it gives. The test asserts that code, not a guessed one.
+    - Pass when:
+      - the exit code is the one written down;
+      - `/tmp/out/*/transcript.txt` holds at least half of the words in `scripts/linux-smoke/speech.txt`;
+      - `/tmp/out/*/debug.log` has no `ERROR` line about system audio.
+    - `speech.wav`: take one sentence of 5 to 10 s from a LibriVox recording (public domain), and convert it with `ffmpeg -i in.mp3 -ss <start> -t <length> -ar 16000 -ac 1 speech.wav`. Write its words into `speech.txt`. Commit both under `../scripts/linux-smoke/`.
+    - AGENTS.md "Linux Smoke Test" describes the old image. Update its text in the same PR.
+    - The keys are checked: `ollama.host` is `InfraConfig.ollama.host` (`src/config.rs:182`), and `transcription.model` applies to `default_en`, because the built-in `transcription.models` has entries only for `zh` and `zh-min-nan` (`src/config.rs:13-17`).
+
+**Proof:**
+- `docker build -f scripts/linux-smoke/Dockerfile -t ltn-linux-smoke . && docker run --rm ltn-linux-smoke` passes on x86_64.
+- The same passes on arm64 (`--platform linux/arm64`).
+- The macOS arm64 build still records a 20 s call with system audio.
+
+#### Phase 2: Intel Mac terminal app
+
+Branch: `intel-mac`, or the Phase 1 branch if Phase 1 is still open.
+
+1. **Cross-build on the arm64 runner.** `rust-toolchain.toml` has no `targets` key. Add `targets = ["x86_64-apple-darwin"]` under `[toolchain]`. Build with:
+   ```bash
+   CMAKE_OSX_ARCHITECTURES=x86_64 cargo build --release --target x86_64-apple-darwin
+   ```
+   `package.sh` takes an optional `--target <triple>` and reads the binary from `target/<triple>/release/`. It takes `<arch>` from the triple when `--target` is given (`x86_64-apple-darwin` → `x86_64`, `aarch64-apple-darwin` → `arm64`), else from `uname -m` as now (`package.sh:15`). `coreaudio-tap` is already universal: check with `lipo -archs`.
+2. **Release.** In the macOS release job, build and package both targets, and upload `lazy-take-notes-x86_64-macos.tar.gz` and its `.sha256`.
+3. **CI smoke on real Intel.** Add a release job on `macos-15-intel` (an x64 image, listed in actions/runner-images) that downloads the x86_64 tarball artifact and runs `--version` and `--help`. Add it to the `needs:` of `publish`.
+4. **Pin.** Add `'lazy-take-notes-x86_64-macos.tar.gz': ('Darwin', 'x86_64')` to `PLATFORMS` in `../scripts/pin_rust_release.py`.
+5. **Metal on Intel.** Keep `metal`. If whisper's Metal backend fails on the Intel runner's GPU, drop `metal` for `x86_64-apple-darwin` only and record it.
+
+**Proof:** on an Apple silicon Mac, extract the x86_64 tarball and run under Rosetta:
+- `arch -x86_64 ./lazy-take-notes record --headless` for 20 s with a played sentence: the words appear in `transcript.txt`;
+- `arch -x86_64 ./lazy-take-notes transcribe --headless <wav>`: the same words.
+
+#### Phase 3: window app on Intel Mac and Linux, release 0.5.0
+
+Branch: `gui-everywhere`.
+
+1. **Intel `.app`.** `scripts/package_app.sh` takes `--target <triple>` like `package.sh`:
+   - It writes `target/app/<arch>/Lazy Take Notes.app`.
+   - The release job zips each `.app` as `Lazy-Take-Notes-<arch>-macos.zip`. The arm64 name stays the same, since the 0.3 casks point at it.
+2. **Cask for both arches.** `scripts/homebrew_cask.sh VERSION SHA_ARM SHA_INTEL`:
+   - Drop `depends_on arch: :arm64`.
+   - Put `sha256` and `url` in `on_arm do … end` and `on_intel do … end` blocks.
+
+   Run `brew style --cask` on the output and `brew install --cask ./lazy-take-notes.rb` from a local file before release.
+3. **gpui on Linux, first a spike.** On an x86_64 Linux machine or in Docker, run `cargo build --features gui`.
+   - Install what the build asks for, starting with `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libfontconfig-dev libssl-dev`.
+   - If gpui-kit 0.11 does not build or does not open a window, stop the phase and report. The terminal app still ships.
+4. **macOS-only window code behind `cfg`.**
+   - `Cargo.toml`: move the two lines `cocoa = { version = "=0.25.0", optional = true }` and `objc = { version = "=0.2.7", optional = true }` into `[target.'cfg(target_os = "macos")'.dependencies]`. Keep `gui = ["dep:gpui-kit", "dep:cocoa", "dep:objc"]` as it is: Cargo builds a target-specific optional dependency only on its target, so Linux never builds them. Check with `cargo tree --features gui --target x86_64-unknown-linux-gnu -i cocoa`, which must print nothing.
+   - `src/gui/mod.rs:9,126`: `#[cfg(target_os = "macos")]` on `mod dock_icon` and its call.
+   - `src/gui/mod.rs:172-175`: on macOS keep `appears_transparent: true` and `traffic_light_position`. On Linux use `TitlebarOptions::default()` and let gpui draw its decorations.
+   - `src/gui/shell.rs:50` and `src/gui/design.rs:52-55`: the traffic-light inset becomes a `design.rs` token that is zero on Linux, so `check_design.py` still passes.
+   - `src/gui/theme.rs` `follow_system`: on Linux, read gpui's window appearance. If gpui reports nothing, use light.
+5. **Linux window package.** Package the GUI binary as `lazy-take-notes-gui-<arch>-linux.tar.gz`, with the binary, `lazy-take-notes.desktop` and `icon.png`. Make the icon from `../assets/icon.png` with `sips -Z 512` (macOS) or `convert -resize 512x512` (Linux). The `dock_icon.rs:22` embed is macOS only after step 4, so Linux needs the file in the package. The `.desktop` file:
+   ```ini
+   [Desktop Entry]
+   Type=Application
+   Name=Lazy Take Notes
+   Exec=lazy-take-notes-gui
+   Icon=lazy-take-notes
+   Categories=AudioVideo;Office;
+   ```
+   Add it to the release job for both Linux arches, with `.sha256`.
+6. **CI.** The Linux CI job also runs `cargo clippy --features gui --all-targets -- -D warnings` and `cargo test --features gui`, with the window packages installed.
+
+**Proof:**
+- Intel `.app`, under Rosetta, opened from Finder: the window, a 20 s recording with system audio, Settings, the viewer, the template builder.
+- Linux, in Docker under Xvfb with Mesa's software Vulkan (`mesa-vulkan-drivers`): launch, then screenshots of the sidebar, a saved session, Settings and preflight. Compare them to the macOS screens: same layout, no clipped text.
+- **A real Linux desktop** (Wayland and X11, a real GPU) before the 0.5.0 tag: the window opens, a 20 s recording with system audio, Settings saves to a temp config, the viewer opens a session. The owner provides the machine. Xvfb proves only that it renders.
+
+#### Phase 4: `setup.sh` installs the binary, part of 0.4.0
+
+Branch: with Phase 1. The file is `../setup.sh` in the repo root. Today its "Step 1: uv" (`setup.sh:77-91`) installs uv; the steps below replace that flow.
+
+1. Pick the asset from `uname -s` and `uname -m`:
+   - `Darwin x86_64` → `x86_64-macos`
+   - `Darwin arm64` → `arm64-macos`
+   - `Linux x86_64` → `x86_64-linux`
+   - `Linux aarch64` → `arm64-linux`
+   - Anything else stops with the list of supported systems.
+2. Read the newest release tag from `https://api.github.com/repos/CJHwong/lazy-take-notes/releases/latest`. `LTN_VERSION=v0.4.0` overrides it.
+3. Download the tarball and its `.sha256`, compare with `shasum -a 256` (macOS) or `sha256sum` (Linux), and stop on a mismatch.
+4. Extract into `~/.local/share/lazy-take-notes/<tag>/`, and link `~/.local/bin/lazy-take-notes` and `~/.local/bin/take-note` to it. From 0.5.0 on, when the release has a Linux GUI tarball, also download it, link `lazy-take-notes-gui`, and copy the `.desktop` file to `~/.local/share/applications/` and the icon to `~/.local/share/icons/hicolor/512x512/apps/lazy-take-notes.png`.
+5. If `~/.local/bin` is not on `PATH`, print the line to add for the user's shell. Do not edit shell files.
+6. On macOS with Homebrew, print `brew install --cask CJHwong/tap/lazy-take-notes` as the recommended way, and continue with the tarball only after a yes.
+7. Keep the AI provider steps as they are. Drop the uv install step. The plugin how-to says to install uv before adding a plugin.
+8. An existing `take-note` that is the old uvx wrapper (a script that contains `uvx`): replace it, and say so in one line.
+
+**Proof:** rewrite `../scripts/setup-smoke/Dockerfile` and `run_tests.sh` for the tarball flow (today they test the uv and Homebrew flow). Then run them in Docker, Debian bookworm, x86_64 and arm64:
+- install from a clean HOME;
+- `take-note --version` prints the release;
+- a second run of `setup.sh` reports "already installed" and changes nothing;
+- `take-note record --headless` against the null sink from Phase 1 writes a transcript.
+
+On macOS, run `setup.sh` with `HOME` set to a temp folder.
+
+#### Phase 5: remove the Python app, release 0.6.0
+
+Start only after 0.5.0 has run on the real Linux desktop.
+
+Branch: `remove-python-app`.
+
+**What must keep working.** Every install made by the old `setup.sh` has a `take-note` wrapper that runs `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git lazy-take-notes` on each start ("The switch" above). That command must keep starting the Rust app. So the package keeps its name and its three scripts:
+
+| Script | After Phase 5 |
+|---|---|
+| `lazy-take-notes`, `take-note` | `launcher.py`: runs the pinned Rust build. With no build for the machine, or any failure, it prints one line naming `setup.sh` and exits 1. No Python fallback. |
+| `lazy-take-notes-plugin-host` | `plugin_host.py`, unchanged |
+
+Steps:
+
+1. **Keep in `src/lazy_take_notes/`:**
+   - `launcher.py` (fallback removed);
+   - `rust_release.py`;
+   - `plugin_host.py`;
+   - `plugin_api.py`.
+   - What `plugin_api` re-exports, moved flat into the package root, with the same public names:
+     - `ChatMessage`, `SessionArtifacts`, `TranscriptSegment`;
+     - the ports `AudioSource`, `LLMClient`, `ChatResponse`, `ModelResolver`, `Transcriber`;
+     - `InfraConfig`, `TranscriptionBackend`;
+     - stubs for `run_record` and `run_transcribe` that raise `RuntimeError("runs only inside the plugin host")`. The host replaces both at runtime (`plugin_host.py:129-168`).
+   - Keep the old import paths that plugins may use as one-line re-export modules: `lazy_take_notes.l4_frameworks_and_drivers.plugin_api` and `lazy_take_notes.l4_frameworks_and_drivers.config` (the host imports it at `plugin_host.py:342`).
+2. **Move the templates into the Rust tree.** `src/adapters/templates.rs:20` embeds `../../../src/lazy_take_notes/templates/<name>.yaml`. Move `../src/lazy_take_notes/templates/` to `rust/templates/`, change the path in the `include_str!` to `../../templates/`, and run `cargo test` before deleting anything else.
+3. **Move `coreaudio-tap` into the Rust tree.**
+   - Move `native/` to `rust/native/`, and `scripts/build_native.sh` to `rust/scripts/build_native.sh`.
+   - `package.sh` and `package_app.sh` build the helper into `rust/target/native/coreaudio-tap` when it is missing, instead of reading `src/lazy_take_notes/_native/bin/`.
+   - Delete `src/lazy_take_notes/_native/`.
+4. **Delete** (only after steps 2 and 3 pass `cargo test`):
+   - the rest of `l1_entities/`, `l2_use_cases/`, `l3_interface_adapters/`, `l4_frameworks_and_drivers/`;
+   - `__main__.py`;
+   - their tests under `tests/`, except `test_launcher.py`, `test_plugin_host.py` and the fakes they use;
+   - `scripts/release.sh`;
+   - the Python-only docs.
+5. **`pyproject.toml`.** Keep only what the kept files import: `platformdirs` for `launcher.py`, `pydantic` for `InfraConfig`, `click` for plugin commands. Drop textual, pywhispercpp, sounddevice, soundcard, numpy, openai, ollama and the rest. Run `uv lock`.
+6. **Lint config.** In `pyproject.toml`, delete every `import-linter` contract that names a deleted layer, and the `lint-imports` hook from `.pre-commit-config.yaml` if no contract is left. `ty` and `ruff` keep running on the kept package.
+7. **CI.** The Python matrix runs only `tests/test_launcher.py` and `tests/test_plugin_host.py`.
+8. **Docs:**
+   - README: install is Homebrew on Mac or `setup.sh` everywhere, and the Rust and Python split note goes.
+   - `docs/explain_rust_and_python.md` is deleted.
+   - The plugin how-to states that plugins need uv and run in the plugin host.
+   - AGENTS.md: delete the Python architecture, Python data flow and Python test sections. The "Rust Layers" table becomes the layout section. Keep the plugin contract.
+   - `rust/PLAN.md` "The switch": the launcher no longer falls back to Python.
+9. **Last pin.** After the 0.6.0 release, run `uv run scripts/pin_rust_release.py v0.6.0`, so every platform's old wrapper runs 0.6.0.
+
+**Proof:**
+- `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@remove-python-app take-note --version` prints the Rust version on macOS arm64, on macOS x86_64 under Rosetta, and on Linux in Docker.
+- The same command with `LTN_PYTHON=1` no longer starts a Python app. It prints the `setup.sh` line.
+- With the owner's real `ltn-claude-code` plugin in `plugins.txt` and `LTN_PLUGIN_HOST_FROM` pointing at the branch: the plugin's subcommand runs, and a session that uses its LLM provider writes a digest.
+- `uvx --from <branch> lazy-take-notes-plugin-host` starts and answers a JSON-RPC request.
+
+#### Releases
+
+| Version | Content | Gate before the tag |
+|---|---|---|
+| 0.3.3 | Phase 0 | the permission check on upgrade |
+| 0.4.0 | Phases 1, 2, 4: Linux and Intel terminal app, new `setup.sh`, launcher pin for all four platforms | the Linux Docker smoke on both arches, Rosetta runs, setup-smoke |
+| 0.5.0 | Phase 3: window app on Intel and Linux, two-arch cask | Rosetta `.app` run, Xvfb screenshots, the real Linux desktop run |
+| 0.6.0 | Phase 5: Python app removed | the uvx wrapper, plugin and host runs |
+
+#### What the owner provides
+
+1. A real Linux desktop (a machine or a VM) for the Phase 3 gate.
+2. The source of `ltn-claude-code`. The copy under `plugins/` holds only `.pyc` files.
 
 ## GUI mode (decided 2026-11-25)
 
@@ -122,7 +425,7 @@ Scope: every TUI screen. That is the menu, the pickers, preflight, record, trans
 
 Non-goals:
 - No Python change.
-- No Intel, Linux or Windows GUI. Those Macs lose the `.app` and keep the `take-note` command.
+- No Intel, Linux or Windows GUI. Superseded on 2026-11-27: "Platforms and Python removal" ships the window app on Intel Macs and Linux.
 - No TUI behavior change.
 - No feature the TUI does not have.
 
