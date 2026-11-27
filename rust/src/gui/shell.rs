@@ -94,6 +94,10 @@ pub struct Shell {
     sessions: Vec<SessionInfo>,
     /// Why the session list is empty, when config.yaml did not load.
     list_error: Option<String>,
+    /// False until the first read of the session folder ends.
+    listed: bool,
+    /// Counts the reads of the session folder, so only the newest one lands.
+    list_generation: u64,
     /// The live session's folder, as last seen: a rename moves it.
     live_dir: Option<PathBuf>,
     /// The config the current flow loaded.
@@ -129,6 +133,8 @@ impl Shell {
             detail: Detail::Empty,
             sessions: Vec::new(),
             list_error: None,
+            listed: false,
+            list_generation: 0,
             live_dir: None,
             loaded: None,
             template: None,
@@ -141,28 +147,55 @@ impl Shell {
             _live_observer: None,
             _appearance: appearance,
         };
-        shell.refresh_sessions();
+        shell.refresh_sessions(cx);
         shell
     }
 
-    fn refresh_sessions(&mut self) {
-        match self.load() {
-            Ok(loaded) => {
-                let base = resolve_base_dir(&loaded.paths, output_dir().as_deref(), &loaded.config);
-                self.sessions = list_sessions(&base);
-                self.list_error = None;
-            }
-            Err(e) => {
-                self.sessions.clear();
-                self.list_error = Some(e);
-            }
-        }
+    /// Read the session folder off the main thread. The first read can wait
+    /// on the macOS prompt for the Documents folder, and the window must show
+    /// while it waits.
+    fn refresh_sessions(&mut self, cx: &mut Context<Self>) {
+        self.list_generation += 1;
+        let generation = self.list_generation;
+        let reading = cx
+            .background_executor()
+            .spawn(async move { read_sessions() });
+        cx.spawn(async move |shell, cx| {
+            let result = reading.await;
+            let _ = shell.update(cx, |shell, cx| {
+                if shell.list_generation != generation {
+                    return;
+                }
+                shell.listed = true;
+                match result {
+                    Ok(sessions) => {
+                        shell.sessions = sessions;
+                        shell.list_error = None;
+                    }
+                    Err(e) => {
+                        shell.sessions.clear();
+                        shell.list_error = Some(e);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn load(&self) -> Result<Loaded, String> {
         load_config(None, output_dir().as_deref())
     }
+}
 
+/// The saved sessions in the output folder that config.yaml names.
+fn read_sessions() -> Result<Vec<SessionInfo>, String> {
+    let loaded = load_config(None, output_dir().as_deref())?;
+    let base = resolve_base_dir(&loaded.paths, output_dir().as_deref(), &loaded.config);
+    Ok(list_sessions(&base))
+}
+
+impl Shell {
     fn show_detail(
         &mut self,
         detail: Detail,
@@ -218,7 +251,7 @@ impl Shell {
         if std::mem::take(&mut self.logging) {
             close_file_logging();
         }
-        self.refresh_sessions();
+        self.refresh_sessions(cx);
         match next {
             Some(dir) if dir.is_dir() => self.open_saved(&dir, window, cx),
             _ if matches!(self.detail, Detail::Live) => self.show_detail(Detail::Empty, None, cx),
@@ -493,12 +526,12 @@ impl Shell {
         cx: &mut Context<Self>,
     ) {
         self.live_dir = Some(session.read(cx).output_dir().to_path_buf());
-        self.refresh_sessions();
+        self.refresh_sessions(cx);
         self._live_observer = Some(cx.observe(&session, |shell, session, cx| {
             let dir = session.read(cx).output_dir().to_path_buf();
             if shell.live_dir.as_ref() != Some(&dir) {
                 shell.live_dir = Some(dir);
-                shell.refresh_sessions();
+                shell.refresh_sessions(cx);
                 cx.notify();
             }
         }));
@@ -539,7 +572,7 @@ impl Shell {
                 if let Detail::Saved(_, dir) = &mut shell.detail {
                     *dir = moved.clone();
                 }
-                shell.refresh_sessions();
+                shell.refresh_sessions(cx);
                 cx.notify();
             }
         });
@@ -606,7 +639,7 @@ impl Shell {
         let settings = cx.new(|cx| SettingsView::new(paths, None, window, cx));
         let subscription = cx.subscribe_in(&settings, window, |shell, _, event, _, cx| {
             // A save can move the output folder, so the session list reads it again.
-            shell.refresh_sessions();
+            shell.refresh_sessions(cx);
             match event {
                 SettingsEvent::Closed => shell.show_detail(Detail::Empty, None, cx),
                 SettingsEvent::Saved => cx.notify(),
@@ -812,10 +845,11 @@ impl Shell {
             }
         }
         if rows.is_empty() {
-            let note = self
-                .list_error
-                .clone()
-                .unwrap_or_else(|| "No saved sessions yet.".into());
+            let note = match (&self.list_error, self.listed) {
+                (Some(error), _) => error.clone(),
+                (None, false) => "Reading saved sessions…".into(),
+                (None, true) => "No saved sessions yet.".into(),
+            };
             rows.push(
                 caption(note, cx)
                     .px(space::LG)
