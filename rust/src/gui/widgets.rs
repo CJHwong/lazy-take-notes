@@ -41,18 +41,18 @@ fn grab() -> Option<Grab> {
     Some(Grab)
 }
 
-/// The pointer moved with the button down: move the window with it. The
-/// move waits until the mouse handler returns: a move onto a screen with
-/// another scale tells gpui through the window, and the window is busy
-/// while its handler runs, so the new scale would be lost until the next
-/// resize.
+/// The pointer moved with the button down: move the window with it. A move
+/// onto a screen with another scale tells gpui the new scale at once, and
+/// gpui drops that word while the app is busy, as it is for this whole mouse
+/// event (`cx.defer` too). So the move runs as a task of its own, from the
+/// main queue, when the app is free.
 #[cfg(target_os = "macos")]
 fn follow(grab: Grab, _: &mut Window, _: &DragArm, cx: &mut App) {
-    cx.defer(move |_| crate::gui::window_move::follow(grab));
+    cx.foreground_executor()
+        .spawn(async move { crate::gui::window_move::follow(grab) })
+        .detach();
 }
 
-/// The pointer moved with the button down: hand the move to the system,
-/// which tracks it to the end.
 #[cfg(not(target_os = "macos"))]
 fn follow(_: Grab, window: &mut Window, arm: &DragArm, _: &mut App) {
     arm.set(None);
