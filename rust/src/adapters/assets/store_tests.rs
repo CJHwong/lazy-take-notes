@@ -130,8 +130,7 @@ fn install_downloads_records_and_reuses() {
     let record = &fixture.state()["assets"]["tiny"];
     assert_eq!(fixture.state()["schema"], "ltn-assets/v1");
     let expected = std::path::Path::new("assets")
-        .join("whisper")
-        .join("tiny")
+        .join("whisper/tiny")
         .join("ggml-tiny.bin")
         .display()
         .to_string();
