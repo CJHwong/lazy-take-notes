@@ -279,7 +279,10 @@ mod legacy {
         fs::create_dir_all(tree.join("lib")).unwrap();
         fs::write(tree.join("bin/tool"), b"#!tool").unwrap();
         fs::write(tree.join("lib/a.so"), b"library").unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink("a.so", tree.join("lib/b.so")).unwrap();
+        #[cfg(windows)]
+        fs::copy(tree.join("lib/a.so"), tree.join("lib/b.so")).unwrap();
         fs::create_dir_all(fixture.dir.path().join("nemotron")).unwrap();
         let record = serde_json::json!({"binary": tree.join("bin/tool")});
         fs::write(

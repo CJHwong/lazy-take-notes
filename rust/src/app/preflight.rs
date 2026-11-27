@@ -46,12 +46,17 @@ const MIC_PERMISSION_FIX: &str = "Allow microphone access in System Settings > P
 #[cfg(target_os = "linux")]
 const MIC_PERMISSION_FIX: &str =
     "Check that PulseAudio or PipeWire runs and that the input is not muted (pavucontrol).";
+#[cfg(target_os = "windows")]
+const MIC_PERMISSION_FIX: &str = "Check that a microphone is connected, and that Settings > Privacy > Microphone allows desktop apps.";
 
 #[cfg(target_os = "macos")]
 const SYSTEM_PERMISSION_FIX: &str = "Allow this app in System Settings > Privacy & Security > Screen & System Audio Recording, then press Retry.";
 #[cfg(target_os = "linux")]
 const SYSTEM_PERMISSION_FIX: &str =
     "Check that PulseAudio or PipeWire runs: pactl info shows a server and a default sink.";
+#[cfg(target_os = "windows")]
+const SYSTEM_PERMISSION_FIX: &str =
+    "Check that an output device is connected. WASAPI loopback records what the output plays.";
 
 /// The tap opens before macOS asks for any permission, so a failed open means the
 /// helper is missing or cannot start. On Linux the open failure is the same
@@ -59,6 +64,8 @@ const SYSTEM_PERMISSION_FIX: &str =
 #[cfg(target_os = "macos")]
 const SYSTEM_HELPER_FIX: &str = "Reinstall lazy-take-notes to restore its coreaudio-tap helper, or build it with: bash scripts/build_native.sh";
 #[cfg(target_os = "linux")]
+const SYSTEM_HELPER_FIX: &str = SYSTEM_PERMISSION_FIX;
+#[cfg(target_os = "windows")]
 const SYSTEM_HELPER_FIX: &str = SYSTEM_PERMISSION_FIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,20 +315,7 @@ fn strerror(error: &std::io::Error) -> String {
 }
 
 fn free_bytes(path: &Path) -> std::io::Result<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
-    let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `name` is a valid C string and `stats` a writable statvfs.
-    if unsafe { libc::statvfs(name.as_ptr(), &mut stats) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // macOS counts blocks in a c_uint; Linux already has a u64.
-    #[cfg(target_os = "macos")]
-    let available = u64::from(stats.f_bavail);
-    #[cfg(target_os = "linux")]
-    let available = stats.f_bavail;
-    Ok(available * stats.f_frsize)
+    fs4::available_space(path)
 }
 
 fn probe_output(base: &Path) -> std::io::Result<u64> {
@@ -657,6 +651,7 @@ fn check_diarization(
     Ok(())
 }
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
@@ -664,6 +659,11 @@ fn is_executable(path: &Path) -> bool {
     };
     // SAFETY: `name` is a valid C string.
     unsafe { libc::access(name.as_ptr(), libc::X_OK) == 0 }
+}
+
+#[cfg(windows)]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn check_llm(

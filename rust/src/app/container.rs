@@ -16,6 +16,8 @@ use crate::adapters::audio::mixed::TestTone;
 use crate::adapters::audio::mixed::{MAX_MIC_GAIN, MixTiming, MixedAudioSource};
 #[cfg(target_os = "linux")]
 use crate::adapters::audio::pulse_monitor::PulseMonitorSource;
+#[cfg(target_os = "windows")]
+use crate::adapters::audio::wasapi_loopback::WasapiLoopbackSource;
 use crate::adapters::config_file::load_raw;
 use crate::adapters::llm::ollama::OllamaLlmClient;
 use crate::adapters::llm::openai::OpenAiCompatClient;
@@ -151,6 +153,11 @@ pub fn system_audio_source(
     {
         let _ = ensure_permission;
         Arc::new(PulseMonitorSource::new())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = ensure_permission;
+        Arc::new(WasapiLoopbackSource::new())
     }
 }
 

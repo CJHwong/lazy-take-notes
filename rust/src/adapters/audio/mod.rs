@@ -14,4 +14,6 @@ pub mod pulse_monitor;
 mod pulse_monitor_tests;
 pub mod rate;
 pub mod session_folder;
+#[cfg(target_os = "windows")]
+pub mod wasapi_loopback;
 pub mod wav;

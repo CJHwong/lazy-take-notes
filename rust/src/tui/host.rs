@@ -951,6 +951,7 @@ pub fn run_screen(
     outcome.map(|()| host.take_result())
 }
 
+#[cfg(unix)]
 fn signal_name(signum: i32) -> &'static str {
     match signum {
         signal_hook::consts::SIGTERM => "SIGTERM",
@@ -960,8 +961,14 @@ fn signal_name(signum: i32) -> &'static str {
     }
 }
 
+#[cfg(windows)]
+fn signal_name(signum: i32) -> &'static str {
+    if signum == 2 { "SIGINT" } else { "signal" }
+}
+
 /// SIGTERM and SIGHUP (the window closed) end the session. A plain thread waits
 /// for them, so a hung event loop still arms the exit watchdog.
+#[cfg(unix)]
 fn watch_shutdown_signals(
     sender: UnboundedSender<Msg>,
     armed: Arc<AtomicBool>,
@@ -970,8 +977,19 @@ fn watch_shutdown_signals(
     watch_signals(&[SIGTERM, SIGHUP], sender, armed)
 }
 
+/// The console close and logoff events need a Win32 handler; for now the TUI
+/// exits through its own quit keys and Ctrl-C on Windows.
+#[cfg(windows)]
+fn watch_shutdown_signals(
+    _sender: UnboundedSender<Msg>,
+    _armed: Arc<AtomicBool>,
+) -> Option<SignalWatch> {
+    None
+}
+
 /// No handler (a signal the OS refuses) logs a warning and returns None: the
 /// session runs on, as Python's host does when `signal.signal` raises.
+#[cfg(unix)]
 fn watch_signals(
     list: &[i32],
     sender: UnboundedSender<Msg>,
@@ -1005,8 +1023,10 @@ fn watch_signals(
 }
 
 /// The host's signal handlers. `close` gives each signal its old action back.
+#[cfg(unix)]
 struct SignalWatch(signal_hook::iterator::Handle);
 
+#[cfg(unix)]
 impl SignalWatch {
     fn close(self) {
         self.0.close();
@@ -1014,15 +1034,25 @@ impl SignalWatch {
     }
 }
 
+#[cfg(windows)]
+struct SignalWatch;
+
+#[cfg(windows)]
+impl SignalWatch {
+    fn close(self) {}
+}
+
 /// While true, a signal whose action was the default before any host takes that
 /// action again: Python's host restores the handlers it replaced. signal-hook
 /// keeps its own handler installed for the next host in the process, so the
 /// default comes back through this flag instead.
+#[cfg(unix)]
 static NO_HOST_LISTENS: std::sync::LazyLock<Arc<AtomicBool>> =
     std::sync::LazyLock::new(|| Arc::new(AtomicBool::new(true)));
 
 /// Before the first host replaces a signal's handler, note whether its action
 /// was the default. A signal that was ignored (SIGHUP under nohup) stays ignored.
+#[cfg(unix)]
 fn keep_default_actions(list: &[i32]) {
     static SEEN: std::sync::Mutex<Vec<i32>> = std::sync::Mutex::new(Vec::new());
     let mut seen = SEEN

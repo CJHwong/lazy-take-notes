@@ -3,7 +3,6 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
@@ -98,7 +97,8 @@ impl StreamingWav {
             .file
             .metadata()
             .map_err(|e| OsError::from_io(&e, None, None))?;
-        Ok((on_disk.dev(), on_disk.ino()) == (opened.dev(), opened.ino()))
+        Ok(crate::adapters::fs_meta::file_key(&on_disk)
+            == crate::adapters::fs_meta::file_key(&opened))
     }
 }
 

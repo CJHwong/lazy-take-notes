@@ -665,9 +665,16 @@ pub fn find_uvx() -> Option<PathBuf> {
 }
 
 fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path)
-        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::metadata(path)
+            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(windows)]
+    {
+        path.is_file()
+    }
 }
 
 /// Where the host comes from.

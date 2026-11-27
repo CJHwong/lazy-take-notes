@@ -2,6 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
@@ -127,14 +128,14 @@ pub fn write_config(
     }
     // The file can hold an API key, so only the user may read it. Writing in place
     // keeps a symlinked config.yaml (dotfiles) a symlink.
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)?;
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let mut file = options.open(&path)?;
     file.write_all(to_yaml(&existing).as_bytes())?;
     // A file from an older version was created readable by everyone.
+    #[cfg(unix)]
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
     Ok(path)
 }
@@ -225,6 +226,7 @@ mod tests {
                 "my_plugin:\n  key: v\ntranscription:\n  models:\n    zh: z\ndigest:\n  model: m\n"
             )
         );
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(&file).unwrap().permissions().mode() & 0o777,
             0o600
@@ -241,6 +243,7 @@ mod tests {
         assert_eq!(fs::read_to_string(file).unwrap(), "a: [unclosed\n");
     }
 
+    #[cfg(unix)]
     #[test]
     fn write_keeps_a_symlink() {
         let (dir, paths) = setup();

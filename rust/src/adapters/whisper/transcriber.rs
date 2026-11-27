@@ -2,6 +2,7 @@
 
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -84,14 +85,17 @@ impl SubprocessWhisperTranscriber {
     }
 
     fn spawn(&self, model_path: &str) -> Result<Worker, TranscribeError> {
-        let mut process = Command::new(&self.program)
+        let mut command = Command::new(&self.program);
+        command
             .args(&self.leading_args)
             .arg(model_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            // Its own process group: a terminal Ctrl-C must not kill it mid-chunk in headless mode.
-            .process_group(0)
+            .stderr(Stdio::null());
+        // Its own process group: a terminal Ctrl-C must not kill it mid-chunk in headless mode.
+        #[cfg(unix)]
+        command.process_group(0);
+        let mut process = command
             .spawn()
             .map_err(|e| TranscribeError(format!("Whisper subprocess failed to start: {e}")))?;
         let stdin = process.stdin.take().expect("piped stdin");

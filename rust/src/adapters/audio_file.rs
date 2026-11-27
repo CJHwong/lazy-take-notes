@@ -107,7 +107,7 @@ fn find_program(program: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 

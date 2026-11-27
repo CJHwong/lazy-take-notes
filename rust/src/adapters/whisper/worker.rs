@@ -2,6 +2,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader};
+#[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
 
 use whisper_rs::{
@@ -99,6 +100,7 @@ impl Engine {
 
 /// Keep stdout for the protocol, then send fds 1 and 2 to /dev/null: whisper.cpp
 /// and ggml print with fprintf, which would corrupt the replies and the TUI.
+#[cfg(unix)]
 fn protocol_output() -> io::Result<File> {
     let null = OpenOptions::new().write(true).open("/dev/null")?;
     // SAFETY: dup and dup2 on descriptors this process owns; the new descriptor gets one owner.
@@ -111,6 +113,44 @@ fn protocol_output() -> io::Result<File> {
             return Err(io::Error::last_os_error());
         }
         Ok(File::from_raw_fd(kept))
+    }
+}
+
+/// The same redirection on Windows. The MSVC runtime keeps its own descriptors,
+/// so the CRT has to be redirected; `SetStdHandle` alone would not touch the
+/// `fprintf` calls in whisper.cpp.
+#[cfg(windows)]
+fn protocol_output() -> io::Result<File> {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+
+    const O_WRONLY: i32 = 0x0001;
+    unsafe extern "C" {
+        fn _dup(fd: i32) -> i32;
+        fn _dup2(fd1: i32, fd2: i32) -> i32;
+        fn _open_osfhandle(osfhandle: isize, flags: i32) -> i32;
+        fn _get_osfhandle(fd: i32) -> isize;
+    }
+    let null = OpenOptions::new().write(true).open("NUL")?;
+    // SAFETY: the CRT descriptors are process-wide, and the returned File owns
+    // the kept descriptor. `null` hands its handle to the CRT and is forgotten.
+    unsafe {
+        let null_fd = _open_osfhandle(null.as_raw_handle() as isize, O_WRONLY);
+        if null_fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        std::mem::forget(null);
+        let kept = _dup(1);
+        if kept < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if _dup2(null_fd, 1) < 0 || _dup2(null_fd, 2) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let handle = _get_osfhandle(kept);
+        if handle < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(File::from_raw_handle(handle as *mut _))
     }
 }
 

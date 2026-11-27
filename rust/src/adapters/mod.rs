@@ -5,6 +5,7 @@ pub mod audio;
 pub mod audio_file;
 pub mod config_file;
 pub mod file_persistence;
+pub(crate) mod fs_meta;
 pub mod llm;
 pub mod model_catalog;
 pub mod nemo_diarizer;

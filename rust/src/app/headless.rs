@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -289,6 +290,7 @@ impl HeadlessSession {
 
     /// SIGINT and SIGTERM stop; SIGUSR1 toggles the mic. SIGHUP is left alone:
     /// `nohup` ignores it on purpose to keep the recording going.
+    #[cfg(unix)]
     fn watch_signals(&self) -> Option<tokio::task::JoinHandle<()>> {
         let mut interrupt = signal(SignalKind::interrupt()).ok()?;
         let mut terminate = signal(SignalKind::terminate()).ok()?;
@@ -318,6 +320,20 @@ impl HeadlessSession {
                         }
                     }
                 }
+            }
+        }))
+    }
+
+    /// Ctrl-C stops a headless session on Windows. There is no SIGUSR1 mute.
+    #[cfg(windows)]
+    fn watch_signals(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let stopper = self.stopper();
+        Some(tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_err() {
+                    break;
+                }
+                stopper.stop();
             }
         }))
     }
