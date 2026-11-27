@@ -556,19 +556,23 @@ impl SettingsView {
 
     fn audio_page(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let running = self.runtime.probe_running();
-        let check = buttons()
-            .child(Self::button(
-                "grant-system",
-                "Grant System Audio",
-                cx,
-                |_, _, _| open_privacy("Privacy_ScreenCapture"),
-            ))
-            .child(Self::button(
-                "grant-mic",
-                "Open Microphone Settings",
-                cx,
-                |_, _, _| open_privacy("Privacy_Microphone"),
-            ))
+        let mut check = buttons();
+        if cfg!(target_os = "macos") {
+            check = check
+                .child(Self::button(
+                    "grant-system",
+                    "Grant System Audio",
+                    cx,
+                    |_, _, _| open_privacy("Privacy_ScreenCapture"),
+                ))
+                .child(Self::button(
+                    "grant-mic",
+                    "Open Microphone Settings",
+                    cx,
+                    |_, _, _| open_privacy("Privacy_Microphone"),
+                ));
+        }
+        let check = check
             .child(
                 Self::button("audio-stop", "Stop", cx, |view, _, cx| {
                     view.runtime.stop_probe();

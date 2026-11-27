@@ -288,14 +288,16 @@ pub fn audio_page(values: &OpeningValues) -> Page {
         "audio-perm-system",
         Kind::Text("Not tested".into(), None),
     ));
-    items.push(buttons(
-        "grant-buttons",
-        2,
-        &[
-            ("audio-grant-system", "Grant system audio"),
-            ("audio-grant-mic", "Open microphone settings"),
-        ],
-    ));
+    if cfg!(target_os = "macos") {
+        items.push(buttons(
+            "grant-buttons",
+            2,
+            &[
+                ("audio-grant-system", "Grant system audio"),
+                ("audio-grant-mic", "Open microphone settings"),
+            ],
+        ));
+    }
     items.extend(title("", "Microphone"));
     items.push(Item::new(
         "cfg-audio-device",

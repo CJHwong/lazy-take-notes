@@ -11,6 +11,7 @@ pub mod logging;
 pub mod logo;
 pub mod modes;
 pub mod notices;
+pub mod open_path;
 pub mod preflight;
 pub mod preflight_runtime;
 pub mod saved_session;
