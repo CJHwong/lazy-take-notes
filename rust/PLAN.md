@@ -201,8 +201,8 @@ Released 2026-11-27, then 0.3.4 the same day. The certificate-signed upgrade ask
 
 #### Phase 0b: pin the newest release (open decision 2)
 
-1. Run the release procedure, step 9, for `v0.3.4`. Only the Mac line applies: 0.3.4 has only the arm64 macOS asset.
-2. **Proof:** the Mac line prints `0.3.4`. Merge.
+1. Run the release procedure, step 9, for `v0.3.5`. Only the Mac line applies: 0.3.5 has only the arm64 macOS asset.
+2. **Proof:** the Mac line prints `0.3.5`. Merge.
 
 #### Phase 1: Linux terminal app (x86_64 and arm64), part of 0.4.0
 
@@ -519,7 +519,7 @@ Steps:
 | Version | Content | Gate before the tag |
 |---|---|---|
 | 0.3.3, 0.3.4 | Phase 0 | done |
-| (pin only) | Phase 0b: pin v0.3.4 | the uvx run on the Mac |
+| (pin only) | Phase 0b: pin v0.3.5 | the uvx run on the Mac |
 | 0.4.0 | Phases 1, 2, 4: Linux and Intel terminal app, new `setup.sh`, pin for macOS arm64, macOS x86_64 and Linux | the Linux Docker smoke on both arches, the Rosetta runs, the `macos-intel` job, setup-smoke |
 | 0.5.0 | Phase 3: window app on Intel and Linux, two-arch cask | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
 | 0.6.0 | Phase 5: Python app removed | the uvx wrapper runs, the plugin host run, the owner's plugin run |
