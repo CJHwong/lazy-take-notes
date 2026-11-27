@@ -293,6 +293,7 @@ mod legacy {
         tree
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_legacy_runtime_tree_is_copied_with_its_links_and_can_be_deleted() {
         let fixture = Fixture::new(vec![runtime_asset()]);
