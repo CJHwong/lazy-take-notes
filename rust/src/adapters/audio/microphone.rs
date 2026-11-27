@@ -137,6 +137,11 @@ impl Run {
         self.queue.clear();
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn put(&self, block: &[f32]) {
+        self.queue.put(block);
+    }
+
     pub(crate) fn start_close(&self) {
         self.closing.store(true, Ordering::SeqCst);
     }

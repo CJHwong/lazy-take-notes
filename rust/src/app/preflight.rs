@@ -14,7 +14,7 @@ use tracing::{info, warn};
 use crate::adapters::assets::resolver::CachedModelResolver;
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::audio::microphone::MicrophoneSource;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::adapters::audio::microphone::play_test_tone;
 use crate::adapters::nemo_diarizer::NemoSpeechDiarizer;
 use crate::app::container::system_audio_source;
@@ -37,7 +37,7 @@ const LLM_PROBE_PROMPT: &str = "Reply with the single word OK.";
 const MIC_READ: Duration = Duration::from_millis(1500);
 const SYSTEM_FIRST_BUFFER: Duration = Duration::from_secs(5);
 const SYSTEM_PERMISSION_WAIT: Duration = Duration::from_secs(45);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const SYSTEM_TONE_WAIT: Duration = Duration::from_millis(1500);
 const READ_STEP: Duration = Duration::from_millis(100);
 
@@ -548,7 +548,7 @@ fn verify_system_capture(
         return Ok(());
     }
     system.drain();
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         running.update("Playing an inaudible test tone");
         if !play_test_tone() {

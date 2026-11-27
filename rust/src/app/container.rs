@@ -10,7 +10,7 @@ use yaml_serde::{Mapping, Value};
 #[cfg(target_os = "macos")]
 use crate::adapters::audio::coreaudio_tap::CoreAudioTapSource;
 use crate::adapters::audio::microphone::MicrophoneSource;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::adapters::audio::microphone::play_test_tone;
 use crate::adapters::audio::mixed::TestTone;
 use crate::adapters::audio::mixed::{MAX_MIC_GAIN, MixTiming, MixedAudioSource};
@@ -162,7 +162,7 @@ pub fn system_audio_source(
 }
 
 fn platform_test_tone() -> Option<TestTone> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         Some(Box::new(play_test_tone))
     }
