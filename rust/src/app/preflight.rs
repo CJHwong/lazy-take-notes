@@ -13,9 +13,11 @@ use tracing::{info, warn};
 
 use crate::adapters::assets::resolver::CachedModelResolver;
 use crate::adapters::assets::store::CachedModelStore;
-use crate::adapters::audio::coreaudio_tap::CoreAudioTapSource;
-use crate::adapters::audio::microphone::{MicrophoneSource, play_test_tone};
+use crate::adapters::audio::microphone::MicrophoneSource;
+#[cfg(target_os = "macos")]
+use crate::adapters::audio::microphone::play_test_tone;
 use crate::adapters::nemo_diarizer::NemoSpeechDiarizer;
+use crate::app::container::system_audio_source;
 use crate::app::download_progress;
 use crate::domain::SAMPLE_RATE;
 use crate::domain::config::AppConfig;
@@ -35,14 +37,29 @@ const LLM_PROBE_PROMPT: &str = "Reply with the single word OK.";
 const MIC_READ: Duration = Duration::from_millis(1500);
 const SYSTEM_FIRST_BUFFER: Duration = Duration::from_secs(5);
 const SYSTEM_PERMISSION_WAIT: Duration = Duration::from_secs(45);
+#[cfg(target_os = "macos")]
 const SYSTEM_TONE_WAIT: Duration = Duration::from_millis(1500);
 const READ_STEP: Duration = Duration::from_millis(100);
 
+#[cfg(target_os = "macos")]
 const MIC_PERMISSION_FIX: &str = "Allow microphone access in System Settings > Privacy & Security > Microphone, then check the input volume in System Settings > Sound.";
+#[cfg(target_os = "linux")]
+const MIC_PERMISSION_FIX: &str =
+    "Check that PulseAudio or PipeWire runs and that the input is not muted (pavucontrol).";
+
+#[cfg(target_os = "macos")]
 const SYSTEM_PERMISSION_FIX: &str = "Allow this app in System Settings > Privacy & Security > Screen & System Audio Recording, then press Retry.";
+#[cfg(target_os = "linux")]
+const SYSTEM_PERMISSION_FIX: &str =
+    "Check that PulseAudio or PipeWire runs: pactl info shows a server and a default sink.";
+
 /// The tap opens before macOS asks for any permission, so a failed open means the
-/// helper is missing or cannot start.
+/// helper is missing or cannot start. On Linux the open failure is the same
+/// PulseAudio or PipeWire problem the system audio text names.
+#[cfg(target_os = "macos")]
 const SYSTEM_HELPER_FIX: &str = "Reinstall lazy-take-notes to restore its coreaudio-tap helper, or build it with: bash scripts/build_native.sh";
+#[cfg(target_os = "linux")]
+const SYSTEM_HELPER_FIX: &str = SYSTEM_PERMISSION_FIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -497,7 +514,8 @@ fn check_system_audio(
     _plan: &PreflightPlan,
     _transcriber: &mut dyn Transcriber,
 ) -> Result<(), String> {
-    check_system_source(running, &CoreAudioTapSource::new(false))
+    let system = system_audio_source(false);
+    check_system_source(running, system.as_ref())
 }
 
 fn check_system_source(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
@@ -531,24 +549,35 @@ fn verify_system_capture(
         return Ok(());
     }
     system.drain();
-    running.update("Playing an inaudible test tone");
-    if !play_test_tone() {
-        running.check.set(
-            Status::Warn,
-            "No output device to play the test tone; system audio is not verified",
-            "",
-        );
-        return Ok(());
+    #[cfg(target_os = "macos")]
+    {
+        running.update("Playing an inaudible test tone");
+        if !play_test_tone() {
+            running.check.set(
+                Status::Warn,
+                "No output device to play the test tone; system audio is not verified",
+                "",
+            );
+            return Ok(());
+        }
+        let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
+        if nonzero == 0 {
+            running.check.fail(
+                "System audio is silent: the capture permission is missing",
+                SYSTEM_PERMISSION_FIX,
+            );
+            return Ok(());
+        }
+        running.check.pass("Test tone captured");
     }
-    let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
-    if nonzero == 0 {
-        running.check.fail(
-            "System audio is silent: the capture permission is missing",
-            SYSTEM_PERMISSION_FIX,
-        );
-        return Ok(());
+    #[cfg(target_os = "linux")]
+    {
+        // A monitor records the output, but a 0.2 s tone played through the
+        // PulseAudio sink does not reach it inside this check's wait, so the
+        // first buffer is the proof. SYS LOST then comes from a failed read or
+        // 3 s without delivery.
+        running.check.pass("Monitor opened");
     }
-    running.check.pass("Test tone captured");
     Ok(())
 }
 

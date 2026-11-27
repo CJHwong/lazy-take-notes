@@ -279,6 +279,7 @@ fn transcribe_file(args: &[String]) -> serde_json::Value {
 /// Record the real mic and system audio into DIR for SECONDS, as a session does.
 /// Prints the health on each change and the delivered samples against wall time.
 /// DEVICE, when given, replaces the configured mic.
+#[cfg(target_os = "macos")]
 fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> serde_json::Value {
     use std::sync::Arc;
     use std::time::{Duration, Instant};
@@ -347,6 +348,7 @@ fn record(paths: &Paths, dir: &Path, seconds: f64, device: Option<String>) -> se
 }
 
 /// Play the test tone and measure 997 Hz in the tap before and during it.
+#[cfg(target_os = "macos")]
 fn tone_reaches_tap() -> serde_json::Value {
     use std::time::{Duration, Instant};
 
@@ -413,6 +415,7 @@ fn mic_blocks(seconds: f64) -> serde_json::Value {
 }
 
 /// The system audio tap's RMS per second, and the share of exact zeros.
+#[cfg(target_os = "macos")]
 fn tap_blocks(seconds: f64) -> serde_json::Value {
     use std::time::{Duration, Instant};
 
@@ -440,6 +443,26 @@ fn tap_blocks(seconds: f64) -> serde_json::Value {
         })
         .collect();
     serde_json::json!(per_second)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn record(
+    _paths: &Paths,
+    _dir: &Path,
+    _seconds: f64,
+    _device: Option<String>,
+) -> serde_json::Value {
+    serde_json::json!({"error": "the Core Audio tap is macOS only"})
+}
+
+#[cfg(not(target_os = "macos"))]
+fn tone_reaches_tap() -> serde_json::Value {
+    serde_json::json!({"error": "the Core Audio tap is macOS only"})
+}
+
+#[cfg(not(target_os = "macos"))]
+fn tap_blocks(_seconds: f64) -> serde_json::Value {
+    serde_json::json!({"error": "the Core Audio tap is macOS only"})
 }
 
 fn mic_levels(device: &str, seconds: f64) -> serde_json::Value {

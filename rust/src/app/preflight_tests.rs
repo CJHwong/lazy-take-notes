@@ -332,8 +332,10 @@ fn an_unknown_speech_model_names_the_setting() {
     );
 }
 
+#[cfg(target_os = "macos")]
 struct NoHelper;
 
+#[cfg(target_os = "macos")]
 impl AudioSource for NoHelper {
     fn open(&self, _sample_rate: u32, _channels: u16) -> Result<(), AudioError> {
         Err(AudioError(
@@ -349,6 +351,7 @@ impl AudioSource for NoHelper {
     }
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 fn a_missing_tap_helper_says_to_restore_it_not_to_grant_permission() {
     let mut check = Check::new("system", "System audio", false);
@@ -361,4 +364,13 @@ fn a_missing_tap_helper_says_to_restore_it_not_to_grant_permission() {
     assert!(error.starts_with("RuntimeError: Native binary not found"));
     assert!(check.fix.contains("coreaudio-tap"));
     assert!(!check.fix.contains("Privacy"));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn the_linux_hints_name_no_macos_settings_or_helper() {
+    for text in [MIC_PERMISSION_FIX, SYSTEM_PERMISSION_FIX, SYSTEM_HELPER_FIX] {
+        assert!(!text.contains("System Settings"), "{text}");
+        assert!(!text.contains("coreaudio-tap"), "{text}");
+    }
 }
