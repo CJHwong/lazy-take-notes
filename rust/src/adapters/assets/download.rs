@@ -566,6 +566,7 @@ mod tests {
         path
     }
 
+    #[cfg(unix)]
     #[test]
     fn extracts_the_top_folder_and_checks_the_entry() {
         let dir = tempfile::tempdir().unwrap();
