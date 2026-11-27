@@ -355,7 +355,7 @@ fn a_signal_stops_the_session_and_exits_after_the_audio_flush() {
         stops: true,
         ..Probe::default()
     }));
-    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    host.message(Msg::Signal(15));
     assert!(!host.finished(), "waits for the audio flush");
     let exit_at = host.ctx.exit_at.expect("an exit is scheduled");
     assert!(exit_at <= Instant::now() + SHUTDOWN_GRACE);
@@ -384,7 +384,7 @@ fn a_signal_with_no_session_exits_at_once() {
     let runtime = runtime();
     let mut host = host_without_watchdog(&runtime);
     host.push(Box::new(Probe::default()));
-    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    host.message(Msg::Signal(15));
     assert!(host.finished());
 }
 
@@ -392,7 +392,7 @@ fn a_signal_with_no_session_exits_at_once() {
 fn the_exit_watchdog_is_armed_only_once() {
     let armed = AtomicBool::new(true);
     // Already armed: no second watchdog thread starts, so this returns at once.
-    arm_watchdog_once(&armed, signal_hook::consts::SIGTERM);
+    arm_watchdog_once(&armed, 15);
     assert!(armed.load(Ordering::SeqCst));
 }
 

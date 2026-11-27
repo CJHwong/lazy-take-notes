@@ -401,6 +401,7 @@ fn a_folder_without_its_status_file_is_kept() {
     assert!(dir.join("debug.log").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_that_cannot_be_removed_is_kept() {
     use std::os::unix::fs::PermissionsExt;
