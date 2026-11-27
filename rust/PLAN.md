@@ -5,7 +5,7 @@ The Rust version replaces the Python app once it is stable. Until then the Pytho
 ## Decisions
 
 - Location: `rust/` in this repo, on the `rust-rewrite` branch.
-- Platforms at the swap: macOS. Linux and Windows system audio come later; Linux loopback needs a spike first.
+- Platforms at the swap: macOS. Superseded on 2026-11-27: the terminal app now ships on Linux and Windows too, and the window app on Linux (see "Platforms and Python removal").
 - Plugins: none in the first version. Ollama and OpenAI-compatible are built in.
 - Data: drop-in. Both versions read and write the same files.
 - Look: ratatui's idiom, not Textual's. The key bindings and the text stay Python's; the drawing does not. See "Look and mouse" below.
@@ -94,25 +94,27 @@ Existing installs keep their command: setup.sh's `take-note` wrapper runs `uvx -
 
 ### Platforms and Python removal (decided 2026-11-27, reviewed against the code 2026-11-27)
 
-This replaces "Two tracks" (2026-11-24). The Rust app covers Intel Macs and Linux, terminal and window app both. Then the Python app goes. A small Python package stays, for the launcher that existing installs run and for the plugin host.
+This replaces "Two tracks" (2026-11-24). The Rust app covers Intel Macs, Linux and Windows, terminal app on all three; the window app on macOS and Linux. Then the Python app goes. A small Python package stays, for the launcher that existing installs run and for the plugin host.
+
+On 2026-11-27 the owner moved the Windows terminal app ahead of the Linux window app (Phase 2w below).
 
 Paths in this section are relative to `rust/`, except paths that start with `../` (the repository root). A `file:line` was checked on 2026-11-27. If a line moved, search for the quoted code.
 
 Decisions:
 
-- Platforms: macOS arm64 (done), macOS x86_64, Linux x86_64, Linux arm64. No Windows.
-- The window app ships on all four.
-- Install: `setup.sh` downloads the release tarball for the machine and checks its SHA-256. Homebrew stays for the Mac window app.
+- Platforms: macOS arm64 (done), macOS x86_64, Linux x86_64, Linux arm64 (done, Phase 1), Windows x86_64 (terminal app only).
+- The window app ships on macOS and Linux. Windows gets no window app.
+- Install: `setup.sh` downloads the release tarball for the machine and checks its SHA-256; Homebrew stays for the Mac window app. Windows gets a zip and `setup.ps1`.
 - Plugin subcommands and `llm_providers` keep working, through the Python plugin host.
 
 Open decisions for the owner. Each has a default. The plan uses the default until the owner says otherwise.
 
-1. **Python-only plugin features stop at 0.6.0.** `transcription_providers`, `run_record`, and the `llm_client` and `transcriber` arguments of `run_transcribe` work only in the Python app (`../docs/ref_plugin_api.md:11,29`). The Rust app refuses an unknown `transcription_provider` with an error (`src/app/container.rs:126-134`). Default: accept the loss. `plugin_api` keeps the names, so a plugin that imports them still loads, and the docs say which parts work. The owner's `ltn-claude-code` uses only `plugin_api` and `llm_providers` (strings in its `.pyc` files).
+1. **Python-only plugin features stop at 0.7.0.** `transcription_providers`, `run_record`, and the `llm_client` and `transcriber` arguments of `run_transcribe` work only in the Python app (`../docs/ref_plugin_api.md:11,29`). The Rust app refuses an unknown `transcription_provider` with an error (`src/app/container.rs:126-134`). Default: accept the loss. `plugin_api` keeps the names, so a plugin that imports them still loads, and the docs say which parts work. The owner's `ltn-claude-code` uses only `plugin_api` and `llm_providers` (strings in its `.pyc` files).
 2. **The launcher pin is behind.** `../src/lazy_take_notes/rust_release.py:6` pins `v0.2.0`, so every `uvx` install on Apple silicon runs 0.2.0, not 0.3.4. Default: pin the newest release now (Phase 0b), and after every release from now on (the release procedure, step 9).
 
 Non-goals:
 
-- Windows.
+- A Windows window app, an MSI, a Store package, or Windows on ARM.
 - Linux packages beyond a tarball and a `.desktop` file: no AppImage, Flatpak, deb or rpm.
 - GPU transcription on Linux (Vulkan, CUDA).
 - Any change to the plugin contract or its JSON-RPC protocol.
@@ -349,14 +351,65 @@ Branch: `linux-terminal`, or `intel-mac` from `main` if Phase 1 has merged.
 - `arch -x86_64 ./lazy-take-notes record --headless --mute-mic --template default_en --config <config> --output-dir <temp>` for 20 s while `afplay scripts/linux-smoke/speech.wav` plays: `words_check.py` passes on `transcript.txt`. Use a temp config at mode 0600 and a temp output folder, and do not run it while the owner records or plays audio.
 - The `macos-intel` job passes.
 
-#### Phase 3: window app on Intel Mac and Linux, release 0.5.0
+#### Phase 2w: Windows terminal app (x86_64), release 0.5.0
+
+Decided 2026-11-27: Windows comes before the Linux window app. Terminal app only. The window app stays macOS and Linux.
+
+Branch: `windows-tui`.
+
+Decisions:
+
+- System audio: WASAPI loopback through a Windows-only adapter. cpal's WASAPI host covers the mic and output, not loopback.
+- Install: a zip with `lazy-take-notes.exe`, `setup.ps1` and a `.sha256`. No MSI, no Store, no window app.
+- Plugins: deferred. The plugin host is a Python child process with Unix process-group code. The Windows build says plugins are unavailable. The plugin contract does not change.
+- Speaker labels: the catalog has a `windows-x86_64` entry. Check whether the NeMo runtime is one of its assets. If not, labels are off on Windows and a known difference records it.
+
+What blocks today (checked 2026-11-27):
+
+| Area | Today | Where |
+|---|---|---|
+| System audio | Core Audio tap and PulseAudio monitor only | `src/app/container.rs` (`system_audio_source`) |
+| Mic | cpal WASAPI: expected to work, no Windows test yet | `src/adapters/audio/microphone.rs` |
+| File lock | `flock` through libc | `src/adapters/assets/file_lock.rs` |
+| Disk free | `statvfs` | `src/app/preflight.rs` (`free_bytes`) |
+| Keep awake | `caffeinate` or `systemd-inhibit` | `src/app/keep_awake.rs` |
+| Open a file | `open` or `xdg-open` | `src/app/open_path.rs` |
+| Clipboard, open a folder | `pbcopy`, `wl-copy`, `xclip`, `xdg-open` | `src/tui/system.rs` |
+| Signals | `signal_hook` SIGTERM, SIGHUP, SIGINT | `src/tui/host.rs`, `src/adapters/session_status.rs` |
+| Process groups and kill | `process_group(0)`, `libc::kill` | `src/adapters/whisper/worker.rs`, `src/adapters/whisper/transcriber.rs`, `src/adapters/plugins/host.rs`, `src/app/keep_awake.rs` |
+| Tests | Unix permissions and signals | `tests/headless.rs`, `tests/tui_record.rs`, `src/tui/host_tests.rs` |
+| Packaging | `package.sh`, `.tar.gz`, `os.execv` | `scripts/package.sh`, `../src/lazy_take_notes/launcher.py` |
+| Plugin host | Unix process group | `src/adapters/plugins/host.rs` |
+
+Steps:
+
+1. **Spike.** Add a `windows-2022` job to `../.github/workflows/ci.yml`: install the pinned toolchain, `cargo clippy --all-targets --locked -- -D warnings`, `cargo test --locked`. The runner has no audio hardware. The job fails until the steps below land; its log is the work list.
+2. **File lock without Unix.** Replace the `flock` code with `std::fs::File::try_lock` and `File::lock` (Rust 1.89 and later; the toolchain is 1.98). Keep the lock file, the busy result and the cross-process behavior. Delete the libc lock code.
+3. **Disk free.** Use `fs4::available_space` or `GetDiskFreeSpaceExW` behind `cfg(windows)`, and delete the `statvfs` call.
+4. **Signals and children.** On Windows, handle Ctrl-C and console close through `ctrlc` or `windows-sys`. Use `Child::kill` for the whisper child, and `CommandExt::creation_flags(CREATE_NEW_PROCESS_GROUP)` where `process_group(0)` is used. Keep the Unix paths.
+5. **Keep awake.** On Windows, `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED)` through `windows-sys`; clear it on drop.
+6. **Open a file and clipboard.** `open_path` uses `cmd /C start "" path` (`/wait` when `wait`); the terminal clipboard uses `clip`; opening a folder uses `explorer`. Test the argument lists per OS.
+7. **System audio.** Add `src/adapters/audio/wasapi_loopback.rs` with `WasapiLoopbackSource` (L3), declared `#[cfg(target_os = "windows")]`. It opens the default render device's loopback, converts to 16 kHz mono through the shared stream code, and implements `AudioSource` like `PulseMonitorSource`. `system_audio_source` picks it on Windows. Test the pure parts; a real run proves the hardware path.
+8. **Preflight.** Windows hints name Sound settings and Privacy > Microphone; the privacy buttons stay off Windows. Decide the test tone by one run, as Phase 1 step 5 did: if the loopback captures the tone, keep it; if not, pass on the first buffer and record a known difference.
+9. **Plugins.** Keep the plugin host off Windows with `cfg`. The app reports one line: plugins need macOS or Linux.
+10. **Package.** Add `scripts/package.ps1`: `cargo build --release --locked`, stage `lazy-take-notes.exe` and a `README.txt`, zip it as `lazy-take-notes-x86_64-windows.zip`, and write its SHA-256 with `Get-FileHash`. Add a `windows` job to `../.github/workflows/release.yml` on `windows-2022` and include the two files in `publish`.
+11. **Launcher and pin.** `../scripts/pin_rust_release.py`: map `lazy-take-notes-x86_64-windows.zip` to `('Windows', 'AMD64')` and hash zip assets. `../src/lazy_take_notes/launcher.py`: extract a zip with the same path checks as the tarball, and on Windows run the child with `subprocess.run` instead of `os.execv`, then exit with its code.
+12. **Install.** Add `../setup.ps1`: read the newest release tag (or `LTN_VERSION`), download the zip and its `.sha256`, check the hash, extract to `%LOCALAPPDATA%\lazy-take-notes\<tag>`, and write a `lazy-take-notes.cmd` shim in `%LOCALAPPDATA%\Programs\lazy-take-notes\bin`; print the PATH line. No registry edits.
+13. **Docs and tests.** README install for Windows, AGENTS.md Windows smoke, and the plan's known differences. Gate Unix-only tests with `cfg(unix)`.
+14. **Proof.** The `windows-2022` job is the build and test gate. The real run needs the owner's Windows machine: a 20 s recording with the mic and system audio, the test tone result, a file transcribe, the viewer, Settings, and the template builder. Record the outcome in the PR.
+
+Expected assets for 0.5.0: the 0.4.0 set, plus `lazy-take-notes-x86_64-windows.zip` and its `.sha256`.
+
+**Proof:** the `windows-2022` job passes, and the owner's Windows checklist passes.
+
+#### Phase 3: window app on Intel Mac and Linux, release 0.6.0
 
 Branch: `gui-everywhere`.
 
 1. **gpui on Linux, first a spike.** In Docker, `FROM rust:1-bookworm`, with the Phase 1 apt line plus `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libfontconfig-dev libssl-dev mesa-vulkan-drivers xvfb fonts-dejavu-core`. Run `cargo build --release --locked --features gui --bin lazy-take-notes-gui` in `rust/`, then `xvfb-run -s "-screen 0 1280x800x24" ./target/release/lazy-take-notes-gui` for 10 s.
    - Install what the build asks for and add it to the apt line. That line, final, is the "window packages" line used in CI, release and the screenshot image.
    - The spike passes when the build ends and the process stays up for 10 s with no panic in its stderr.
-   - If the spike fails: comment on the PR with the error, and stop the Linux part. Phase 3 then ships only steps 2 and 3 (Intel `.app` and the two-arch cask) as 0.5.0, and "Known differences" records "no window app on Linux".
+   - If the spike fails: comment on the PR with the error, and stop the Linux part. Phase 3 then ships only steps 2 and 3 (Intel `.app` and the two-arch cask) as 0.6.0, and "Known differences" records "no window app on Linux".
 2. **Intel `.app`.** `scripts/package_app.sh` takes `--target <triple>` like `package.sh`:
    - Remove the arch check at `:44`. Keep the Darwin check.
    - Build with `--target <triple>` when given (exporting `CMAKE_OSX_ARCHITECTURES` as `package.sh` does), and copy from `target/<triple>/release/` (`:65`).
@@ -368,7 +421,7 @@ Branch: `gui-everywhere`.
    - The two URL arguments default to the release assets; a local test passes `file://` URLs.
    - In `release.yml:127-129`, job `homebrew` downloads both `.zip.sha256` files and passes both hashes.
 
-   Before the release: `sh scripts/homebrew_cask.sh 0.5.0 <sha_arm> <sha_intel> file://<arm zip> file://<intel zip> > /tmp/lazy-take-notes.rb`, then `brew style --cask /tmp/lazy-take-notes.rb`, then `brew install --cask /tmp/lazy-take-notes.rb` on the owner's Mac, only when no session records. If Homebrew refuses a cask outside a tap, put the file in a local tap instead: `brew tap-new <user>/ltn-test`, copy it to that tap's `Casks/`, and install `<user>/ltn-test/lazy-take-notes`; `brew untap` it after.
+   Before the release: `sh scripts/homebrew_cask.sh 0.6.0 <sha_arm> <sha_intel> file://<arm zip> file://<intel zip> > /tmp/lazy-take-notes.rb`, then `brew style --cask /tmp/lazy-take-notes.rb`, then `brew install --cask /tmp/lazy-take-notes.rb` on the owner's Mac, only when no session records. If Homebrew refuses a cask outside a tap, put the file in a local tap instead: `brew tap-new <user>/ltn-test`, copy it to that tap's `Casks/`, and install `<user>/ltn-test/lazy-take-notes`; `brew untap` it after.
 4. **macOS-only window code behind `cfg`.**
    - `Cargo.toml:35-36`: move `cocoa = { version = "=0.25.0", optional = true }` and `objc = { version = "=0.2.7", optional = true }` into `[target.'cfg(target_os = "macos")'.dependencies]`. Keep `gui = ["dep:gpui-kit", "dep:cocoa", "dep:objc"]` (`Cargo.toml:19`): Cargo builds a target-specific optional dependency only on its target. Check: `cargo tree --features gui --target x86_64-unknown-linux-gnu -i cocoa` prints nothing.
    - `src/gui/mod.rs:9,131`: `#[cfg(target_os = "macos")]` on `mod dock_icon` and its call.
@@ -398,14 +451,14 @@ Branch: `gui-everywhere`.
    ```
    Add the script to the release job `linux` for both arches, with the window packages line.
 8. **CI.** Job `rust-linux` installs the window packages line too, and also runs `cargo clippy --features gui --all-targets --locked -- -D warnings` and `cargo test --features gui --locked`.
-9. **setup-smoke for the window tarball.** Run the Phase 4 setup-smoke again against a 0.5.0 dry-run artifact: the GUI link, the `.desktop` file and the icon land in place.
+9. **setup-smoke for the window tarball.** Run the Phase 4 setup-smoke again against a 0.6.0 dry-run artifact: the GUI link, the `.desktop` file and the icon land in place.
 
-Expected assets for 0.5.0: the 0.4.0 set, plus `Lazy-Take-Notes-x86_64-macos.zip`, `lazy-take-notes-gui-x86_64-linux.tar.gz`, `lazy-take-notes-gui-arm64-linux.tar.gz`, each with `.sha256`.
+Expected assets for 0.6.0: the 0.4.0 set, plus `Lazy-Take-Notes-x86_64-macos.zip`, `lazy-take-notes-gui-x86_64-linux.tar.gz`, `lazy-take-notes-gui-arm64-linux.tar.gz`, each with `.sha256`.
 
 **Proof:**
 - Intel `.app`, under Rosetta, opened from Finder: the window, a 20 s recording with system audio, Settings, the viewer, the template builder.
 - Linux under Xvfb in the spike image: `xvfb-run` the app, then `import -window root` (ImageMagick, in that image only) captures the sidebar, a saved session, Settings and preflight into `/tmp/shots/`. Attach the four PNGs to the PR. The owner compares them with the macOS screens: same layout, no clipped text.
-- **A real Linux desktop** (Wayland and X11, a real GPU) before the 0.5.0 tag. The owner provides the machine and runs this checklist, and writes the result in the PR:
+- **A real Linux desktop** (Wayland and X11, a real GPU) before the 0.6.0 tag. The owner provides the machine and runs this checklist, and writes the result in the PR:
   1. `setup.sh` installs the window app, and it opens from the app menu.
   2. A 20 s recording with system audio writes a transcript.
   3. Settings saves to a temp config passed with `--config`.
@@ -425,7 +478,7 @@ Branch: `linux-terminal`. The file is `../setup.sh`. Today its "Step 1: uv" (`se
    - Anything else stops with the list of supported systems.
 2. Read the newest release tag with `curl -fsSL https://api.github.com/repos/CJHwong/lazy-take-notes/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p'`. `LTN_VERSION=v0.4.0` overrides it. If the call fails or prints nothing (rate limit, no network), stop with "Cannot read the newest release. Set LTN_VERSION=vX.Y.Z and run again."
 3. Download the tarball and its `.sha256` with `curl -fL` from `${LTN_RELEASE_URL:-https://github.com/CJHwong/lazy-take-notes/releases/download}/<tag>/`. The variable lets setup-smoke serve dry-run artifacts from a local folder. Compare with `shasum -a 256` (macOS) or `sha256sum` (Linux), and stop on a mismatch.
-4. Extract into `~/.local/share/lazy-take-notes/<tag>/`, and link `~/.local/bin/lazy-take-notes` and `~/.local/bin/take-note` to the binary in it. When the release has a GUI tarball for the machine (Linux, 0.5.0 on; `curl -fsIL` of its `.sha256` URL succeeds), also download and check it, link `~/.local/bin/lazy-take-notes-gui`, copy the `.desktop` file to `~/.local/share/applications/`, and copy the icon to `~/.local/share/icons/hicolor/512x512/apps/lazy-take-notes.png`.
+4. Extract into `~/.local/share/lazy-take-notes/<tag>/`, and link `~/.local/bin/lazy-take-notes` and `~/.local/bin/take-note` to the binary in it. When the release has a GUI tarball for the machine (Linux, 0.6.0 on; `curl -fsIL` of its `.sha256` URL succeeds), also download and check it, link `~/.local/bin/lazy-take-notes-gui`, copy the `.desktop` file to `~/.local/share/applications/`, and copy the icon to `~/.local/share/icons/hicolor/512x512/apps/lazy-take-notes.png`.
 5. "Already installed" means `~/.local/share/lazy-take-notes/<tag>/` exists and both links point into it. Then print "lazy-take-notes <tag> is already installed" and change nothing.
 6. If `~/.local/bin` is not on `PATH`, print the line to add for the user's shell. Do not edit shell files. Lines that the old `setup.sh` added to `.zshrc` or `.bashrc` (`setup.sh:220-238`) stay and do no harm.
 7. On macOS with Homebrew, print `brew install --cask CJHwong/tap/lazy-take-notes` as the recommended way, and ask "Install the terminal app from the tarball instead? (y/N)", reading from `/dev/tty` as `setup.sh:145` does. With no tty, or no answer, use the tarball.
@@ -441,9 +494,9 @@ Branch: `linux-terminal`. The file is `../setup.sh`. Today its "Step 1: uv" (`se
 
 On macOS, run `setup.sh` with `HOME` set to a temp folder and answer `y` to the tarball question: the same checks, without the recording.
 
-#### Phase 5: remove the Python app, release 0.6.0
+#### Phase 5: remove the Python app, release 0.7.0
 
-Start only after 0.5.0 has run on the real Linux desktop, and after `main` pins a release with all four terminal assets (release procedure, step 9). Old wrappers fetch `main` on every start, so the merge of this PR changes every old install at once.
+Start only after 0.6.0 has run on the real Linux desktop, and after `main` pins a release with all five terminal assets (release procedure, step 9). Old wrappers fetch `main` on every start, so the merge of this PR changes every old install at once.
 
 Branch: `remove-python-app`.
 
@@ -472,7 +525,7 @@ Steps:
      - `l4_frameworks_and_drivers/plugin_api.py`, which re-exports everything from `_api_types`;
      - `l4_frameworks_and_drivers/config.py`, which re-exports only `InfraConfig`, `OllamaProviderConfig` and `OpenAIProviderConfig` (the host imports it at `plugin_host.py:342-343`).
    - `plugin_host.py:27-28`: import `ChatMessage` and `SessionArtifacts` from `lazy_take_notes._api_types`.
-   - `launcher.py`: add `def give_up(reason: str) -> NoReturn`, which prints `lazy-take-notes: no build for this machine (<reason>). Install with: curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash` to stderr and exits 1. Replace the `LTN_PYTHON` check (`:126-127`) with `give_up("the Python app was removed in 0.6.0")`. Delete `run_python()` (`:143-148`). In `main()` (`:151-161`), replace both `run_python()` calls with `give_up(<the reason already printed there>)`. Keep `main` as the entry point (`pyproject.toml:48-49`). Update the docstring at `:3-7`.
+   - `launcher.py`: add `def give_up(reason: str) -> NoReturn`, which prints `lazy-take-notes: no build for this machine (<reason>). Install with: curl -fsSL https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.sh | bash` to stderr and exits 1. Replace the `LTN_PYTHON` check (`:126-127`) with `give_up("the Python app was removed in 0.7.0")`. Delete `run_python()` (`:143-148`). In `main()` (`:151-161`), replace both `run_python()` calls with `give_up(<the reason already printed there>)`. Keep `main` as the entry point (`pyproject.toml:48-49`). Update the docstring at `:3-7`.
    - `rust_release.py:3`: "TAG None means no release is pinned: the launcher exits with the setup.sh line."
 2. **Move the templates into the Rust tree.** `src/adapters/templates.rs:20` embeds `../../../src/lazy_take_notes/templates/<name>.yaml`. Move `../src/lazy_take_notes/templates/` to `templates/` (in `rust/`), change the path in the `include_str!` to `../../templates/`, and run `cargo test --locked` before deleting anything else. Then run `grep -rn "lazy_take_notes/templates" ../docs ../README.md ../AGENTS.md` and fix each hit.
 3. **Move `coreaudio-tap` into the Rust tree.**
@@ -501,12 +554,12 @@ Steps:
    - Drop the portaudio, PulseAudio and null sink steps from the `quality` and `test` jobs (`ci.yml:21-30,46-55`). The Python jobs no longer touch audio.
 8. **Docs.**
    - README: install is Homebrew on Mac or `setup.sh` everywhere, the Rust and Python split note goes, and the window app needs macOS Sequoia (Phase 3).
-   - `../docs/ref_plugin_api.md`: drop the "Native build" column and the Python-only rows, and state which parts stopped at 0.6.0 (open decision 1).
+   - `../docs/ref_plugin_api.md`: drop the "Native build" column and the Python-only rows, and state which parts stopped at 0.7.0 (open decision 1).
    - `../docs/howto_plugins.md:100-103`: delete the Python-version text and the `uvx --with` example. State that plugins need uv and run in the plugin host.
    - `../docs/howto_develop_and_release.md`: point the release steps at this plan's release procedure, and drop `scripts/release.sh`, the Python app's commands, and the single-SHA cask.
    - AGENTS.md: delete the Python architecture, data flow, audio capture, testing and "Operational Commands" sections (`lint-imports`, `ty check src tests`). The "Rust Layers" table becomes the layout section. Keep the plugin contract. The root `CLAUDE.md` is `@AGENTS.md` and needs no change.
    - This file, "The switch": replace "else the Python app" and the bullet about failures with "Any failure prints one line naming setup.sh and exits 1."
-9. **Release** 0.6.0 with the release procedure. Its pin (step 9) points every old wrapper at 0.6.0.
+9. **Release** 0.7.0 with the release procedure. Its pin (step 9) points every old wrapper at 0.7.0.
 
 **Proof:**
 - `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@remove-python-app take-note --version` prints the Rust version on macOS arm64, on macOS x86_64 under Rosetta, and on Linux in Docker.
@@ -521,15 +574,17 @@ Steps:
 | 0.3.3, 0.3.4 | Phase 0 | done |
 | (pin only) | Phase 0b: pin v0.3.5 | the uvx run on the Mac |
 | 0.4.0 | Phases 1, 2, 4: Linux and Intel terminal app, new `setup.sh`, pin for macOS arm64, macOS x86_64 and Linux | the Linux Docker smoke on both arches, the Rosetta runs, the `macos-intel` job, setup-smoke |
-| 0.5.0 | Phase 3: window app on Intel and Linux, two-arch cask | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
-| 0.6.0 | Phase 5: Python app removed | the uvx wrapper runs, the plugin host run, the owner's plugin run |
+| 0.5.0 | Phase 2w: Windows terminal app, zip and `setup.ps1` | the `windows-2022` job, the owner's Windows checklist |
+| 0.6.0 | Phase 3: window app on Intel and Linux, two-arch cask | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
+| 0.7.0 | Phase 5: Python app removed | the uvx wrapper runs, the plugin host run, the owner's plugin run |
 
 #### What the owner provides
 
 1. A decision on the two open items at the top (or the defaults stand).
-2. A real Linux desktop (a machine or a VM with a GPU) and the Phase 3 checklist run.
-3. The `ltn-claude-code` plugin run in Phase 5. The copy under `../plugins/` holds only `.pyc` files.
-4. The review of the Xvfb screenshots in Phase 3.
+2. A Windows machine (or VM) with a microphone and system audio, and the Phase 2w checklist run.
+3. A real Linux desktop (a machine or a VM with a GPU) and the Phase 3 checklist run.
+4. The `ltn-claude-code` plugin run in Phase 5. The copy under `../plugins/` holds only `.pyc` files.
+5. The review of the Xvfb screenshots in Phase 3.
 
 ## GUI mode (decided 2026-11-25)
 
