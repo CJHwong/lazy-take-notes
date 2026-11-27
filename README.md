@@ -30,7 +30,15 @@ brew install --cask CJHwong/tap/lazy-take-notes
 
 The app has no Apple Developer ID signature. The cask removes the download mark that Homebrew adds, so macOS opens the app without a warning. Install it only if you trust this tap. Each release is signed with the same certificate, so the microphone and system audio permissions carry over to the next version.
 
-On a Mac with Apple silicon, the app is a native build. Other systems run the Python version. See [Rust and Python versions](docs/explain_rust_and_python.md).
+On Windows, run this in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/CJHwong/lazy-take-notes/main/setup.ps1 | iex
+```
+
+Or download `lazy-take-notes-x86_64-windows.zip` from the [newest release](https://github.com/CJHwong/lazy-take-notes/releases/latest), unzip it, and run `lazy-take-notes.exe`. File transcription needs ffmpeg: `winget install Gyan.FFmpeg`. The window app and plugins are not available on Windows yet.
+
+The terminal app is a native build on macOS, Linux and Windows x86_64. The window app is macOS only for now. Plugins need the Python host, which is not on Windows yet. See [Rust and Python versions](docs/explain_rust_and_python.md).
 
 ## First run
 

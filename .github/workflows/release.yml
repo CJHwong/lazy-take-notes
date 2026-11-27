@@ -131,9 +131,31 @@ jobs:
             rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz
             rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz.sha256
 
+  windows:
+    name: Build (Windows x86_64)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        working-directory: rust
+        run: rustup toolchain install
+      - name: Build the package
+        run: pwsh rust/scripts/package.ps1
+      - name: Check that the package starts
+        run: |
+          Expand-Archive "rust/dist/lazy-take-notes-x86_64-windows.zip" -DestinationPath "$env:RUNNER_TEMP/win"
+          & "$env:RUNNER_TEMP/win/lazy-take-notes-x86_64-windows/lazy-take-notes.exe" --version
+          & "$env:RUNNER_TEMP/win/lazy-take-notes-x86_64-windows/lazy-take-notes.exe" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lazy-take-notes-x86_64-windows
+          path: |
+            rust/dist/lazy-take-notes-x86_64-windows.zip
+            rust/dist/lazy-take-notes-x86_64-windows.zip.sha256
+
   publish:
     name: Publish the release
-    needs: [macos-arm64, linux]
+    needs: [macos-arm64, linux, windows]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     env:
@@ -149,11 +171,12 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
             --title "lazy-take-notes $GITHUB_REF_NAME" \
-            --notes "The Rust build for macOS on Apple silicon and Linux (x86_64 and arm64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, or setup.sh everywhere." \
+            --notes "The Rust build for macOS on Apple silicon and Linux (x86_64 and arm64) and Windows (x86_64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, setup.sh on Linux, or unzip and run lazy-take-notes.exe on Windows. Windows needs ffmpeg for file transcription: winget install Gyan.FFmpeg." \
             dist/lazy-take-notes-arm64-macos.tar.gz dist/lazy-take-notes-arm64-macos.tar.gz.sha256 \
             dist/Lazy-Take-Notes-arm64-macos.zip dist/Lazy-Take-Notes-arm64-macos.zip.sha256 \
             dist/lazy-take-notes-x86_64-linux.tar.gz dist/lazy-take-notes-x86_64-linux.tar.gz.sha256 \
-            dist/lazy-take-notes-arm64-linux.tar.gz dist/lazy-take-notes-arm64-linux.tar.gz.sha256
+            dist/lazy-take-notes-arm64-linux.tar.gz dist/lazy-take-notes-arm64-linux.tar.gz.sha256 \
+            dist/lazy-take-notes-x86_64-windows.zip dist/lazy-take-notes-x86_64-windows.zip.sha256
 
   homebrew:
     name: Update the Homebrew cask

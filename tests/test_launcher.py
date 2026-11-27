@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import sys
 import tarfile
+import types
 import urllib.error
+import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -199,3 +203,64 @@ def test_run_python_is_the_click_cli(monkeypatch):
 
 def test_the_cache_is_the_apps_cache_folder():
     assert launcher.cache_root().parts[-2:] == ('lazy-take-notes', 'bin')
+
+
+def zip_asset(entries: dict[str, bytes], folder: str = 'lazy-take-notes-x86_64-windows') -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, 'w') as zipped:
+        for name, data in entries.items():
+            zipped.writestr(f'{folder}/{name}', data)
+    return buffer.getvalue()
+
+
+def test_a_zip_asset_is_unpacked(pinned, tmp_path, monkeypatch):
+    body = zip_asset({'lazy-take-notes.exe': b'MZ'})
+    pinned(body=body)
+    monkeypatch.setattr(launcher, 'BINARY', 'lazy-take-notes.exe')
+    executable = launcher.install(
+        'v9',
+        'lazy-take-notes-x86_64-windows.zip',
+        hashlib.sha256(body).hexdigest(),
+        tmp_path / 'bin',
+    )
+    assert executable == tmp_path / 'bin' / 'v9' / 'lazy-take-notes.exe'
+    assert executable.read_bytes() == b'MZ'
+
+
+def test_a_zip_path_that_escapes_is_refused(tmp_path):
+    archive = tmp_path / 'a.zip'
+    with zipfile.ZipFile(archive, 'w') as zipped:
+        zipped.writestr('../../evil', b'x')
+    with pytest.raises(launcher.SetupError, match='unsafe path'):
+        launcher.extract(archive, tmp_path / 'out')
+
+
+def test_main_runs_the_windows_build_with_subprocess(pinned, tmp_path, monkeypatch):
+    pinned()
+    executable = tmp_path / 'bin' / 'v9' / 'lazy-take-notes.exe'
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b'MZ')
+    monkeypatch.setattr(launcher, 'BINARY', 'lazy-take-notes.exe')
+    monkeypatch.setattr(launcher, 'WINDOWS', True)
+    monkeypatch.setattr(launcher.sys, 'argv', ['lazy-take-notes', 'status'])
+    calls = []
+
+    class Completed:
+        returncode = 7
+
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda args, check: calls.append(args) or Completed())
+    with pytest.raises(SystemExit) as stopped:
+        launcher.main()
+    assert calls == [[str(executable), 'status']]
+    assert stopped.value.code == 7
+
+
+def test_the_windows_lock_waits_then_installs(pinned, tmp_path, monkeypatch):
+    served = pinned()
+    monkeypatch.setattr(launcher, 'WINDOWS', True)
+    fake: Any = types.ModuleType('msvcrt')
+    fake.LK_NBLCK = 1
+    fake.locking = lambda handle, mode, size: None
+    monkeypatch.setitem(sys.modules, 'msvcrt', fake)
+    executable = launcher.locked_install('v9', ASSET, hashlib.sha256(served.body).hexdigest(), tmp_path / 'bin')
+    assert executable.read_bytes() == b'#!/bin/sh\n'

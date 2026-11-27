@@ -2,6 +2,8 @@
 
 A plugin is a Python package. It imports only from `lazy_take_notes.plugin_api`. The native build runs plugins in a separate Python process, the plugin host, so the same plugin works in both versions. Some parts of the API work only in the Python version; the tables say which.
 
+The plugin host runs on macOS and Linux. The Windows terminal app does not load plugins yet.
+
 ## Entry points
 
 | Group | Value | Adds | Native build |

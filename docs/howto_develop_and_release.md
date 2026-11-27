@@ -22,7 +22,8 @@ cd rust
 cargo test                                  # the transcribe tests need ffmpeg
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
-scripts/package.sh                          # build dist/lazy-take-notes-<arch>-macos.tar.gz
+scripts/package.sh                          # macOS and Linux: dist/lazy-take-notes-<arch>-<os>.tar.gz
+powershell scripts/package.ps1              # Windows: dist/lazy-take-notes-x86_64-windows.zip
 ```
 
 [rust/PLAN.md](../rust/PLAN.md) lists each way the native app differs from the Python app. Add a line there for every new difference.
@@ -38,14 +39,14 @@ scripts/package.sh                          # build dist/lazy-take-notes-<arch>-
    git push origin v0.3.0
    ```
 
-   The workflow publishes a GitHub Release with the terminal package, `Lazy-Take-Notes-arm64-macos.zip` (the window app), and their SHA-256 files. It then writes `Casks/lazy-take-notes.rb` to `CJHwong/homebrew-tap` with the `HOMEBREW_TAP_KEY` deploy key. A tag with a `-`, such as `v0.3.0-rc.1`, is a prerelease and leaves the cask alone.
+   The workflow publishes a GitHub Release with the terminal packages for macOS, Linux and Windows, `Lazy-Take-Notes-arm64-macos.zip` (the window app), and their SHA-256 files. The Windows package is built on `windows-2022` by `rust/scripts/package.ps1`; the dry run keeps its zip as an artifact too. The workflow then writes `Casks/lazy-take-notes.rb` to `CJHwong/homebrew-tap` with the `HOMEBREW_TAP_KEY` deploy key. A tag with a `-`, such as `v0.3.0-rc.1`, is a prerelease and leaves the cask alone.
 4. Pin the release on a branch and test it:
 
    ```bash
    uv run scripts/pin_rust_release.py v0.3.0
    ```
 
-   Commit `src/lazy_take_notes/rust_release.py`, push the branch, and run `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@<branch> take-note --version`.
+   Commit `src/lazy_take_notes/rust_release.py`, push the branch, and run `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@<branch> take-note --version`. On Windows, run the same command with the pinned launcher and check that `--version` prints the version.
 5. Merge the branch. Users of the Python launcher get the release when the pin reaches `main`.
 
 The release job signs the `.app` with a self-signed certificate from the `MACOS_SIGN_P12` and `MACOS_SIGN_P12_PASSWORD` secrets, and a tag fails without them. macOS keeps an app's privacy permissions (microphone, system audio, Documents) for its bundle id and certificate. Keep the same certificate: a new one makes every user grant the permissions again. A local build of `rust/scripts/package_app.sh` is signed ad hoc, unless `LTN_SIGN_IDENTITY` (and `LTN_SIGN_KEYCHAIN`) name an identity.
