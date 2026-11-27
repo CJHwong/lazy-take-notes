@@ -316,7 +316,12 @@ fn free_bytes(path: &Path) -> std::io::Result<u64> {
     if unsafe { libc::statvfs(name.as_ptr(), &mut stats) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
-    Ok(u64::from(stats.f_bavail) * stats.f_frsize)
+    // macOS counts blocks in a c_uint; Linux already has a u64.
+    #[cfg(target_os = "macos")]
+    let available = u64::from(stats.f_bavail);
+    #[cfg(target_os = "linux")]
+    let available = stats.f_bavail;
+    Ok(available * stats.f_frsize)
 }
 
 fn probe_output(base: &Path) -> std::io::Result<u64> {

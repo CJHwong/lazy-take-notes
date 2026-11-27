@@ -8,6 +8,7 @@ use super::*;
 use crate::adapters::assets::store::LegacyDirs;
 use crate::domain::chat::ChatMessage;
 use crate::domain::transcript::TranscriptSegment;
+#[cfg(target_os = "macos")]
 use crate::ports::audio_source::AudioError;
 use crate::ports::llm::{ChatResponse, LlmError};
 use crate::ports::transcriber::TranscribeError;
