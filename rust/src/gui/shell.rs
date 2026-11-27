@@ -10,7 +10,7 @@ use std::time::Duration;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Icon, IconName, Sizable as _};
+use gpui_kit::component::{ActiveTheme, Disableable as _, Icon, IconName, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use tracing::{error, info};
@@ -98,6 +98,8 @@ pub struct Shell {
     listed: bool,
     /// Counts the reads of the session folder, so only the newest one lands.
     list_generation: u64,
+    /// A session runs: New Session and model removal are locked.
+    busy: bool,
     /// The live session's folder, as last seen: a rename moves it.
     live_dir: Option<PathBuf>,
     /// The config the current flow loaded.
@@ -135,6 +137,7 @@ impl Shell {
             list_error: None,
             listed: false,
             list_generation: 0,
+            busy: false,
             live_dir: None,
             loaded: None,
             template: None,
@@ -248,6 +251,7 @@ impl Shell {
         self.live_dir = None;
         self._live_observer = None;
         self.awake = None;
+        self.sync_busy(cx);
         if std::mem::take(&mut self.logging) {
             close_file_logging();
         }
@@ -274,6 +278,9 @@ impl Shell {
     /// New Session: the template picker, whose title bar starts a recording
     /// or a transcription. With a flow running, the pane shows it instead.
     fn start(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
         if self.live.is_some() {
             return self.show_detail(Detail::Live, None, cx);
         }
@@ -528,6 +535,7 @@ impl Shell {
         self.live_dir = Some(session.read(cx).output_dir().to_path_buf());
         self.refresh_sessions(cx);
         self._live_observer = Some(cx.observe(&session, |shell, session, cx| {
+            shell.sync_busy(cx);
             let dir = session.read(cx).output_dir().to_path_buf();
             if shell.live_dir.as_ref() != Some(&dir) {
                 shell.live_dir = Some(dir);
@@ -537,6 +545,25 @@ impl Shell {
         }));
         let subscription = cx.subscribe_in(&session, window, Self::on_session);
         self.set_stage(Stage::Session(session), subscription, cx);
+        self.sync_busy(cx);
+    }
+
+    /// Whether a session runs, pushed to the controls that depend on it.
+    /// The terminal app cannot reach Settings during a session; the window
+    /// can, so the models a session uses must not be removed under it.
+    fn sync_busy(&mut self, cx: &mut Context<Self>) {
+        let busy = match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::Session(session)) => session.read(cx).is_running(),
+            _ => false,
+        };
+        if busy == self.busy {
+            return;
+        }
+        self.busy = busy;
+        if let Detail::Settings(settings) = &self.detail {
+            settings.update(cx, |settings, cx| settings.lock_removal(busy, cx));
+        }
+        cx.notify();
     }
 
     fn on_session(
@@ -637,6 +664,8 @@ impl Shell {
             return self.failed("open_config", "no home folder", window, cx);
         };
         let settings = cx.new(|cx| SettingsView::new(paths, None, window, cx));
+        let busy = self.busy;
+        settings.update(cx, |settings, cx| settings.lock_removal(busy, cx));
         let subscription = cx.subscribe_in(&settings, window, |shell, _, event, _, cx| {
             // A save can move the output folder, so the session list reads it again.
             shell.refresh_sessions(cx);
@@ -929,6 +958,7 @@ impl Shell {
                 .w_full()
                 .icon(IconName::Plus)
                 .label("New Session")
+                .disabled(self.busy)
                 .on_click(cx.listener(move |shell, _, window, cx| {
                     shell.leave_page_then(start.clone(), window, cx)
                 })),
@@ -953,6 +983,7 @@ impl Shell {
                         .with_size(control::HERO)
                         .icon(IconName::Plus)
                         .label("New Session")
+                        .disabled(self.busy)
                         .on_click(cx.listener(|shell, _, window, cx| shell.start(window, cx))),
                 ),
             )

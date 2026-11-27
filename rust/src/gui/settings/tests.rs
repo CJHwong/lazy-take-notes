@@ -168,3 +168,22 @@ fn a_short_model_name_marks_its_row_and_saves_unchanged(cx: &mut TestAppContext)
     let saved = std::fs::read_to_string(&config).unwrap();
     assert!(saved.contains("model: large-v3-turbo-q8_0"), "{saved}");
 }
+
+#[gpui_kit::test]
+fn a_running_session_locks_model_removal(cx: &mut TestAppContext) {
+    let root = tempfile::tempdir().unwrap();
+    let form = open(root.path(), cx);
+    form.run(cx, |view, window, cx| {
+        let id = view.assets[0].id;
+        view.lock_removal(true, cx);
+        view.ask_remove(id, window, cx);
+        assert_eq!(view.runtime.removing(), None, "locked: no question");
+        view.lock_removal(false, cx);
+        view.ask_remove(id, window, cx);
+        assert_eq!(
+            view.runtime.removing(),
+            Some(id),
+            "unlocked: the question opens"
+        );
+    });
+}

@@ -7,6 +7,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use crate::gui::keyscroll::{Jump, Pane, jump_area, jump_list};
 use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{InputEvent, InputState, Textarea, TextareaState};
@@ -38,8 +39,9 @@ use crate::gui::widgets::{
 };
 use crate::gui::{
     CopyDigest, CopyTranscript, DigestNow, FinishSession, QuickAction1, QuickAction2, QuickAction3,
-    QuickAction4, QuickAction5, RenameSession, SESSION_CONTEXT, ShowHelp, ShowInFinder,
-    StopSession, ToggleMute, TogglePause, quick_action,
+    QuickAction4, QuickAction5, RenameSession, SESSION_CONTEXT, ScrollBottom, ScrollPageDown,
+    ScrollPageUp, ScrollTop, ShowHelp, ShowInFinder, StopSession, ToggleMute, TogglePause,
+    quick_action,
 };
 
 const COPY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -61,6 +63,7 @@ pub const SHORTCUTS: &str = "\
 | `⌥⌘C` | Copy the notes |
 | `⌘L` | Rename the session |
 | `⇧⌘R` | Show the session folder in Finder |
+| `Page Up` `Page Down` `Home` `End` | Scroll the transcript or the notes, whichever the pointer is over |
 | `Tab` | Move between the transcript, the speakers and Background for AI |
 | `←` `→` `Return` | On the speakers: choose one, name it |
 | `⌘N` | New session: choose a note type, then record or import audio |
@@ -129,6 +132,10 @@ pub struct SessionView {
     focus_handle: FocusHandle,
     lines: Vec<Line>,
     transcript: ListState,
+    /// The notes column, for the scroll keys.
+    notes_scroll: ScrollHandle,
+    /// The pane the pointer last moved over: the scroll keys move it.
+    pointer_pane: Pane,
     digest: Entity<TextViewState>,
     context: Entity<TextareaState>,
     /// The session label, edited in place in the title bar row.
@@ -215,7 +222,9 @@ impl SessionView {
             cx.subscribe_in(&context, window, Self::on_context),
             cx.subscribe_in(&title, window, Self::on_title),
         ];
-        let transcript = ListState::new(0, ListAlignment::Top, size::LIST_OVERDRAW);
+        // Measure every line, not only the visible ones, so the scrollbar
+        // keeps one size while the list scrolls.
+        let transcript = ListState::new(0, ListAlignment::Top, size::LIST_OVERDRAW).measure_all();
         transcript.set_follow_mode(FollowMode::Tail);
         let mut status = StatusLine::default();
         status.silence_threshold = silence_threshold;
@@ -239,6 +248,8 @@ impl SessionView {
             drag: DragArm::default(),
             selected_speaker: None,
             hovered_speaker: None,
+            notes_scroll: ScrollHandle::new(),
+            pointer_pane: Pane::default(),
             closing: false,
             shown_lines: 0,
             shown_relabel: 0,
@@ -730,6 +741,11 @@ impl SessionView {
         &self.mode.session().output_dir
     }
 
+    /// A recording or an import runs and has not stopped.
+    pub fn is_running(&self) -> bool {
+        !self.status.stopped
+    }
+
     /// A recording runs and has not stopped.
     pub fn is_recording(&self) -> bool {
         self.is_record() && !self.status.stopped
@@ -798,6 +814,15 @@ impl SessionView {
         if handled {
             cx.stop_propagation();
         }
+    }
+
+    /// A scroll key: the pane the pointer last moved over.
+    fn jump(&mut self, jump: Jump, cx: &mut Context<Self>) {
+        match self.pointer_pane {
+            Pane::Transcript => jump_list(&self.transcript, jump),
+            Pane::Notes => jump_area(&self.notes_scroll, jump),
+        }
+        cx.notify();
     }
 
     /// Escape: the title drops what was typed; the context keeps it.
@@ -1059,6 +1084,9 @@ impl SessionView {
                     .flex_1()
                     .min_h_0()
                     .text_size(text::READING)
+                    .on_mouse_move(cx.listener(|view, _: &MouseMoveEvent, _, _| {
+                        view.pointer_pane = Pane::Transcript;
+                    }))
                     .on_click(cx.listener(|view, _, window, cx| {
                         view.selected_speaker = None;
                         view.set_focus(Focus::Transcript, window, cx);
@@ -1071,7 +1099,7 @@ impl SessionView {
     }
 
     /// The speakers, as chips at the strip's start.
-    fn render_speakers(&self, cx: &mut Context<Self>) -> Div {
+    fn render_speakers(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let chips = self.speakers();
         let focused = self.focus == Focus::Speakers;
         let items = chips.into_iter().map(|(speaker, name, seconds)| {
@@ -1098,14 +1126,16 @@ impl SessionView {
                     cx.listener(move |view, _, window, cx| view.click_speaker(speaker, window, cx)),
                 )
         });
+        // A long list of speakers scrolls sideways, like the panes above it.
         div()
             .flex()
             .flex_1()
             .min_w_0()
             .items_center()
             .gap(space::XS)
-            .overflow_hidden()
             .children(items)
+            .overflow_x_scrollbar()
+            .id("speakers")
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
@@ -1114,6 +1144,9 @@ impl SessionView {
             .flex_col()
             .flex_1()
             .min_w_0()
+            .on_mouse_move(cx.listener(|view, _: &MouseMoveEvent, _, _| {
+                view.pointer_pane = Pane::Notes;
+            }))
             .child(
                 column_header("Notes", cx).child(
                     div()
@@ -1130,20 +1163,22 @@ impl SessionView {
                         .child(self.copy_button("copy-digest", Copied::Digest, cx)),
                 ),
             )
-            .child(
+            .child(scroll_area(
                 div()
+                    .id("digest")
                     .flex_1()
                     .min_h_0()
                     .px(space::LG)
                     .pb(space::SM)
                     .text_size(text::READING)
-                    .overflow_y_scrollbar()
-                    .id("digest")
+                    .overflow_y_scroll()
+                    .track_scroll(&self.notes_scroll)
                     .map(|column| match self.has_digest() {
                         true => column.child(markdown(&self.digest)),
                         false => column.child(self.digest_empty(cx)),
                     }),
-            )
+                &self.notes_scroll,
+            ))
             .child(self.render_context(cx))
     }
 
@@ -1454,6 +1489,10 @@ impl Render for SessionView {
             .on_action(cx.listener(|view, _: &RenameSession, window, cx| view.rename(window, cx)))
             .on_action(cx.listener(|view, _: &ShowInFinder, _, cx| view.show_in_finder(cx)))
             .on_action(cx.listener(|view, _: &ShowHelp, window, cx| view.show_help(window, cx)))
+            .on_action(cx.listener(|view, _: &ScrollPageUp, _, cx| view.jump(Jump::PageUp, cx)))
+            .on_action(cx.listener(|view, _: &ScrollPageDown, _, cx| view.jump(Jump::PageDown, cx)))
+            .on_action(cx.listener(|view, _: &ScrollTop, _, cx| view.jump(Jump::Top, cx)))
+            .on_action(cx.listener(|view, _: &ScrollBottom, _, cx| view.jump(Jump::Bottom, cx)))
             .size_full()
             .flex()
             .flex_col()
