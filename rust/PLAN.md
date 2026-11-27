@@ -581,7 +581,7 @@ Steps:
 #### What the owner provides
 
 1. A decision on the two open items at the top (or the defaults stand).
-2. A Windows machine (or VM) with a microphone and system audio, and the Phase 2w checklist run.
+2. A Windows machine with a microphone and system audio, and the Phase 2w checklist run.
 3. A real Linux desktop (a machine or a VM with a GPU) and the Phase 3 checklist run.
 4. The `ltn-claude-code` plugin run in Phase 5. The copy under `../plugins/` holds only `.pyc` files.
 5. The review of the Xvfb screenshots in Phase 3.
