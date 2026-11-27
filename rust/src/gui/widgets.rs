@@ -19,35 +19,95 @@ use crate::gui::theme::hsla;
 
 /// A press on the strip that may turn into a window move. The owner keeps it
 /// across renders, so a re-render during the press does not lose it.
-pub type DragArm = Rc<Cell<bool>>;
+pub type DragArm = Rc<Cell<Option<Grab>>>;
+
+/// Where a press on the strip started. On macOS the strip moves the window
+/// itself (`window_move`); elsewhere gpui's `start_window_move` does.
+#[cfg(target_os = "macos")]
+pub use crate::gui::window_move::Grab;
+
+/// Where a press on the strip started. gpui moves the window here.
+#[cfg(not(target_os = "macos"))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grab;
+
+#[cfg(target_os = "macos")]
+fn grab() -> Option<Grab> {
+    crate::gui::window_move::grab()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn grab() -> Option<Grab> {
+    Some(Grab)
+}
+
+/// The pointer moved with the button down: move the window with it.
+#[cfg(target_os = "macos")]
+fn follow(grab: Grab, _: &mut Window, _: &DragArm) {
+    crate::gui::window_move::follow(grab);
+}
+
+/// The pointer moved with the button down: hand the move to the system,
+/// which tracks it to the end.
+#[cfg(not(target_os = "macos"))]
+fn follow(_: Grab, window: &mut Window, arm: &DragArm) {
+    arm.set(None);
+    window.start_window_move();
+}
 
 /// The top row of a pane, in the title bar: a drag moves the window, and a
 /// double click does what the system setting says (zoom or minimize). A
 /// button on the strip takes its own press.
 pub fn title_strip(id: impl Into<ElementId>, arm: &DragArm) -> Stateful<Div> {
-    let (down, up, motion) = (arm.clone(), arm.clone(), arm.clone());
+    let down = arm.clone();
+    let tracked = arm.clone();
     div()
         .id(id)
+        .relative()
         .flex()
         .flex_none()
         .items_center()
         .h(size::TITLE_BAR)
         .on_mouse_down(MouseButton::Left, move |_, window, _| {
-            down.set(!window.default_prevented());
+            down.set(match window.default_prevented() {
+                true => None,
+                false => grab(),
+            });
         })
-        .on_mouse_up(MouseButton::Left, move |_, _, _| up.set(false))
-        .on_mouse_move(move |event: &MouseMoveEvent, window, _| {
-            if event.pressed_button != Some(MouseButton::Left) {
-                motion.set(false);
-            } else if motion.replace(false) {
-                window.start_window_move();
-            }
-        })
+        // The window, not the strip, hears the drag: the pointer may leave
+        // the strip, as when the system holds the window at a screen edge.
+        .child(
+            canvas(
+                |_, _, _| {},
+                move |_, _, window, _| {
+                    let moved = tracked.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
+                        follow_press(&moved, event, phase, window);
+                    });
+                    let released = tracked.clone();
+                    window.on_mouse_event(move |_: &MouseUpEvent, _, _, _| released.set(None));
+                },
+            )
+            .absolute()
+            .size_full(),
+        )
         .on_click(|event, window, _| {
             if event.click_count() == 2 {
                 window.titlebar_double_click();
             }
         })
+}
+
+/// Move the window for one pointer move of a press on the strip.
+fn follow_press(arm: &DragArm, event: &MouseMoveEvent, phase: DispatchPhase, window: &mut Window) {
+    if phase != DispatchPhase::Bubble {
+        return;
+    }
+    match (arm.get(), event.pressed_button) {
+        (Some(grab), Some(MouseButton::Left)) => follow(grab, window, arm),
+        (Some(_), _) => arm.set(None),
+        (None, _) => {}
+    }
 }
 
 /// The pig and teal title, as the terminal's welcome banner writes it.

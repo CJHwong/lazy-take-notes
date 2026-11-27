@@ -177,7 +177,7 @@ Limits of the proofs, stated so nobody reads more into them:
 | Clipboard, open a folder (terminal) | already handles Linux: `wl-copy`, `xclip`, `xdg-open` | `src/tui/system.rs` |
 | Clipboard, show a folder (window) | gpui calls with Linux versions; no change | `cx.write_to_clipboard`, `cx.reveal_path` in `src/gui/session.rs:611`, `src/gui/view.rs:164` |
 | Shortcuts (window) | every binding uses `cmd-`, which gpui maps to Super on Linux; only `secondary-` maps to Ctrl there | `src/gui/mod.rs:133-152`; gpui `keystroke.rs:158-176` |
-| Window chrome | traffic lights, transparent title bar, Dock icon through cocoa and objc | `src/gui/mod.rs:9,131,183-186`, `src/gui/dock_icon.rs`, `src/gui/shell.rs:51-54`, `src/gui/design.rs:54-56` |
+| Window chrome | traffic lights, transparent title bar, Dock icon through cocoa and objc | `src/gui/mod.rs:9,131,183-186`, `src/gui/dock_icon.rs`, `src/gui/window_move.rs` (macOS moves the window by its frame; Linux keeps gpui's `start_window_move` in `widgets.rs`), `src/gui/shell.rs:51-54`, `src/gui/design.rs:54-56` |
 | Accent color | runs the macOS `defaults read -g AppleAccentColor` on each theme build | `src/gui/design.rs:287-295` |
 | Monospace font | `MONO = "Menlo"`, which Linux does not have | `src/gui/design.rs:146` |
 | Privacy hints and buttons | the hints name macOS System Settings and the `coreaudio-tap` helper; `open_privacy` does nothing off macOS, but its buttons still show | `src/app/preflight.rs:41-42,45`; buttons at `src/gui/settings/pages.rs:564,570`, `src/tui/screens/settings/pages.rs:295-296` |
