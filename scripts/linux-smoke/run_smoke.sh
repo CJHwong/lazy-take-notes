@@ -13,6 +13,9 @@ chmod 700 "$XDG_RUNTIME_DIR"
 pulseaudio --start --exit-idle-time=-1
 pactl load-module module-null-sink sink_name=test_loopback
 pactl set-default-sink test_loopback
+# The server's default volume can be low, and the monitor follows the sink.
+pactl set-sink-mute test_loopback 0
+pactl set-sink-volume test_loopback 100%
 
 CONFIG="$HOME/ltn.yaml"
 cat >"$CONFIG" <<'YAML'

@@ -1,7 +1,7 @@
 # Source: https://archive.org/download/eightstrokesoftheclock_1411_librivox/eightstrokesoftheclock_01_leblanc_64kb.mp3
-# LibriVox recording, public domain. Start 10 s, length 10 s, with 2 s of
-# silence added at the front so a slow capture start does not clip the words.
-# Extracted with: ffmpeg -i in.mp3 -ss 10 -t 10 -ar 16000 -ac 1 speech.wav
-or to volunteer please visit librivox.org
-recording by kate barrett
-the eight strokes of the clock by maurice leblanc
+# LibriVox recording, public domain. Start 25 s, length 8 s, with 2 s of
+# silence at the front. Normalized to -14 LUFS: a PulseAudio monitor in a VM
+# attenuates the sink's output, and a quiet clip falls under the speech gate.
+# Extracted with: ffmpeg -i in.mp3 -ss 25 -t 8 -ar 16000 -ac 1 speech.wav
+as though they had happened to a friend of his named prince
+as for me considering the way in which they were conducted the actions
