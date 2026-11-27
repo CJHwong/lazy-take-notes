@@ -18,6 +18,9 @@ from pathlib import Path
 # Release asset -> (platform.system(), platform.machine()) on the machines it runs on.
 PLATFORMS = {
     'lazy-take-notes-arm64-macos.tar.gz': ('Darwin', 'arm64'),
+    'lazy-take-notes-x86_64-macos.tar.gz': ('Darwin', 'x86_64'),
+    'lazy-take-notes-x86_64-linux.tar.gz': ('Linux', 'x86_64'),
+    'lazy-take-notes-arm64-linux.tar.gz': ('Linux', 'aarch64'),
 }
 TARGET = Path(__file__).resolve().parent.parent / 'src' / 'lazy_take_notes' / 'rust_release.py'
 

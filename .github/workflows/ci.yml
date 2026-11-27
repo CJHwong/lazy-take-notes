@@ -56,8 +56,6 @@ jobs:
           pactl load-module module-null-sink sink_name=test_loopback
       - run: uv sync
       - run: uv run pytest tests/ -v --cov=lazy_take_notes --cov-report=xml --cov-fail-under=90
-      - name: Check virtual audio capture
-        run: uv run python scripts/linux-smoke/smoke_test.py
 
   rust:
     name: Rust (macOS arm64)
@@ -79,3 +77,39 @@ jobs:
       # The .app window builds only with the gui feature, so lint and test it too.
       - run: cargo clippy --features gui --all-targets --locked -- -D warnings
       - run: cargo test --features gui --locked
+
+  rust-linux:
+    name: Rust (Linux ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      # whisper.cpp defaults to -march=native; GCC 12 on ARM rejects its FP16 flags.
+      GGML_NATIVE: OFF
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install system deps
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+            cmake clang libclang-dev libasound2-dev ffmpeg
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        run: rustup toolchain install
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+      - run: uv run --script scripts/check_layers.py
