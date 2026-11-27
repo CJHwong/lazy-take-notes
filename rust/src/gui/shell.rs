@@ -25,6 +25,7 @@ use crate::app::keep_awake::{KeepAwake, keep_awake};
 use crate::app::logging::close_file_logging;
 use crate::app::preflight::Reload;
 use crate::app::preflight_runtime::PreflightRuntime;
+use crate::app::session::SHUTDOWN_GRACE;
 use crate::app::session::Severity;
 use crate::app::session_list::{Entry, grouped};
 use crate::app::session_start::{
@@ -115,6 +116,9 @@ pub struct Shell {
     _detail_subscription: Option<Subscription>,
     _live_observer: Option<Subscription>,
     _appearance: Subscription,
+    /// Quit from the Dock menu, a log out or a restart: it skips the window's
+    /// close check, so the live session stops here.
+    _quit: Subscription,
 }
 
 /// The shell of the one window, for the app-level actions.
@@ -149,9 +153,38 @@ impl Shell {
             _detail_subscription: None,
             _live_observer: None,
             _appearance: appearance,
+            _quit: cx.on_app_quit(Self::stop_for_app_quit),
         };
         shell.refresh_sessions(cx);
         shell
+    }
+
+    /// Stop the live session's audio and save its context before the app
+    /// ends. gpui waits at most its `SHUTDOWN_TIMEOUT` for the flush.
+    fn stop_for_app_quit(&mut self, cx: &mut Context<Self>) -> impl Future<Output = ()> + use<> {
+        let flushing = match self.live.as_ref().map(|live| &live.stage) {
+            Some(Stage::Session(view)) => view.update(cx, |view, _| view.stop_for_quit()),
+            _ => false,
+        };
+        let flush = cx.background_executor().timer(SHUTDOWN_GRACE);
+        async move {
+            if flushing {
+                flush.await;
+            }
+        }
+    }
+
+    /// Give the keys back to the live session when it shows and nothing has
+    /// them, as after a visit to Settings or a saved session. Its shortcuts
+    /// and the Session menu work only while it has the focus.
+    fn focus_live_session(&self, window: &mut Window, cx: &mut App) {
+        let shown = matches!(self.detail, Detail::Live);
+        let Some(Stage::Session(view)) = self.live.as_ref().map(|live| &live.stage) else {
+            return;
+        };
+        if shown && window.focused(cx).is_none() {
+            view.read(cx).focus_handle(cx).focus(window, cx);
+        }
     }
 
     /// Read the session folder off the main thread. The first read can wait
@@ -1019,7 +1052,8 @@ impl Shell {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.focus_live_session(window, cx);
         let (title, body) = self.pane(cx);
         let theme = cx.theme();
         let (background, foreground) = (theme.background, theme.foreground);

@@ -18,6 +18,8 @@ mod template_picker;
 mod theme;
 mod view;
 mod widgets;
+#[cfg(target_os = "macos")]
+mod window_move;
 
 use std::sync::OnceLock;
 
@@ -50,9 +52,38 @@ actions!(
         ScrollPageUp,
         ScrollPageDown,
         ScrollTop,
-        ScrollBottom
+        ScrollBottom,
+        HideApp,
+        HideOthers,
+        ShowAll,
+        Minimize,
+        Zoom
     ]
 );
+
+/// Run `act` on the window that has the keys, once the key dispatch ends.
+fn on_active_window(cx: &mut App, act: fn(&Window)) {
+    cx.defer(move |cx| {
+        if let Some(handle) = cx.active_window() {
+            let _ = handle.update(cx, |_, window, _| act(window));
+        }
+    });
+}
+
+/// The standard text commands. A text field handles them; elsewhere the
+/// items are off.
+fn edit_menu() -> Menu {
+    use gpui_kit::component::input;
+    Menu::new("Edit").items([
+        MenuItem::os_action("Undo", input::Undo, OsAction::Undo),
+        MenuItem::os_action("Redo", input::Redo, OsAction::Redo),
+        MenuItem::separator(),
+        MenuItem::os_action("Cut", input::Cut, OsAction::Cut),
+        MenuItem::os_action("Copy", input::Copy, OsAction::Copy),
+        MenuItem::os_action("Paste", input::Paste, OsAction::Paste),
+        MenuItem::os_action("Select All", input::SelectAll, OsAction::SelectAll),
+    ])
+}
 
 /// The key context of the live session pane: its commands work only there.
 pub(crate) const SESSION_CONTEXT: &str = "Session";
@@ -134,6 +165,9 @@ pub fn run() -> i32 {
                 KeyBinding::new("cmd-w", CloseWindow, None),
                 KeyBinding::new("cmd-n", NewSession, None),
                 KeyBinding::new("cmd-,", OpenSettings, None),
+                KeyBinding::new("cmd-h", HideApp, None),
+                KeyBinding::new("alt-cmd-h", HideOthers, None),
+                KeyBinding::new("cmd-m", Minimize, None),
             ]);
             let session = Some(SESSION_CONTEXT);
             cx.bind_keys([
@@ -165,9 +199,22 @@ pub fn run() -> i32 {
             cx.on_action(|_: &OpenSettings, cx: &mut App| cx.defer(shell::open_settings));
             // The live session pane shows its own help; this one serves the rest.
             cx.on_action(|_: &ShowHelp, cx: &mut App| cx.defer(shell::show_help));
+            cx.on_action(|_: &HideApp, cx: &mut App| cx.hide());
+            cx.on_action(|_: &HideOthers, cx: &mut App| cx.hide_other_apps());
+            cx.on_action(|_: &ShowAll, cx: &mut App| cx.unhide_other_apps());
+            cx.on_action(|_: &Minimize, cx: &mut App| {
+                on_active_window(cx, Window::minimize_window)
+            });
+            cx.on_action(|_: &Zoom, cx: &mut App| on_active_window(cx, Window::zoom_window));
             cx.set_menus([
                 Menu::new("Lazy Take Notes").items([
                     MenuItem::action("Settings…", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::os_submenu("Services", SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Hide Lazy Take Notes", HideApp),
+                    MenuItem::action("Hide Others", HideOthers),
+                    MenuItem::action("Show All", ShowAll),
                     MenuItem::separator(),
                     MenuItem::action("Quit Lazy Take Notes", Quit),
                 ]),
@@ -176,7 +223,14 @@ pub fn run() -> i32 {
                     MenuItem::separator(),
                     MenuItem::action("Close Window", CloseWindow),
                 ]),
+                edit_menu(),
                 session_menu(),
+                // AppKit adds full screen, tiling and the window list to the menu
+                // named Window.
+                Menu::new("Window").items([
+                    MenuItem::action("Minimize", Minimize),
+                    MenuItem::action("Zoom", Zoom),
+                ]),
                 Menu::new("Help").items([MenuItem::action("Lazy Take Notes Help", ShowHelp)]),
             ]);
             let options = WindowOptions {

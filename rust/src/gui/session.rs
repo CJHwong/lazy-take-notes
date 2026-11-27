@@ -43,6 +43,9 @@ use crate::gui::{
     quick_action,
 };
 
+/// What the first Quit during a session says while the audio flushes.
+const QUIT_NOTICE: &str = "Saving the recording, then quitting.";
+
 const COPY_TIMEOUT: Duration = Duration::from_secs(2);
 const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
 /// How often the status strip redraws its timer and level meter.
@@ -760,24 +763,38 @@ impl SessionView {
 
     /// The window may close now. Otherwise the recording stops, and the app
     /// ends once the audio is flushed, or after the grace time.
-    pub fn should_close(&mut self, _: &mut Window, cx: &mut Context<Self>) -> bool {
+    pub fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.closing {
             return false;
         }
-        let flushing = match &mut self.mode {
-            Mode::Record(record) => record.stop_for_shutdown(),
-            Mode::File(file) => file.stop_for_shutdown(),
-        };
-        if !flushing {
+        if !self.stop_for_quit() {
             return true;
         }
         self.closing = true;
+        // The audio needs up to SHUTDOWN_GRACE to reach the file. Without a
+        // word, a second Quit looks ignored.
+        notify(
+            window,
+            cx,
+            QUIT_NOTICE.into(),
+            Severity::Information,
+            SHUTDOWN_GRACE,
+        );
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SHUTDOWN_GRACE).await;
             let _ = this.update(cx, |_, cx| cx.emit(SessionEvent::Exit));
         })
         .detach();
         false
+    }
+
+    /// Stop the audio and save the session context for a quit. True while
+    /// the audio still flushes to the file.
+    pub fn stop_for_quit(&mut self) -> bool {
+        match &mut self.mode {
+            Mode::Record(record) => record.stop_for_shutdown(),
+            Mode::File(file) => file.stop_for_shutdown(),
+        }
     }
 
     /// The keys with no Cmd: Space, Tab, and the speaker keys. A text field
