@@ -113,8 +113,14 @@ impl SessionController {
         self.speaker_turns = turns;
     }
 
+    /// Name a speaker. An empty name clears it, so the label is `S<n>` again.
     pub fn set_speaker_name(&mut self, speaker: u32, name: impl Into<String>) {
-        self.speaker_names.insert(speaker, name.into());
+        let name = name.into();
+        if name.is_empty() {
+            self.speaker_names.remove(&speaker);
+        } else {
+            self.speaker_names.insert(speaker, name);
+        }
     }
 
     /// The mapped name, else `S<n>`, else None when no turn covers the line.

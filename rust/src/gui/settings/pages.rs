@@ -37,6 +37,9 @@ fn tint_of(name: Option<&str>, cx: &App) -> Hsla {
     }
 }
 
+/// Why the Remove buttons are off.
+const REMOVAL_LOCKED: &str = "Models can't be removed while a session runs.";
+
 fn note(content: impl Into<SharedString>, cx: &App) -> Div {
     caption(content, cx)
 }
@@ -245,6 +248,9 @@ impl SettingsView {
         for index in 0..self.assets.len() {
             speech.push(self.model_row(index, cx).into_any_element());
         }
+        if self.removal_locked {
+            speech.push(wide_row(note(REMOVAL_LOCKED, cx)).into_any_element());
+        }
         speech.push(
             buttons()
                 .child(Self::button(
@@ -327,7 +333,9 @@ impl SettingsView {
         let actions = row_actions(state.status).into_iter().map(|action| {
             Button::new((action.id(), index))
                 .with_size(control::CONTROL)
-                .when(action == RowAction::Remove, |button| button.ghost())
+                .when(action == RowAction::Remove, |button| {
+                    button.ghost().disabled(self.removal_locked)
+                })
                 .label(action.label())
                 .on_click(cx.listener(move |view, _, window, cx| match action {
                     RowAction::Download => {
@@ -458,7 +466,8 @@ impl SettingsView {
                     Self::button("speaker-remove", "Remove", cx, |view, window, cx| {
                         view.ask_remove(SPEAKER, window, cx)
                     })
-                    .ghost(),
+                    .ghost()
+                    .disabled(self.removal_locked),
                 )
             });
         row(

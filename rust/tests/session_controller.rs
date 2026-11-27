@@ -204,6 +204,19 @@ fn a_label_uses_the_mapped_name() {
     );
 }
 
+#[test]
+fn an_empty_name_clears_the_mapped_name() {
+    let Setup { mut ctrl, .. } = with_turns();
+    ctrl.set_speaker_name(1, "Alice");
+    ctrl.set_speaker_name(1, "");
+    assert!(!ctrl.speaker_names.contains_key(&1));
+    assert_eq!(
+        ctrl.speaker_label(&ctrl.all_segments[0]).as_deref(),
+        Some("S1")
+    );
+    assert!(!ctrl.speakers_json().contains("Alice"));
+}
+
 #[tokio::test]
 async fn the_digest_prompt_carries_speaker_labels() {
     let Setup { mut ctrl, llm, .. } = with_turns();

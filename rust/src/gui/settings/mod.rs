@@ -225,6 +225,8 @@ pub struct SettingsView {
     loaded_choice: Option<&'static str>,
     /// A key is stored, so the clear-key button shows.
     key_stored: bool,
+    /// A session runs, so no model or speaker asset may be removed.
+    removal_locked: bool,
     focus: FocusHandle,
     drag: DragArm,
     _pump: Task<()>,
@@ -294,6 +296,7 @@ impl SettingsView {
             chosen: None,
             loaded_choice: None,
             key_stored: false,
+            removal_locked: false,
             focus: cx.focus_handle(),
             drag: DragArm::default(),
             _pump: pump,
@@ -546,7 +549,16 @@ impl SettingsView {
         });
     }
 
+    /// Lock or unlock the Remove buttons while a session runs.
+    pub fn lock_removal(&mut self, locked: bool, cx: &mut Context<Self>) {
+        self.removal_locked = locked;
+        cx.notify();
+    }
+
     fn ask_remove(&mut self, asset_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.removal_locked {
+            return;
+        }
         let asked = self.call(window, cx, |runtime, _, io| {
             runtime.ask_remove(asset_id, io)
         });

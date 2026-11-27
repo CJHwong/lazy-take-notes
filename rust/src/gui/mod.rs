@@ -9,6 +9,7 @@ mod dialogs;
 mod dock_icon;
 mod env;
 pub(crate) mod icons;
+mod keyscroll;
 mod preflight;
 mod session;
 mod settings;
@@ -45,7 +46,11 @@ actions!(
         CopyTranscript,
         CopyDigest,
         RenameSession,
-        ShowInFinder
+        ShowInFinder,
+        ScrollPageUp,
+        ScrollPageDown,
+        ScrollTop,
+        ScrollBottom
     ]
 );
 
@@ -145,6 +150,12 @@ pub fn run() -> i32 {
                 KeyBinding::new("alt-cmd-c", CopyDigest, session),
                 KeyBinding::new("cmd-l", RenameSession, session),
                 KeyBinding::new("shift-cmd-r", ShowInFinder, session),
+                // A text field binds these keys too, and its binding wins
+                // while it has the focus.
+                KeyBinding::new("pageup", ScrollPageUp, session),
+                KeyBinding::new("pagedown", ScrollPageDown, session),
+                KeyBinding::new("home", ScrollTop, session),
+                KeyBinding::new("end", ScrollBottom, session),
             ]);
             // A key reaches these while the window dispatches it, and the
             // window cannot be updated then: each runs once the dispatch ends.

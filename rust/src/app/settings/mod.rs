@@ -756,6 +756,12 @@ impl SettingsRuntime {
         Some(asked)
     }
 
+    /// The asset a removal question is open for.
+    #[cfg(test)]
+    pub fn removing(&self) -> Option<&str> {
+        self.removing.as_deref()
+    }
+
     /// The answer to `ask_remove`. A confirmed one removes on a thread.
     pub fn answer_remove(&mut self, confirmed: bool, delete_legacy: bool, io: &mut dyn SettingsIo) {
         let Some(asset_id) = self.removing.take() else {

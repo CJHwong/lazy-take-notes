@@ -3,12 +3,12 @@
 //! It looks like the live session pane. The files are `app::saved_session`.
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::Duration;
 
 use crate::gui::widgets::scroll_area;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{InputEvent, InputState};
-use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::text::TextViewState;
 use gpui_kit::component::{ActiveTheme, IconName};
 use gpui_kit::*;
@@ -22,11 +22,15 @@ use crate::gui::bridge::notify;
 use crate::gui::design::{size, space, speaker_fill, text, tint};
 use crate::gui::dialogs;
 use crate::gui::icons;
+use crate::gui::keyscroll::{Jump, Pane, jump_area, jump_list};
 use crate::gui::widgets::{
     DragArm, TurnColors, TurnEdge, column_header, empty_state, inline_tool, markdown, pane_header,
     speaker_chip, status_strip, tag, title_field, tool, transcript_line,
 };
-use crate::gui::{CopyDigest, CopyTranscript, RenameSession, SESSION_CONTEXT, ShowInFinder};
+use crate::gui::{
+    CopyDigest, CopyTranscript, RenameSession, SESSION_CONTEXT, ScrollBottom, ScrollPageDown,
+    ScrollPageUp, ScrollTop, ShowInFinder,
+};
 
 const COPY_TIMEOUT: Duration = Duration::from_secs(2);
 const ERROR_TIMEOUT: Duration = Duration::from_secs(8);
@@ -47,6 +51,10 @@ pub struct SessionReader {
     dir: PathBuf,
     session: SavedSession,
     transcript: ListState,
+    /// The notes column, for the scroll keys.
+    notes_scroll: ScrollHandle,
+    /// The pane the pointer last moved over: the scroll keys move it.
+    pointer_pane: Pane,
     notes: Entity<TextViewState>,
     title: Entity<InputState>,
     drag: DragArm,
@@ -69,11 +77,14 @@ impl SessionReader {
                 .default_value(shown_title(&dir))
         });
         let subscriptions = vec![cx.subscribe_in(&title, window, Self::on_title)];
+        // Measure every line, not only the visible ones, so the scrollbar
+        // keeps one size while the list scrolls.
         let transcript = ListState::new(
             session.transcript.len(),
             ListAlignment::Top,
             size::LIST_OVERDRAW,
-        );
+        )
+        .measure_all();
         let focus_handle = cx.focus_handle();
         // The toasts need the window, and the keys start on the view.
         cx.defer_in(window, move |view, window, cx| {
@@ -88,6 +99,8 @@ impl SessionReader {
             title,
             drag: DragArm::default(),
             hovered_speaker: None,
+            notes_scroll: ScrollHandle::new(),
+            pointer_pane: Pane::default(),
             focus_handle,
             _subscriptions: subscriptions,
         }
@@ -166,17 +179,25 @@ impl SessionReader {
             .and_then(|saved| saved.names.get(&speaker).cloned())
             .unwrap_or_default();
         let view = cx.entity().downgrade();
+        let name_as = move |name: String, window: &mut Window, cx: &mut App| {
+            let _ = view.update(cx, |view, cx| {
+                view.rename_speaker(speaker, &name, window, cx)
+            });
+        };
+        let clear = name_as.clone();
+        let on_clear: Option<dialogs::OnClear> = (!current.is_empty()).then(|| {
+            let clear: dialogs::ClearFn =
+                Rc::new(move |window, cx| clear(String::new(), window, cx));
+            ("Clear Name", clear)
+        });
         dialogs::prompt(
             window,
             cx,
             format!("Name for S{speaker}"),
             &current,
             "Speaker name...",
-            move |name, window, cx| {
-                let _ = view.update(cx, |view, cx| {
-                    view.rename_speaker(speaker, &name, window, cx)
-                });
-            },
+            name_as,
+            on_clear,
         );
     }
 
@@ -275,6 +296,9 @@ impl SessionReader {
             .flex_none()
             .w(relative(0.4))
             .min_w_0()
+            .on_mouse_move(cx.listener(|view, _: &MouseMoveEvent, _, _| {
+                view.pointer_pane = Pane::Transcript;
+            }))
             .child(column_header("Transcript", cx).child(self.copy_button(
                 "reader-copy-transcript",
                 Copied::Transcript,
@@ -364,7 +388,7 @@ impl SessionReader {
 
     /// The note type and the speakers, in the strip under both columns, as in
     /// a live session.
-    fn render_speakers(&self, cx: &mut Context<Self>) -> Option<Div> {
+    fn render_speakers(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let chips = self
             .session
             .speakers
@@ -392,23 +416,33 @@ impl SessionReader {
                     view.ask_speaker_name(speaker, window, cx)
                 }))
         });
+        // A long list of speakers scrolls sideways. No bar: the strip has no
+        // room below the chips, and a bar there would take their clicks.
         Some(
             status_strip(cx)
                 .gap(space::XS)
-                .overflow_hidden()
                 .children(template.map(|name| tag(name, cx)))
-                .children(items),
+                .children(items)
+                .id("reader-speakers")
+                .overflow_x_scroll()
+                .into_any_element(),
         )
     }
 
     fn render_notes(&self, cx: &mut Context<Self>) -> Div {
-        let column = div().flex().flex_col().flex_1().min_w_0().child(
-            column_header("Notes", cx).child(self.copy_button(
+        let column = div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_w_0()
+            .on_mouse_move(cx.listener(|view, _: &MouseMoveEvent, _, _| {
+                view.pointer_pane = Pane::Notes;
+            }))
+            .child(column_header("Notes", cx).child(self.copy_button(
                 "reader-copy-notes",
                 Copied::Digest,
                 cx,
-            )),
-        );
+            )));
         if self.session.notes.is_empty() {
             return column.child(empty_state(
                 icons::extra("sparkles"),
@@ -416,17 +450,28 @@ impl SessionReader {
                 cx,
             ));
         }
-        column.child(
+        column.child(scroll_area(
             div()
+                .id("reader-notes")
                 .flex_1()
                 .min_h_0()
                 .px(space::LG)
                 .pb(space::SM)
                 .text_size(text::READING)
-                .overflow_y_scrollbar()
-                .id("reader-notes")
+                .overflow_y_scroll()
+                .track_scroll(&self.notes_scroll)
                 .child(markdown(&self.notes)),
-        )
+            &self.notes_scroll,
+        ))
+    }
+
+    /// A scroll key: the pane the pointer last moved over.
+    fn jump(&mut self, jump: Jump, cx: &mut Context<Self>) {
+        match self.pointer_pane {
+            Pane::Transcript => jump_list(&self.transcript, jump),
+            Pane::Notes => jump_area(&self.notes_scroll, jump),
+        }
+        cx.notify();
     }
 }
 
@@ -454,6 +499,10 @@ impl Render for SessionReader {
             )
             .on_action(cx.listener(|view, _: &RenameSession, window, cx| view.rename(window, cx)))
             .on_action(cx.listener(|view, _: &ShowInFinder, _, cx| view.show_in_finder(cx)))
+            .on_action(cx.listener(|view, _: &ScrollPageUp, _, cx| view.jump(Jump::PageUp, cx)))
+            .on_action(cx.listener(|view, _: &ScrollPageDown, _, cx| view.jump(Jump::PageDown, cx)))
+            .on_action(cx.listener(|view, _: &ScrollTop, _, cx| view.jump(Jump::Top, cx)))
+            .on_action(cx.listener(|view, _: &ScrollBottom, _, cx| view.jump(Jump::Bottom, cx)))
             .size_full()
             .flex()
             .flex_col()
