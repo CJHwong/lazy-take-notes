@@ -41,16 +41,20 @@ fn grab() -> Option<Grab> {
     Some(Grab)
 }
 
-/// The pointer moved with the button down: move the window with it.
+/// The pointer moved with the button down: move the window with it. The
+/// move waits until the mouse handler returns: a move onto a screen with
+/// another scale tells gpui through the window, and the window is busy
+/// while its handler runs, so the new scale would be lost until the next
+/// resize.
 #[cfg(target_os = "macos")]
-fn follow(grab: Grab, _: &mut Window, _: &DragArm) {
-    crate::gui::window_move::follow(grab);
+fn follow(grab: Grab, _: &mut Window, _: &DragArm, cx: &mut App) {
+    cx.defer(move |_| crate::gui::window_move::follow(grab));
 }
 
 /// The pointer moved with the button down: hand the move to the system,
 /// which tracks it to the end.
 #[cfg(not(target_os = "macos"))]
-fn follow(_: Grab, window: &mut Window, arm: &DragArm) {
+fn follow(_: Grab, window: &mut Window, arm: &DragArm, _: &mut App) {
     arm.set(None);
     window.start_window_move();
 }
@@ -81,8 +85,8 @@ pub fn title_strip(id: impl Into<ElementId>, arm: &DragArm) -> Stateful<Div> {
                 |_, _, _| {},
                 move |_, _, window, _| {
                     let moved = tracked.clone();
-                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
-                        follow_press(&moved, event, phase, window);
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                        follow_press(&moved, event, phase, window, cx);
                     });
                     let released = tracked.clone();
                     window.on_mouse_event(move |_: &MouseUpEvent, _, _, _| released.set(None));
@@ -99,12 +103,18 @@ pub fn title_strip(id: impl Into<ElementId>, arm: &DragArm) -> Stateful<Div> {
 }
 
 /// Move the window for one pointer move of a press on the strip.
-fn follow_press(arm: &DragArm, event: &MouseMoveEvent, phase: DispatchPhase, window: &mut Window) {
+fn follow_press(
+    arm: &DragArm,
+    event: &MouseMoveEvent,
+    phase: DispatchPhase,
+    window: &mut Window,
+    cx: &mut App,
+) {
     if phase != DispatchPhase::Bubble {
         return;
     }
     match (arm.get(), event.pressed_button) {
-        (Some(grab), Some(MouseButton::Left)) => follow(grab, window, arm),
+        (Some(grab), Some(MouseButton::Left)) => follow(grab, window, arm, cx),
         (Some(_), _) => arm.set(None),
         (None, _) => {}
     }
