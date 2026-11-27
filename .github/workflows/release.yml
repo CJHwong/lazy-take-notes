@@ -71,6 +71,7 @@ jobs:
         run: |
           bash rust/scripts/package_app.sh
           ditto -c -k --keepParent "rust/target/app/Lazy Take Notes.app" rust/dist/Lazy-Take-Notes-arm64-macos.zip
+          (cd rust/dist && shasum -a 256 Lazy-Take-Notes-arm64-macos.zip > Lazy-Take-Notes-arm64-macos.zip.sha256)
       - name: Check that the app starts
         run: |
           ditto -x -k rust/dist/Lazy-Take-Notes-arm64-macos.zip "$RUNNER_TEMP/app"
@@ -82,33 +83,81 @@ jobs:
           test -f "$app/Contents/Resources/AppIcon.icns"
           test -x "$app/Contents/MacOS/coreaudio-tap"
           "$app/Contents/MacOS/lazy-take-notes" --version
-      - name: Keep the dry-run packages
-        if: github.event_name == 'workflow_dispatch'
+      - name: Keep the packages
         uses: actions/upload-artifact@v4
         with:
           name: lazy-take-notes-arm64-macos
           path: |
             rust/dist/lazy-take-notes-arm64-macos.tar.gz
+            rust/dist/lazy-take-notes-arm64-macos.tar.gz.sha256
             rust/dist/Lazy-Take-Notes-arm64-macos.zip
-      - name: Publish the release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
+            rust/dist/Lazy-Take-Notes-arm64-macos.zip.sha256
+
+  linux:
+    name: Build (Linux ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system deps
         run: |
-          cd rust/dist
-          shasum -a 256 lazy-take-notes-arm64-macos.tar.gz > lazy-take-notes-arm64-macos.tar.gz.sha256
-          shasum -a 256 Lazy-Take-Notes-arm64-macos.zip > Lazy-Take-Notes-arm64-macos.zip.sha256
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          fi
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+            cmake clang libclang-dev libasound2-dev ffmpeg
+      - name: Install the pinned toolchain (rust/rust-toolchain.toml)
+        working-directory: rust
+        run: rustup toolchain install
+      - name: Build the package
+        run: bash rust/scripts/package.sh
+      - name: Check that the package starts
+        run: |
+          tar -xzf "rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz" -C "$RUNNER_TEMP"
+          "$RUNNER_TEMP/lazy-take-notes-${{ matrix.arch }}-linux/lazy-take-notes" --version
+          "$RUNNER_TEMP/lazy-take-notes-${{ matrix.arch }}-linux/lazy-take-notes" --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lazy-take-notes-${{ matrix.arch }}-linux
+          path: |
+            rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz
+            rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz.sha256
+
+  publish:
+    name: Publish the release
+    needs: [macos-arm64, linux]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
           prerelease=()
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
             --title "lazy-take-notes $GITHUB_REF_NAME" \
-            --notes "The Rust build for macOS on Apple silicon: the terminal app, and the window app as Lazy Take Notes.app. The Python launcher downloads the terminal app once the tag is pinned in src/lazy_take_notes/rust_release.py. Homebrew: brew install --cask CJHwong/tap/lazy-take-notes" \
-            lazy-take-notes-arm64-macos.tar.gz lazy-take-notes-arm64-macos.tar.gz.sha256 \
-            Lazy-Take-Notes-arm64-macos.zip Lazy-Take-Notes-arm64-macos.zip.sha256
+            --notes "The Rust build for macOS on Apple silicon and Linux (x86_64 and arm64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, or setup.sh everywhere." \
+            dist/lazy-take-notes-arm64-macos.tar.gz dist/lazy-take-notes-arm64-macos.tar.gz.sha256 \
+            dist/Lazy-Take-Notes-arm64-macos.zip dist/Lazy-Take-Notes-arm64-macos.zip.sha256 \
+            dist/lazy-take-notes-x86_64-linux.tar.gz dist/lazy-take-notes-x86_64-linux.tar.gz.sha256 \
+            dist/lazy-take-notes-arm64-linux.tar.gz dist/lazy-take-notes-arm64-linux.tar.gz.sha256
 
   homebrew:
     name: Update the Homebrew cask
-    needs: macos-arm64
+    needs: publish
     # A prerelease (a tag with a hyphen) leaves the cask alone.
     if: github.event_name == 'push' && !contains(github.ref_name, '-')
     runs-on: ubuntu-24.04

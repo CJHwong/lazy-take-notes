@@ -1,17 +1,41 @@
-//! Keep the Mac awake while a live recording runs.
+//! Keep the machine awake while a live recording runs.
 //!
 //! `caffeinate -w <pid>` ties the assertion to this process, so it ends even
-//! when the process is killed without a clean shutdown.
+//! when the process is killed without a clean shutdown. On Linux,
+//! `systemd-inhibit` blocks idle and sleep for the length of the child.
 
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 
+use tracing::debug;
+
 /// Holds the machine awake until dropped.
 pub struct KeepAwake(Option<Child>);
 
+fn command() -> Command {
+    #[cfg(target_os = "macos")]
+    {
+        let mut command = Command::new("caffeinate");
+        command.args(["-di", "-w", &std::process::id().to_string()]);
+        command
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut command = Command::new("systemd-inhibit");
+        command.args([
+            "--what=idle:sleep",
+            "--who=lazy-take-notes",
+            "--why=Recording",
+            "--mode=block",
+            "sleep",
+            "infinity",
+        ]);
+        command
+    }
+}
+
 pub fn keep_awake() -> KeepAwake {
-    let child = Command::new("caffeinate")
-        .args(["-di", "-w", &std::process::id().to_string()])
+    let child = command()
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -20,6 +44,9 @@ pub fn keep_awake() -> KeepAwake {
         .process_group(0)
         .spawn()
         .ok();
+    if child.is_none() {
+        debug!("no idle inhibitor found; the machine may sleep during a recording");
+    }
     KeepAwake(child)
 }
 

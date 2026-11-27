@@ -18,6 +18,7 @@ use tracing::warn;
 
 use crate::adapters::templates::YamlTemplates;
 use crate::app::container::Loaded;
+use crate::app::open_path::open_path;
 use crate::app::session::Severity;
 use crate::app::template_catalog::{Row, TemplateCatalog};
 use crate::gui::bridge::notify;
@@ -288,10 +289,7 @@ impl TemplatePickerView {
         };
         let edited = cx.background_executor().spawn(async move {
             // -W waits until the editor closes the file; -t opens the text editor.
-            std::process::Command::new("open")
-                .args(["-W", "-t"])
-                .arg(&path)
-                .status()
+            open_path(&path, true, true).and_then(|mut child| child.wait())
         });
         cx.spawn_in(window, async move |this, cx| {
             let status = edited.await;

@@ -1,0 +1,6 @@
+rust/target
+rust/dist
+.venv
+**/__pycache__
+# The user's real recordings.
+output

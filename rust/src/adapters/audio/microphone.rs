@@ -26,13 +26,29 @@ fn device_name(device: &Device) -> Option<String> {
         .map(|description| description.name().to_string())
 }
 
-/// The names of devices with an input, in system order, without duplicates.
+/// The name of a real input, or None for a PulseAudio monitor of an output.
+fn input_entry(id: Option<&str>, name: &str) -> Option<String> {
+    match id {
+        Some(id) if id.ends_with(".monitor") => None,
+        _ => Some(name.to_string()),
+    }
+}
+
+/// The names of devices with an input, in system order, without duplicates,
+/// and without the PulseAudio monitors of outputs.
 pub fn list_input_devices() -> Vec<String> {
     let Ok(devices) = cpal::default_host().input_devices() else {
         return Vec::new();
     };
     let mut names: Vec<String> = Vec::new();
-    for name in devices.filter_map(|device| device_name(&device)) {
+    for device in devices {
+        let Some(name) = device_name(&device) else {
+            continue;
+        };
+        let id = device.id().ok();
+        let Some(name) = input_entry(id.as_ref().map(|id| id.id()), &name) else {
+            continue;
+        };
         if !names.contains(&name) {
             names.push(name);
         }
@@ -72,7 +88,7 @@ fn panic_text(panic: &Box<dyn std::any::Any + Send>) -> String {
         .unwrap_or_else(|| "panic".into())
 }
 
-struct Run {
+pub(crate) struct Run {
     queue: AudioBuffer,
     error: Mutex<Option<String>>,
     exhausted: AtomicBool,
@@ -80,7 +96,7 @@ struct Run {
 }
 
 impl Run {
-    fn new(sample_rate: u32) -> Self {
+    pub(crate) fn new(sample_rate: u32) -> Self {
         Self {
             queue: AudioBuffer::new(sample_rate as usize, sample_rate, "microphone"),
             error: Mutex::new(None),
@@ -107,6 +123,28 @@ impl Run {
         }
     }
 
+    pub(crate) fn read(&self, timeout: Duration) -> Result<Option<Vec<f32>>, AudioError> {
+        if let Some(block) = self.queue.get(timeout) {
+            return Ok(Some(block));
+        }
+        match self.error.lock().expect("input error lock").clone() {
+            Some(message) => Err(AudioError(message)),
+            None => Ok(None),
+        }
+    }
+
+    pub(crate) fn drain(&self) {
+        self.queue.clear();
+    }
+
+    pub(crate) fn start_close(&self) {
+        self.closing.store(true, Ordering::SeqCst);
+    }
+
+    pub(crate) fn exhausted(&self) -> bool {
+        self.exhausted.load(Ordering::SeqCst)
+    }
+
     fn stream_failed(&self, failure: &cpal::Error) {
         match failure.kind() {
             // An overload drops a few samples; a default-device reroute keeps the stream.
@@ -126,6 +164,52 @@ impl Run {
             }
         }
     }
+}
+
+/// Build and start an input stream on `device` that feeds `run` at `sample_rate`.
+pub(crate) fn open_stream(
+    device: &Device,
+    sample_rate: u32,
+    channels: u16,
+    run: Arc<Run>,
+    label: &str,
+) -> Result<Stream, AudioError> {
+    let native: SampleRate = device
+        .default_input_config()
+        .map_err(|e| AudioError(e.to_string()))?
+        .sample_rate();
+    let mut converter = RateConverter::new(native, sample_rate);
+    info!(
+        target: "ltn.audio.sounddevice",
+        "opening {label}: device={}, native_sr={native}, conversion={}, channels={channels}",
+        device_name(device).unwrap_or_else(|| "?".into()),
+        converter.describe(),
+    );
+    let config = StreamConfig {
+        channels,
+        sample_rate: native,
+        buffer_size: cpal::BufferSize::Default,
+    };
+    let (data_run, error_run) = (run.clone(), run.clone());
+    let stream = device
+        .build_input_stream::<f32, _, _>(
+            config,
+            move |samples: &[f32], _| {
+                if data_run.closing.load(Ordering::Relaxed) {
+                    return;
+                }
+                data_run.guarded(|| {
+                    for block in converter.push(samples) {
+                        data_run.queue.put(&block);
+                    }
+                });
+            },
+            move |failure| error_run.stream_failed(&failure),
+            None,
+        )
+        .map_err(|e| AudioError(e.to_string()))?;
+    stream.play().map_err(|e| AudioError(e.to_string()))?;
+    Ok(stream)
 }
 
 pub struct MicrophoneSource {
@@ -187,71 +271,30 @@ impl AudioSource for MicrophoneSource {
         let run = Arc::new(Run::new(sample_rate));
         *self.run.lock().expect("mic run lock") = run.clone();
         let device = self.input_device()?;
-        let native: SampleRate = device
-            .default_input_config()
-            .map_err(|e| AudioError(e.to_string()))?
-            .sample_rate();
-        let mut converter = RateConverter::new(native, sample_rate);
-        info!(
-            target: "ltn.audio.sounddevice",
-            "opening microphone: device={}, native_sr={native}, conversion={}, channels={channels}",
-            device_name(&device).unwrap_or_else(|| "?".into()),
-            converter.describe(),
-        );
-        let config = StreamConfig {
-            channels,
-            sample_rate: native,
-            buffer_size: cpal::BufferSize::Default,
-        };
-        let (data_run, error_run) = (run.clone(), run.clone());
-        let stream = device
-            .build_input_stream::<f32, _, _>(
-                config,
-                move |samples: &[f32], _| {
-                    if data_run.closing.load(Ordering::Relaxed) {
-                        return;
-                    }
-                    data_run.guarded(|| {
-                        for block in converter.push(samples) {
-                            data_run.queue.put(&block);
-                        }
-                    });
-                },
-                move |failure| error_run.stream_failed(&failure),
-                None,
-            )
-            .map_err(|e| AudioError(e.to_string()))?;
-        stream.play().map_err(|e| AudioError(e.to_string()))?;
+        let stream = open_stream(&device, sample_rate, channels, run, "microphone")?;
         *self.stream.lock().expect("mic stream lock") = Some(stream);
         Ok(())
     }
 
     fn read(&self, timeout: Duration) -> Result<Option<Vec<f32>>, AudioError> {
-        let run = self.run();
-        if let Some(block) = run.queue.get(timeout) {
-            return Ok(Some(block));
-        }
-        match run.error.lock().expect("mic error lock").clone() {
-            Some(message) => Err(AudioError(message)),
-            None => Ok(None),
-        }
+        self.run().read(timeout)
     }
 
     fn drain(&self) {
-        self.run().queue.clear();
+        self.run().drain();
     }
 
     fn close(&self) -> Result<(), AudioError> {
         let run = self.run();
-        run.closing.store(true, Ordering::SeqCst);
+        run.start_close();
         // Dropping the stream stops the device and waits for its callback.
         drop(self.stream.lock().expect("mic stream lock").take());
-        run.queue.clear();
+        run.drain();
         Ok(())
     }
 
     fn exhausted(&self) -> bool {
-        self.run().exhausted.load(Ordering::SeqCst)
+        self.run().exhausted()
     }
 
     fn continuous_capture(&self) -> bool {
@@ -351,5 +394,28 @@ mod tests {
         assert_eq!(match_device(&names, "macbook mic"), Some(0));
         assert_eq!(match_device(&names, "BlackHole"), None, "two devices match");
         assert_eq!(match_device(&names, "AirPods"), None);
+    }
+
+    #[test]
+    fn a_pulse_monitor_is_not_an_input() {
+        assert_eq!(
+            input_entry(
+                Some("alsa_input.pci-0000_00_1f.3.analog-stereo"),
+                "Built-in Audio"
+            ),
+            Some("Built-in Audio".into())
+        );
+        assert_eq!(
+            input_entry(
+                Some("alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"),
+                "Monitor of Built-in Audio"
+            ),
+            None
+        );
+        assert_eq!(
+            input_entry(None, "Built-in Audio"),
+            Some("Built-in Audio".into()),
+            "a device with no id stays in the list"
+        );
     }
 }

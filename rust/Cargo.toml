@@ -52,8 +52,17 @@ tokio = { version = "1.54.1", features = ["rt", "rt-multi-thread", "macros", "ti
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["registry", "std"] }
 unicode-width = "0.2.3"
-whisper-rs = { version = "0.16.0", features = ["metal"] }
+whisper-rs = "0.16.0"
 yaml_serde = "0.10.7"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# whisper.cpp's Metal backend builds only on macOS.
+whisper-rs = { version = "0.16.0", features = ["metal"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The pure Rust PulseAudio client: no libpulse, and the monitor sources cpal's
+# ALSA host cannot see. Linux still builds ALSA too, so libasound2-dev is needed.
+cpal = { version = "0.18.2", features = ["pulseaudio"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

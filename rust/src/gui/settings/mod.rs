@@ -23,6 +23,7 @@ use tracing::error;
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::model_catalog::asset_for_model;
 use crate::adapters::paths::Paths;
+use crate::app::open_path::open_path;
 use crate::app::session::Severity;
 use crate::app::settings::form::{
     DIARIZATION_DEVICES, FormValues, LLM_PROVIDERS, OpeningValues, THEME_ORDER,
@@ -538,10 +539,7 @@ impl SettingsView {
         };
         self.bridge.tasks.spawn_thread("config-editor", move || {
             // -W waits until the editor closes the file; -t opens the text editor.
-            let status = std::process::Command::new("open")
-                .args(["-W", "-t"])
-                .arg(&path)
-                .status();
+            let status = open_path(&path, true, true).and_then(|mut child| child.wait());
             Edited(status.map(|_| ()).map_err(|e| {
                 error!(target: "ltn.config", "Cannot open the text editor: {e}");
                 e.to_string()

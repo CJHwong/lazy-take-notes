@@ -1,35 +1,31 @@
-FROM python:3.11-bookworm
+FROM rust:1-bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pulseaudio \
-    libpulse-dev \
-    libportaudio2 \
+    pulseaudio-utils \
+    libasound2-dev \
     cmake \
+    clang \
+    libclang-dev \
+    ffmpeg \
+    curl \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY . /src
+WORKDIR /src/rust
+RUN rustup toolchain install
+# whisper.cpp defaults to -march=native, whose ARM FP16 flags GCC 12 rejects
+# in this image. The release takes the same baseline.
+ENV GGML_NATIVE=OFF
+RUN cargo build --release --locked
+RUN install -m755 /src/rust/target/release/lazy-take-notes /usr/local/bin/
 
-# PulseAudio refuses to run as root — create a test user
-RUN useradd -m -s /bin/bash testuser
+RUN mkdir -p /models \
+    && curl -fL -o /models/ggml-base.en.bin \
+        https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 
-WORKDIR /home/testuser/app
-COPY . .
-RUN rm -rf .venv && chown -R testuser:testuser /home/testuser/app
-
+RUN useradd -m testuser
+COPY scripts/linux-smoke/run_smoke.sh /usr/local/bin/
 USER testuser
-
-# Pre-warm uv cache + install all deps
-RUN uv sync
-
-CMD ["bash", "-c", "\
-    echo '=== Starting PulseAudio ===' && \
-    pulseaudio --start --exit-idle-time=-1 && \
-    pactl load-module module-null-sink sink_name=test_loopback && \
-    echo '=== PulseAudio ready (null-sink loaded) ===' && \
-    echo '' && \
-    echo '=== Running pytest ===' && \
-    uv run pytest tests/ -v --tb=short && \
-    echo '' && \
-    echo '=== Running loopback smoke test ===' && \
-    uv run python scripts/linux-smoke/smoke_test.py \
-"]
+CMD ["/usr/local/bin/run_smoke.sh"]

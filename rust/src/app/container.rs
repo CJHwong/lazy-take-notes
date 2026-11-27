@@ -7,9 +7,15 @@ use regex::Regex;
 use serde_json::Value as JsonValue;
 use yaml_serde::{Mapping, Value};
 
+#[cfg(target_os = "macos")]
 use crate::adapters::audio::coreaudio_tap::CoreAudioTapSource;
-use crate::adapters::audio::microphone::{MicrophoneSource, play_test_tone};
+use crate::adapters::audio::microphone::MicrophoneSource;
+#[cfg(target_os = "macos")]
+use crate::adapters::audio::microphone::play_test_tone;
+use crate::adapters::audio::mixed::TestTone;
 use crate::adapters::audio::mixed::{MAX_MIC_GAIN, MixTiming, MixedAudioSource};
+#[cfg(target_os = "linux")]
+use crate::adapters::audio::pulse_monitor::PulseMonitorSource;
 use crate::adapters::config_file::load_raw;
 use crate::adapters::llm::ollama::OllamaLlmClient;
 use crate::adapters::llm::openai::OpenAiCompatClient;
@@ -133,6 +139,32 @@ pub fn check_transcription_provider(infra: &InfraConfig) -> Result<(), String> {
     ))
 }
 
+/// The system audio source for this platform.
+pub fn system_audio_source(
+    ensure_permission: bool,
+) -> Arc<dyn crate::ports::audio_source::AudioSource> {
+    #[cfg(target_os = "macos")]
+    {
+        Arc::new(CoreAudioTapSource::new(ensure_permission))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = ensure_permission;
+        Arc::new(PulseMonitorSource::new())
+    }
+}
+
+fn platform_test_tone() -> Option<TestTone> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(Box::new(play_test_tone))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        None
+    }
+}
+
 /// The microphone and the system audio as two sources, for the Settings input test.
 pub fn build_audio_sources(
     device: Option<String>,
@@ -143,24 +175,25 @@ pub fn build_audio_sources(
 ) {
     (
         Arc::new(MicrophoneSource::new(device)),
-        Arc::new(CoreAudioTapSource::new(ensure_permission)),
+        system_audio_source(ensure_permission),
     )
 }
 
-/// The microphone and the system audio, mixed. macOS only for now.
+/// The microphone and the system audio, mixed.
 pub fn build_mixed_source(config: &AppConfig) -> Arc<MixedAudioSource> {
     let mic = Arc::new(MicrophoneSource::new(
         config.transcription.input_device.clone(),
     ));
-    let system = Arc::new(CoreAudioTapSource::new(false));
-    // The Core Audio tap sends exact zeros when nothing plays, and it captures
-    // this tone even with the output muted.
+    let system = system_audio_source(false);
+    // The system source sends exact zeros when nothing plays. On macOS the tap
+    // captures this tone even with the output muted; a PulseAudio monitor does
+    // not, so Linux passes none.
     Arc::new(MixedAudioSource::new(
         mic,
         system,
         config.transcription.silence_threshold,
         MAX_MIC_GAIN,
-        Some(Box::new(play_test_tone)),
+        platform_test_tone(),
         MixTiming::default(),
     ))
 }
