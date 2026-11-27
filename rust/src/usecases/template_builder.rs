@@ -20,6 +20,8 @@ static JSON_FENCE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)```json\s*\n(.*?)\n\s*```").expect("valid regex"));
 
 fn schema_doc() -> String {
+    // Git checks the file out with CRLF on Windows; the prompt has LF.
+    let schema = SCHEMA_FILE.replace("\r\n", "\n");
     format!(
         "## Template Schema (JSON)\n\n{schema}\n\n## Field descriptions\n\n\
 - **metadata**: name, description, locale (e.g. \"en\", \"zh-TW\"), key (leave empty).\n\
@@ -39,7 +41,7 @@ about these fields directly.\n\n",
         digest = format_variables(DIGEST_VARIABLES),
         final_vars = format_variables(FINAL_VARIABLES),
         quick = format_variables(QUICK_ACTION_VARIABLES),
-        schema = SCHEMA_FILE.trim_end(),
+        schema = schema.trim_end(),
     )
 }
 
