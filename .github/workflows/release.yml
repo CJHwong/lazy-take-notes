@@ -139,6 +139,13 @@ jobs:
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: rustup toolchain install
+      - name: Install the Vulkan SDK
+        shell: pwsh
+        run: |
+          $installer = "$env:RUNNER_TEMP\vulkan-sdk.exe"
+          Invoke-WebRequest 'https://sdk.lunarg.com/sdk/download/1.4.363.0/windows/vulkansdk-windows-X64-1.4.363.0.exe' -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
+          if (-not (Test-Path 'C:\VulkanSDK')) { throw 'Vulkan SDK install failed' }
       - name: Build the package
         run: pwsh rust/scripts/package.ps1
       - name: Check that the package starts

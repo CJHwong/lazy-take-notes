@@ -15,10 +15,20 @@ $zip = Join-Path $rustDir "dist\$name.zip"
 # can crash on an older one, so take the baseline.
 $env:GGML_NATIVE = 'OFF'
 
+# The release uses whisper.cpp's Vulkan backend. The build needs the SDK's
+# glslc and headers; the installed zip needs a GPU driver with Vulkan.
+$sdk = Get-ChildItem 'C:\VulkanSDK' -Directory -ErrorAction SilentlyContinue |
+    Sort-Object Name -Descending | Select-Object -First 1
+if (-not $sdk) {
+    throw 'Vulkan SDK not found. Install it: winget install KhronosGroup.VulkanSDK'
+}
+$env:VULKAN_SDK = $sdk.FullName
+$env:PATH = "$($sdk.FullName)\Bin;$env:PATH"
+
 # rustup picks the toolchain from rust/ (rust-toolchain.toml).
 Push-Location $rustDir
 try {
-    cargo build --release --locked
+    cargo build --release --locked --features vulkan
     if ($LASTEXITCODE -ne 0) { throw "cargo build failed" }
 } finally {
     Pop-Location
@@ -32,6 +42,7 @@ Copy-Item (Join-Path $rustDir 'target\release\lazy-take-notes.exe') $stage
 lazy-take-notes for Windows
 Run lazy-take-notes.exe --help.
 ffmpeg is required for file transcription: winget install Gyan.FFmpeg
+Speech recognition needs a GPU driver with Vulkan support.
 Settings: lazy-take-notes.exe config
 '@ | Set-Content -Path (Join-Path $stage 'README.txt') -Encoding utf8
 
