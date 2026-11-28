@@ -33,10 +33,6 @@ dirs = "7.0.0"
 fancy-regex = "0.20.2"
 flate2 = "1.1.11"
 gpui-kit = { version = "=0.11.0", optional = true }
-# The Dock icon of a run outside the .app. The same versions gpui uses, so
-# they add no crate to the build.
-cocoa = { version = "=0.25.0", optional = true }
-objc = { version = "=0.2.7", optional = true }
 futures-util = { version = "0.3.34", default-features = false }
 indexmap = { version = "2.14.2", features = ["serde"] }
 libc = "0.2.191"
@@ -62,6 +58,10 @@ fs4 = "1.1.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper.cpp's Metal backend builds only on macOS.
 whisper-rs = { version = "0.16.0", features = ["metal"] }
+# The Dock icon of a run outside the .app. The same versions gpui uses, so
+# they add no crate to the build.
+cocoa = { version = "=0.25.0", optional = true }
+objc = { version = "=0.2.7", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The pure Rust PulseAudio client: no libpulse, and the monitor sources cpal's

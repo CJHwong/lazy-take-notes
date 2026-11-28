@@ -6,6 +6,7 @@ mod bridge;
 mod builder;
 mod design;
 mod dialogs;
+#[cfg(target_os = "macos")]
 mod dock_icon;
 mod env;
 pub(crate) mod icons;
@@ -159,6 +160,7 @@ pub fn run() -> i32 {
         .with_assets(icons::AppAssets)
         .run(|cx: &mut App| {
             init(cx);
+            #[cfg(target_os = "macos")]
             dock_icon::set_outside_bundle();
             cx.bind_keys([
                 KeyBinding::new("cmd-q", Quit, None),
