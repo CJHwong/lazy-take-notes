@@ -21,41 +21,14 @@ case "$(uname -s)" in
         exit 1
         ;;
 esac
-# Optional --target <triple> builds another architecture on this machine.
-TARGET=""
-if [ "${1:-}" = "--target" ]; then
-    TARGET="${2:-}"
-    if [ -z "$TARGET" ]; then
-        echo "ERROR: --target needs a triple" >&2
+case "$(uname -m)" in
+    x86_64) ARCH=x86_64 ;;
+    aarch64 | arm64) ARCH=arm64 ;;
+    *)
+        echo "ERROR: unsupported machine: $(uname -m)" >&2
         exit 1
-    fi
-elif [ $# -gt 0 ]; then
-    echo "ERROR: unknown argument: $1" >&2
-    exit 1
-fi
-
-if [ -n "$TARGET" ]; then
-    case "$TARGET" in
-        x86_64-apple-darwin) ARCH=x86_64 ;;
-        aarch64-apple-darwin) ARCH=arm64 ;;
-        *)
-            echo "ERROR: unsupported target: $TARGET" >&2
-            exit 1
-            ;;
-    esac
-    if [ "$TARGET" = x86_64-apple-darwin ]; then
-        export CMAKE_OSX_ARCHITECTURES=x86_64
-    fi
-else
-    case "$(uname -m)" in
-        x86_64) ARCH=x86_64 ;;
-        aarch64 | arm64) ARCH=arm64 ;;
-        *)
-            echo "ERROR: unsupported machine: $(uname -m)" >&2
-            exit 1
-            ;;
-    esac
-fi
+        ;;
+esac
 
 NAME="lazy-take-notes-$ARCH-$OS"
 STAGE="$RUST_DIR/dist/$NAME"
@@ -74,27 +47,12 @@ fi
 
 # rustup picks the toolchain from the working folder, so build from rust/:
 # rust-toolchain.toml pins it.
-if [ -n "$TARGET" ]; then
-    (cd "$RUST_DIR" && cargo build --release --locked --target "$TARGET")
-    BIN_DIR="$RUST_DIR/target/$TARGET/release"
-else
-    (cd "$RUST_DIR" && cargo build --release --locked)
-    BIN_DIR="$RUST_DIR/target/release"
-fi
+(cd "$RUST_DIR" && cargo build --release)
 
 mkdir -p "$STAGE"
-cp "$BIN_DIR/lazy-take-notes" "$STAGE/"
+cp "$RUST_DIR/target/release/lazy-take-notes" "$STAGE/"
 if [ "$OS" = macos ]; then
     cp "$TAP" "$STAGE/"
-    # The helper must carry the package's architecture.
-    archs="$(lipo -archs "$STAGE/coreaudio-tap")"
-    case " $archs " in
-        *" $ARCH "*) ;;
-        *)
-            echo "ERROR: coreaudio-tap has no $ARCH slice: $archs" >&2
-            exit 1
-            ;;
-    esac
 fi
 # COPYFILE_DISABLE: no ._ AppleDouble files for the extended attributes.
 COPYFILE_DISABLE=1 tar -czf "$RUST_DIR/dist/$NAME.tar.gz" -C "$RUST_DIR/dist" "$NAME"

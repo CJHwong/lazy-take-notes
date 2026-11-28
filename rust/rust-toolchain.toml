@@ -3,5 +3,3 @@
 [toolchain]
 channel = "1.98.0"
 components = ["rustfmt", "clippy"]
-# The arm64 release runner cross-builds the Intel terminal app.
-targets = ["x86_64-apple-darwin"]
