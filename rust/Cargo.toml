@@ -1,14 +1,15 @@
 [package]
 name = "lazy-take-notes"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 
 [[bin]]
 name = "lazy-take-notes"
 path = "src/main.rs"
 
-# The executable of the macOS .app: the window with no arguments, the command
-# line with any. Only `--features gui` builds it.
+# The executable of the macOS .app: a terminal start opens the terminal app,
+# a Finder start opens the window, and any argument runs the command line.
+# Only `--features gui` builds it.
 [[bin]]
 name = "lazy-take-notes-gui"
 path = "src/gui_main.rs"
