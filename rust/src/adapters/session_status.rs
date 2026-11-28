@@ -25,6 +25,7 @@ pub fn read_status(session_dir: &Path) -> Option<SessionStatus> {
 }
 
 /// True when `pid` names a running process, including one owned by another user.
+#[cfg(unix)]
 pub fn is_pid_alive(pid: u32) -> bool {
     let Ok(pid) = i32::try_from(pid) else {
         return false;
@@ -35,6 +36,25 @@ pub fn is_pid_alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks that the process exists; it sends nothing.
     let result = unsafe { libc::kill(pid, 0) };
     result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(windows)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // SAFETY: the handle is opened for a pid and closed once below.
+    let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return false;
+    }
+    let mut code = 0u32;
+    // SAFETY: the handle is open and `code` is writable.
+    let ok = unsafe { GetExitCodeProcess(handle, &mut code) };
+    // SAFETY: the handle came from OpenProcess.
+    unsafe { CloseHandle(handle) };
+    ok != 0 && code == STILL_ACTIVE as u32
 }
 
 #[cfg(test)]

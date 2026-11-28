@@ -21,6 +21,7 @@ PLATFORMS = {
     'lazy-take-notes-x86_64-macos.tar.gz': ('Darwin', 'x86_64'),
     'lazy-take-notes-x86_64-linux.tar.gz': ('Linux', 'x86_64'),
     'lazy-take-notes-arm64-linux.tar.gz': ('Linux', 'aarch64'),
+    'lazy-take-notes-x86_64-windows.zip': ('Windows', 'AMD64'),
 }
 TARGET = Path(__file__).resolve().parent.parent / 'src' / 'lazy_take_notes' / 'rust_release.py'
 
@@ -28,11 +29,11 @@ TARGET = Path(__file__).resolve().parent.parent / 'src' / 'lazy_take_notes' / 'r
 def main(tag: str) -> None:
     with tempfile.TemporaryDirectory() as folder:
         subprocess.run(  # noqa: S603 -- fixed arg list, not shell=True
-            ['gh', 'release', 'download', tag, '--pattern', '*.tar.gz', '--dir', folder],  # noqa: S607 -- gh on PATH
+            ['gh', 'release', 'download', tag, '--pattern', '*.tar.gz', '--pattern', '*.zip', '--dir', folder],  # noqa: S607 -- gh on PATH
             check=True,
         )
         assets = {}
-        for archive in sorted(Path(folder).glob('*.tar.gz')):
+        for archive in sorted([*Path(folder).glob('*.tar.gz'), *Path(folder).glob('*.zip')]):
             key = PLATFORMS.get(archive.name)
             if key is None:
                 print(f'skipping {archive.name}: no platform known for it', file=sys.stderr)

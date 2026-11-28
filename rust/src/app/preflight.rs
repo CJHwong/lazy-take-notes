@@ -14,8 +14,9 @@ use tracing::{info, warn};
 use crate::adapters::assets::resolver::CachedModelResolver;
 use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::audio::microphone::MicrophoneSource;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::adapters::audio::microphone::play_test_tone;
+use crate::adapters::model_catalog;
 use crate::adapters::nemo_diarizer::NemoSpeechDiarizer;
 use crate::app::container::system_audio_source;
 use crate::app::download_progress;
@@ -36,6 +37,7 @@ pub const LLM_PROBE_TIMEOUT: Duration = Duration::from_secs(120);
 const LLM_PROBE_PROMPT: &str = "Reply with the single word OK.";
 const MIC_READ: Duration = Duration::from_millis(1500);
 const SYSTEM_FIRST_BUFFER: Duration = Duration::from_secs(5);
+#[cfg(not(target_os = "windows"))]
 const SYSTEM_PERMISSION_WAIT: Duration = Duration::from_secs(45);
 #[cfg(target_os = "macos")]
 const SYSTEM_TONE_WAIT: Duration = Duration::from_millis(1500);
@@ -46,12 +48,17 @@ const MIC_PERMISSION_FIX: &str = "Allow microphone access in System Settings > P
 #[cfg(target_os = "linux")]
 const MIC_PERMISSION_FIX: &str =
     "Check that PulseAudio or PipeWire runs and that the input is not muted (pavucontrol).";
+#[cfg(target_os = "windows")]
+const MIC_PERMISSION_FIX: &str = "Check that a microphone is connected, and that Settings > Privacy > Microphone allows desktop apps.";
 
 #[cfg(target_os = "macos")]
 const SYSTEM_PERMISSION_FIX: &str = "Allow this app in System Settings > Privacy & Security > Screen & System Audio Recording, then press Retry.";
 #[cfg(target_os = "linux")]
 const SYSTEM_PERMISSION_FIX: &str =
     "Check that PulseAudio or PipeWire runs: pactl info shows a server and a default sink.";
+#[cfg(target_os = "windows")]
+const SYSTEM_PERMISSION_FIX: &str =
+    "Check that an output device is connected. WASAPI loopback records what the output plays.";
 
 /// The tap opens before macOS asks for any permission, so a failed open means the
 /// helper is missing or cannot start. On Linux the open failure is the same
@@ -59,6 +66,8 @@ const SYSTEM_PERMISSION_FIX: &str =
 #[cfg(target_os = "macos")]
 const SYSTEM_HELPER_FIX: &str = "Reinstall lazy-take-notes to restore its coreaudio-tap helper, or build it with: bash scripts/build_native.sh";
 #[cfg(target_os = "linux")]
+const SYSTEM_HELPER_FIX: &str = SYSTEM_PERMISSION_FIX;
+#[cfg(target_os = "windows")]
 const SYSTEM_HELPER_FIX: &str = SYSTEM_PERMISSION_FIX;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,20 +317,7 @@ fn strerror(error: &std::io::Error) -> String {
 }
 
 fn free_bytes(path: &Path) -> std::io::Result<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
-    let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
-    // SAFETY: `name` is a valid C string and `stats` a writable statvfs.
-    if unsafe { libc::statvfs(name.as_ptr(), &mut stats) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    // macOS counts blocks in a c_uint; Linux already has a u64.
-    #[cfg(target_os = "macos")]
-    let available = u64::from(stats.f_bavail);
-    #[cfg(target_os = "linux")]
-    let available = stats.f_bavail;
-    Ok(available * stats.f_frsize)
+    fs4::available_space(path)
 }
 
 fn probe_output(base: &Path) -> std::io::Result<u64> {
@@ -418,11 +414,9 @@ fn check_whisper(
     transcriber
         .load_model(&path)
         .map_err(|e| format!("RuntimeError: {e}"))?;
-    running.update(format!("Testing {name}"));
-    let language = locale.split('-').next().unwrap_or("").to_lowercase();
-    transcriber
-        .transcribe(&vec![0.0; SAMPLE_RATE], &language, &[])
-        .map_err(|e| format!("RuntimeError: {e}"))?;
+    // The load proves the child process, the model file, and the load path. A
+    // transcribe probe on silence costs the whole timeout on a CPU, because
+    // whisper retries it across temperature levels.
     running.check.pass(name);
     Ok(())
 }
@@ -539,6 +533,51 @@ fn verify_system_capture(
     running: &mut Running<'_>,
     system: &dyn AudioSource,
 ) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    return verify_windows_capture(running, system, SYSTEM_FIRST_BUFFER, play_test_tone);
+    #[cfg(target_os = "macos")]
+    return verify_macos_capture(running, system);
+    #[cfg(target_os = "linux")]
+    verify_linux_capture(running, system)
+}
+
+/// WASAPI loopback is event driven and idle endpoints deliver nothing, so the
+/// tone comes first. It wakes the audio engine, and the read window proves the
+/// tone arrived.
+#[cfg(any(target_os = "windows", test))]
+fn verify_windows_capture(
+    running: &mut Running<'_>,
+    system: &dyn AudioSource,
+    window: Duration,
+    play_tone: impl Fn() -> bool,
+) -> Result<(), String> {
+    running.update("Playing an inaudible test tone");
+    if !play_tone() {
+        running.check.set(
+            Status::Warn,
+            "No output device to play the test tone; system audio is not verified",
+            "",
+        );
+        return Ok(());
+    }
+    let (frames, nonzero) = listen(system, window)?;
+    let fix = running.check.fix.clone();
+    let check = &mut *running.check;
+    if nonzero > 0 {
+        check.pass("Test tone captured");
+    } else if frames == 0 {
+        check.fail("System audio capture did not start", fix);
+    } else {
+        check.fail(
+            "System audio is silent: the capture permission is missing",
+            SYSTEM_PERMISSION_FIX,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_capture(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
     if !system.continuous_capture() {
         // A loopback that delivers only while audio plays cannot be proven idle.
         running
@@ -554,38 +593,52 @@ fn verify_system_capture(
         return Ok(());
     }
     system.drain();
-    #[cfg(target_os = "macos")]
-    {
-        running.update("Playing an inaudible test tone");
-        if !play_test_tone() {
-            running.check.set(
-                Status::Warn,
-                "No output device to play the test tone; system audio is not verified",
-                "",
-            );
-            return Ok(());
-        }
-        let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
-        if nonzero == 0 {
-            running.check.fail(
-                "System audio is silent: the capture permission is missing",
-                SYSTEM_PERMISSION_FIX,
-            );
-            return Ok(());
-        }
-        running.check.pass("Test tone captured");
+    running.update("Playing an inaudible test tone");
+    if !play_test_tone() {
+        running.check.set(
+            Status::Warn,
+            "No output device to play the test tone; system audio is not verified",
+            "",
+        );
+        return Ok(());
     }
-    #[cfg(target_os = "linux")]
-    {
-        // A monitor records the output, but a 0.2 s tone played through the
-        // PulseAudio sink does not reach it inside this check's wait, so the
-        // first buffer is the proof. SYS LOST then comes from a failed read or
-        // 3 s without delivery.
-        running.check.pass("Monitor opened");
+    let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
+    if nonzero == 0 {
+        running.check.fail(
+            "System audio is silent: the capture permission is missing",
+            SYSTEM_PERMISSION_FIX,
+        );
+        return Ok(());
     }
+    running.check.pass("Test tone captured");
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn verify_linux_capture(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
+    if !system.continuous_capture() {
+        running
+            .check
+            .pass("Loopback opened; verified when audio plays");
+        return Ok(());
+    }
+    if !wait_for_first_buffer(running, system)? {
+        let fix = running.check.fix.clone();
+        running
+            .check
+            .fail("System audio capture did not start", fix);
+        return Ok(());
+    }
+    system.drain();
+    // A monitor records the output, but a 0.2 s tone played through the
+    // PulseAudio sink does not reach it inside this check's wait, so the
+    // first buffer is the proof. SYS LOST then comes from a failed read or
+    // 3 s without delivery.
+    running.check.pass("Monitor opened");
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
 fn wait_for_first_buffer(
     running: &mut Running<'_>,
     source: &dyn AudioSource,
@@ -626,6 +679,14 @@ fn check_diarization(
         check.set(Status::Skip, "Off", "");
         return Ok(());
     }
+    if model_catalog::runtime_asset(&model_catalog::platform_key()).is_none() {
+        check.set(
+            Status::Skip,
+            format!("Not available on {}", model_catalog::platform_label()),
+            "",
+        );
+        return Ok(());
+    }
     if !plan.config.output.save_audio {
         check.fail(
             "Speaker labels need the recording saved",
@@ -657,6 +718,7 @@ fn check_diarization(
     Ok(())
 }
 
+#[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::ffi::OsStrExt;
     let Ok(name) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
@@ -664,6 +726,11 @@ fn is_executable(path: &Path) -> bool {
     };
     // SAFETY: `name` is a valid C string.
     unsafe { libc::access(name.as_ptr(), libc::X_OK) == 0 }
+}
+
+#[cfg(windows)]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn check_llm(

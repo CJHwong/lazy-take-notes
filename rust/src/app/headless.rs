@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+#[cfg(unix)]
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -23,6 +24,7 @@ use crate::app::events::{Cancel, Event, Poster, WorkerState};
 use crate::app::workers::diarization::diarize_snapshot;
 use crate::domain::session_files::{DEBUG_LOG, NOTES, SPEAKER_TRANSCRIPT, TRANSCRIPT};
 use crate::domain::session_status::{self as st, SessionStatus};
+#[cfg(unix)]
 use crate::ports::audio_source::AudioSource as _; // set_mic_muted on the mixer
 use crate::ports::diarizer::Diarizer;
 
@@ -170,6 +172,7 @@ pub struct HeadlessSession {
     /// False after a failed AI check: transcript only, as in the TUI.
     ai_notes: bool,
     /// The mixer, for mute on SIGUSR1. None for a file.
+    #[cfg_attr(windows, allow(dead_code))] // no SIGUSR1 on Windows
     mic: Option<Arc<MixedAudioSource>>,
     writer: Writer,
     status: SessionStatus,
@@ -289,6 +292,7 @@ impl HeadlessSession {
 
     /// SIGINT and SIGTERM stop; SIGUSR1 toggles the mic. SIGHUP is left alone:
     /// `nohup` ignores it on purpose to keep the recording going.
+    #[cfg(unix)]
     fn watch_signals(&self) -> Option<tokio::task::JoinHandle<()>> {
         let mut interrupt = signal(SignalKind::interrupt()).ok()?;
         let mut terminate = signal(SignalKind::terminate()).ok()?;
@@ -318,6 +322,20 @@ impl HeadlessSession {
                         }
                     }
                 }
+            }
+        }))
+    }
+
+    /// Ctrl-C stops a headless session on Windows. There is no SIGUSR1 mute.
+    #[cfg(windows)]
+    fn watch_signals(&self) -> Option<tokio::task::JoinHandle<()>> {
+        let stopper = self.stopper();
+        Some(tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_err() {
+                    break;
+                }
+                stopper.stop();
             }
         }))
     }

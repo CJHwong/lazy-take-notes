@@ -2,6 +2,8 @@
 
 This guide writes a plugin that adds a command to `take-note`. The command reads text or audio from your own source and opens it in the transcribe screen. The [plugin API](ref_plugin_api.md) lists everything a plugin can use.
 
+The plugin host runs on macOS and Linux. The Windows terminal app does not load plugins yet.
+
 ## 1. Make the package
 
 A plugin is two files.

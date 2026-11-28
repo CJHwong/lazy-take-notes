@@ -343,10 +343,17 @@ fn opening_values_show_a_custom_model_in_its_own_field() {
     let root = tempfile::tempdir().unwrap();
     let paths = Paths::under(root.path());
     std::fs::create_dir_all(&paths.config_dir).unwrap();
-    let text = "transcription:\n  model: /models/mine.bin\n  input_device: Gone mic\n";
+    let custom = root.path().join("models/mine.bin");
+    let text = format!(
+        "transcription:\n  model: {}\n  input_device: Gone mic\n",
+        custom.display()
+    );
     std::fs::write(paths.config_dir.join("config.yaml"), text).unwrap();
     let values = form::opening_values(&load(&paths, None), &["Desk".into()]);
-    assert_eq!(values.text("cfg-trans-custom-path"), "/models/mine.bin");
+    assert_eq!(
+        values.text("cfg-trans-custom-path"),
+        custom.display().to_string()
+    );
     assert_eq!(values.text("cfg-diarization-interval"), "60");
     assert_eq!(values.text("cfg-audio-device"), "Gone mic");
     let labels: Vec<&str> = values

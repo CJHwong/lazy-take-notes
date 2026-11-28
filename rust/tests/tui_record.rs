@@ -482,6 +482,7 @@ fn an_existing_target_is_never_overwritten() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_failed_rename_keeps_the_session() {
     use std::os::unix::fs::PermissionsExt;

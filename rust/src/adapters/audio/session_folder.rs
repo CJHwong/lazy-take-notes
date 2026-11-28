@@ -138,6 +138,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_failed_rename_reads_like_python() {
         let root = tempfile::tempdir().unwrap();

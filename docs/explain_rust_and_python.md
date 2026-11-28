@@ -6,24 +6,26 @@ lazy-take-notes exists twice: the original Python app, and a native rewrite in R
 
 | Machine | App |
 |---|---|
-| Mac with Apple silicon | The native app |
-| Intel Mac, Linux, Windows | The Python app |
+| Mac with Apple silicon | The native app: terminal and window |
+| Linux x86_64 and arm64 | The native app: terminal |
+| Windows x86_64 | The native app: terminal; no window app, no plugins |
+| Intel Mac | The Python app until the Intel build lands |
 
 The Python package decides. Every install runs its `take-note` command, which is a small launcher:
 
 1. It looks for a native build for this machine in `src/lazy_take_notes/rust_release.py`. That file pins one release tag and the SHA-256 of each package.
 2. On the first start, it downloads the package from the GitHub release into the model cache, under `bin/<tag>/`, and checks the SHA-256.
-3. It replaces itself with the native app, so the terminal and the signals go straight to it.
+3. It replaces itself with the native app on macOS and Linux, so the terminal and the signals go straight to it. On Windows it runs the app and exits with its code.
 
 If anything fails (no build for this machine, no network, a wrong checksum), the launcher runs the Python app and prints one line that says why. `LTN_PYTHON=1` always runs the Python app.
 
 ## What the native app is
 
-One executable, plus `coreaudio-tap`, the small helper that captures system audio. Speech recognition runs inside it, so it needs no Python packages of its own. Python runs only when you use a plugin: the native app then starts a separate Python process, the plugin host, and talks to it.
+One executable. On macOS it also ships `coreaudio-tap`, the small helper that captures system audio. Speech recognition runs inside it, so it needs no Python packages of its own. Python runs only when you use a plugin: the native app then starts a separate Python process, the plugin host, and talks to it. The Windows terminal app does not load plugins yet.
 
-## Why only Apple silicon for now
+## System audio on each platform
 
-The native app captures system audio through Core Audio, which exists only on macOS. Intel Macs need their own build. Linux and Windows also need their own system-audio code. None of these has been built or tested yet, so those machines keep the Python app, which already supports them.
+The native app captures system audio through Core Audio on macOS, a PulseAudio monitor source on Linux, and WASAPI loopback on Windows. The Intel Mac build is next.
 
 ## How updates reach you
 

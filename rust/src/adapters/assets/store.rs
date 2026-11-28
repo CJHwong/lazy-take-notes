@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,6 +18,7 @@ use tracing::{info, warn};
 
 use super::download::{DownloadError, Expected, download_file, extract_archive, sha256_file};
 use super::file_lock;
+use crate::adapters::fs_meta::{file_key, link_count, mtime_ns};
 use crate::adapters::model_catalog::{self, RUNTIME_ID};
 use crate::adapters::paths::Paths;
 use crate::domain::errors::ModelResolutionError;
@@ -797,10 +797,6 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-fn mtime_ns(meta: &fs::Metadata) -> i64 {
-    meta.mtime() * 1_000_000_000 + meta.mtime_nsec()
-}
-
 /// Regular files under `path`, not following links. A link takes no space of its own.
 fn files(path: &Path) -> Vec<PathBuf> {
     let Ok(meta) = fs::symlink_metadata(path) else {
@@ -836,9 +832,11 @@ fn freed_bytes(paths: &[PathBuf]) -> u64 {
         let Ok(meta) = fs::metadata(&file) else {
             continue;
         };
-        let seen = inodes
-            .entry((meta.dev(), meta.ino()))
-            .or_insert((meta.len(), meta.nlink(), 0));
+        let Ok(key) = file_key(&file) else {
+            continue;
+        };
+        let links = link_count(&file).unwrap_or(1);
+        let seen = inodes.entry(key).or_insert((meta.len(), links, 0));
         seen.2 += 1;
     }
     inodes
@@ -865,7 +863,11 @@ fn copy_tree(source: &Path, target: &Path) -> io::Result<()> {
         let destination = target.join(entry.file_name());
         let kind = entry.file_type()?;
         if kind.is_symlink() {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(fs::read_link(entry.path())?, &destination)?;
+            // A Windows symlink needs a privilege; a copy keeps the runtime usable.
+            #[cfg(windows)]
+            fs::copy(entry.path(), &destination)?;
         } else if kind.is_dir() {
             copy_tree(&entry.path(), &destination)?;
         } else {
@@ -876,15 +878,7 @@ fn copy_tree(source: &Path, target: &Path) -> io::Result<()> {
 }
 
 fn free_bytes(path: &Path) -> io::Result<u64> {
-    use std::ffi::CString;
-    use std::os::unix::ffi::OsStrExt;
-    let c_path = CString::new(path.as_os_str().as_bytes()).map_err(io::Error::other)?;
-    // SAFETY: statvfs fills a zeroed struct for a valid NUL-terminated path.
-    let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c_path.as_ptr(), &mut stats) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(stats.f_bavail as u64 * stats.f_frsize)
+    fs4::available_space(path)
 }
 
 fn megabytes(size: u64) -> String {

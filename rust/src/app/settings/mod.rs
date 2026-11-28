@@ -26,7 +26,9 @@ use self::probe::{ProbeEvent, Source};
 use crate::adapters::assets::download::DownloadError;
 use crate::adapters::assets::store::{CachedModelStore, StoreError};
 use crate::adapters::config_file::{config_file_path, write_config};
-use crate::adapters::model_catalog::{NEMOTRON_ID, RUNTIME_ID};
+use crate::adapters::model_catalog::{
+    NEMOTRON_ID, RUNTIME_ID, platform_key, platform_label, runtime_asset,
+};
 use crate::adapters::paths::Paths;
 use crate::app::download_progress::{describe, megabytes};
 use crate::app::preflight::{Check, Status};
@@ -594,6 +596,8 @@ impl SettingsRuntime {
             let total: u64 = self.speaker_progress.values().map(|p| p.total).sum();
             speaker.status = format!("Downloading {} / {}", megabytes(done), megabytes(total));
             speaker.cancel = true;
+        } else if runtime_asset(&platform_key()).is_none() {
+            speaker.status = format!("Not available on {}", platform_label());
         } else {
             let runtime = self.states.get(RUNTIME_ID).map(|s| s.status);
             let model = self.states.get(NEMOTRON_ID).map(|s| s.status);

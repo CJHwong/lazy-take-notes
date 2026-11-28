@@ -129,7 +129,12 @@ fn install_downloads_records_and_reuses() {
     assert_eq!(path, fixture.entry());
     let record = &fixture.state()["assets"]["tiny"];
     assert_eq!(fixture.state()["schema"], "ltn-assets/v1");
-    assert_eq!(record["path"], "assets/whisper/tiny/ggml-tiny.bin");
+    let expected = std::path::Path::new("assets")
+        .join("whisper/tiny")
+        .join("ggml-tiny.bin")
+        .display()
+        .to_string();
+    assert_eq!(record["path"], expected.as_str());
     assert_eq!(record["sha256"], sha(BODY));
     assert_eq!(record["size"], BODY.len());
     store.install("tiny", &mut no_progress(), None).unwrap();
@@ -212,8 +217,9 @@ mod resolve {
             resolve(file.to_str().unwrap()).unwrap(),
             file.display().to_string()
         );
+        let missing = file.with_file_name("no-such-model.bin");
         assert!(
-            resolve("/no/such/model.bin")
+            resolve(missing.to_str().unwrap())
                 .unwrap_err()
                 .0
                 .starts_with("Model file not found")
@@ -233,7 +239,7 @@ mod resolve {
     #[test]
     fn a_pywhispercpp_name_uses_its_old_download() {
         let fixture = Fixture::new(vec![]);
-        let kept = fixture.dir.path().join("pyw/ggml-base.en.bin");
+        let kept = fixture.dir.path().join("pyw").join("ggml-base.en.bin");
         fs::create_dir_all(kept.parent().unwrap()).unwrap();
         fs::write(&kept, b"x").unwrap();
         assert_eq!(
@@ -279,7 +285,10 @@ mod legacy {
         fs::create_dir_all(tree.join("lib")).unwrap();
         fs::write(tree.join("bin/tool"), b"#!tool").unwrap();
         fs::write(tree.join("lib/a.so"), b"library").unwrap();
+        #[cfg(unix)]
         std::os::unix::fs::symlink("a.so", tree.join("lib/b.so")).unwrap();
+        #[cfg(windows)]
+        fs::copy(tree.join("lib/a.so"), tree.join("lib/b.so")).unwrap();
         fs::create_dir_all(fixture.dir.path().join("nemotron")).unwrap();
         let record = serde_json::json!({"binary": tree.join("bin/tool")});
         fs::write(
@@ -290,6 +299,7 @@ mod legacy {
         tree
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_legacy_runtime_tree_is_copied_with_its_links_and_can_be_deleted() {
         let fixture = Fixture::new(vec![runtime_asset()]);

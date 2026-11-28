@@ -58,6 +58,7 @@ fn the_header_stays_valid_while_writing() {
     assert_eq!(frames(&writer.path).len(), 320);
 }
 
+#[cfg(unix)]
 #[test]
 fn os_errors_read_like_python() {
     assert_eq!(
@@ -118,6 +119,7 @@ fn a_full_disk_keeps_the_audio_and_writes_it_to_the_next_file() {
     assert_eq!(seen[1], "Audio recording continues in recording_2.wav.");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_removed_session_folder_is_created_again() {
     for move_to_trash in [false, true] {
@@ -150,6 +152,7 @@ fn a_removed_session_folder_is_created_again() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_renamed_by_the_app_keeps_one_recording() {
     let root = tempfile::tempdir().unwrap();
@@ -169,6 +172,7 @@ fn a_folder_renamed_by_the_app_keeps_one_recording() {
     assert!(seen.lock().unwrap().is_empty());
 }
 
+#[cfg(unix)]
 #[test]
 fn save_audio_off_deletes_the_file_in_the_renamed_folder() {
     let root = tempfile::tempdir().unwrap();

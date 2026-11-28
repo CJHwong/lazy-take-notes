@@ -349,12 +349,16 @@ fn the_fixed_lines_read_like_python() {
         digest_count: 0,
         error: "boom".into(),
     };
+    let transcript = Path::new("/o/s")
+        .join("transcript.txt")
+        .display()
+        .to_string();
     assert_eq!(
         summary_lines(Path::new("/o/s"), &status),
-        [
-            "■ error | 01:05 | 2 seg | 0 digests",
-            "  transcript: /o/s/transcript.txt",
-            "  error:      boom"
+        vec![
+            "■ error | 01:05 | 2 seg | 0 digests".to_string(),
+            format!("  transcript: {transcript}"),
+            "  error:      boom".to_string(),
         ]
     );
 }
@@ -401,6 +405,7 @@ fn a_folder_without_its_status_file_is_kept() {
     assert!(dir.join("debug.log").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_folder_that_cannot_be_removed_is_kept() {
     use std::os::unix::fs::PermissionsExt;

@@ -13,16 +13,21 @@ import hashlib
 import os
 import platform
 import shutil
+import subprocess  # noqa: S404 -- fixed argument list, not shell=True
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.request
+import zipfile
 from pathlib import Path
+from typing import TextIO
 
 from lazy_take_notes import rust_release
 
 RELEASES = 'https://github.com/CJHwong/lazy-take-notes/releases/download'
-BINARY = 'lazy-take-notes'
+WINDOWS = os.name == 'nt'
+BINARY = 'lazy-take-notes.exe' if WINDOWS else 'lazy-take-notes'
 DOWNLOAD_TIMEOUT_S = 60
 
 
@@ -60,7 +65,10 @@ def download(url: str, target: Path) -> str:
 
 
 def extract(archive: Path, into: Path) -> None:
-    """Unpack the tarball's regular files, refusing any path that leaves `into`."""
+    """Unpack the archive's regular files, refusing any path that leaves `into`."""
+    if archive.suffix == '.zip':
+        extract_zip(archive, into)
+        return
     try:
         with tarfile.open(archive, 'r:gz') as tar:
             for member in tar.getmembers():
@@ -80,6 +88,24 @@ def extract(archive: Path, into: Path) -> None:
                     shutil.copyfileobj(source, out)
                 target.chmod(0o755)
     except (OSError, tarfile.TarError) as exc:
+        raise SetupError(f'cannot unpack the download: {exc}') from exc
+
+
+def extract_zip(archive: Path, into: Path) -> None:
+    """The Windows asset is a zip; the same path check applies."""
+    try:
+        with zipfile.ZipFile(archive) as zipped:
+            for member in zipped.infolist():
+                target = (into / member.filename).resolve()
+                if not target.is_relative_to(into.resolve()):
+                    raise SetupError(f'unsafe path in the download: {member.filename}')
+                if member.is_dir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zipped.open(member) as source, target.open('wb') as out:
+                    shutil.copyfileobj(source, out)
+    except (OSError, zipfile.BadZipFile) as exc:
         raise SetupError(f'cannot unpack the download: {exc}') from exc
 
 
@@ -107,13 +133,30 @@ def install(tag: str, asset: str, sha256: str, root: Path) -> Path:
     return final / BINARY
 
 
+def lock_file(lock: TextIO) -> None:
+    """Hold the install lock: flock on POSIX, msvcrt on Windows."""
+    if WINDOWS:
+        import msvcrt  # noqa: PLC0415 -- Windows only
+
+        lock.write('x')
+        lock.flush()
+        while True:
+            try:
+                msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.2)
+
+    import fcntl  # noqa: PLC0415 -- POSIX only
+
+    fcntl.flock(lock, fcntl.LOCK_EX)
+
+
 def locked_install(tag: str, asset: str, sha256: str, root: Path) -> Path:
     """`install`, once across processes: a second start waits, then finds it installed."""
-    import fcntl  # noqa: PLC0415 -- POSIX only; every pinned build is POSIX
-
     root.mkdir(parents=True, exist_ok=True)
     with (root / '.lock').open('w') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        lock_file(lock)
         executable = root / tag / BINARY
         if executable.is_file():
             return executable
@@ -153,6 +196,17 @@ def main() -> None:
     if executable is None:
         run_python()
         return
+    if WINDOWS:
+        try:
+            completed = subprocess.run(  # noqa: S603 -- fixed arg list, verified, pinned build
+                [str(executable), *sys.argv[1:]],
+                check=False,
+            )
+        except OSError as exc:
+            print(f'Note: running the Python version; cannot start {executable} ({exc}).', file=sys.stderr)
+            run_python()
+            return
+        raise SystemExit(completed.returncode)
     try:
         # Replace this process, so signals and the terminal go straight to the app.
         os.execv(executable, [str(executable), *sys.argv[1:]])  # noqa: S606 -- verified, pinned build

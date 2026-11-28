@@ -28,7 +28,7 @@ fn load_with(path: &Path, ffmpeg: &Path, timeout: Duration) -> Result<Vec<f32>, 
     }
     let Some(program) = find_program(ffmpeg) else {
         return Err(AudioFileError(
-            "ffmpeg is required but not found on PATH.\n  macOS:  brew install ffmpeg\n  Debian: apt install ffmpeg".into(),
+            "ffmpeg is required but not found on PATH.\n  macOS:  brew install ffmpeg\n  Debian: apt install ffmpeg\n  Windows: winget install Gyan.FFmpeg".into(),
         ));
     };
     let rate = SAMPLE_RATE.to_string();
@@ -97,6 +97,7 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> thread::JoinHandle<Vec<u8>
 }
 
 /// The program as given when it holds a slash, else the first match on PATH.
+#[cfg(unix)]
 fn find_program(program: &Path) -> Option<PathBuf> {
     if program.components().count() > 1 {
         return program.is_file().then(|| program.to_path_buf());
@@ -107,7 +108,37 @@ fn find_program(program: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-#[cfg(test)]
+#[cfg(windows)]
+fn find_program(program: &Path) -> Option<PathBuf> {
+    if program.components().count() > 1 {
+        return program.is_file().then(|| program.to_path_buf());
+    }
+    let path = std::env::var_os("PATH")?;
+    let pathext = std::env::var_os("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".into());
+    let extensions: Vec<String> = pathext
+        .to_string_lossy()
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| ext.trim_start_matches('.').to_string())
+        .collect();
+    for dir in std::env::split_paths(&path) {
+        let base = dir.join(program);
+        if base.is_file() {
+            return Some(base);
+        }
+        if program.extension().is_none() {
+            for extension in &extensions {
+                let candidate = base.with_extension(extension);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 

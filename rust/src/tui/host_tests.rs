@@ -355,12 +355,13 @@ fn a_signal_stops_the_session_and_exits_after_the_audio_flush() {
         stops: true,
         ..Probe::default()
     }));
-    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    host.message(Msg::Signal(15));
     assert!(!host.finished(), "waits for the audio flush");
     let exit_at = host.ctx.exit_at.expect("an exit is scheduled");
     assert!(exit_at <= Instant::now() + SHUTDOWN_GRACE);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_signal_exits_even_if_the_audio_worker_never_stops() {
     let runtime = runtime();
@@ -383,7 +384,7 @@ fn a_signal_with_no_session_exits_at_once() {
     let runtime = runtime();
     let mut host = host_without_watchdog(&runtime);
     host.push(Box::new(Probe::default()));
-    host.message(Msg::Signal(signal_hook::consts::SIGTERM));
+    host.message(Msg::Signal(15));
     assert!(host.finished());
 }
 
@@ -391,7 +392,7 @@ fn a_signal_with_no_session_exits_at_once() {
 fn the_exit_watchdog_is_armed_only_once() {
     let armed = AtomicBool::new(true);
     // Already armed: no second watchdog thread starts, so this returns at once.
-    arm_watchdog_once(&armed, signal_hook::consts::SIGTERM);
+    arm_watchdog_once(&armed, 15);
     assert!(armed.load(Ordering::SeqCst));
 }
 
@@ -636,9 +637,11 @@ fn a_covered_screen_gets_no_clicks() {
 
 // --- Signals and the exit watchdog, in a child process: they end the process. ---
 
+#[cfg(unix)]
 const CHILD_CASE: &str = "LTN_HOST_CHILD_CASE";
 
 /// Run `signal_child` in a fresh copy of this test binary, with `case` set.
+#[cfg(unix)]
 fn run_child(case: &str) -> (std::process::ExitStatus, Duration) {
     let started = Instant::now();
     let status = std::process::Command::new(std::env::current_exe().unwrap())
@@ -652,6 +655,7 @@ fn run_child(case: &str) -> (std::process::ExitStatus, Duration) {
 }
 
 /// The child's body. Without `LTN_HOST_CHILD_CASE` it does nothing.
+#[cfg(unix)]
 #[test]
 fn signal_child() {
     use signal_hook::consts::SIGTERM;
@@ -680,6 +684,7 @@ fn signal_child() {
     std::thread::sleep(SHUTDOWN_GRACE + FORCE_EXIT_AFTER + Duration::from_secs(5));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_hung_loop_still_exits_through_the_watchdog_after_sigterm() {
     use std::os::unix::process::ExitStatusExt;
@@ -692,6 +697,7 @@ fn a_hung_loop_still_exits_through_the_watchdog_after_sigterm() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn closing_the_handlers_gives_sigterm_its_default_action_back() {
     use std::os::unix::process::ExitStatusExt;
@@ -700,6 +706,7 @@ fn closing_the_handlers_gives_sigterm_its_default_action_back() {
     assert!(elapsed < SHUTDOWN_GRACE, "{elapsed:?}");
 }
 
+#[cfg(unix)]
 #[test]
 fn a_signal_the_os_refuses_leaves_the_host_without_handlers() {
     let (sender, _receiver) = unbounded_channel();
@@ -709,6 +716,7 @@ fn a_signal_the_os_refuses_leaves_the_host_without_handlers() {
     assert!(!armed.load(Ordering::SeqCst));
 }
 
+#[cfg(unix)]
 #[test]
 fn a_second_host_in_the_same_process_still_catches_sigterm() {
     let (status, _elapsed) = run_child("second");

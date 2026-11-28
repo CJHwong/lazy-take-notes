@@ -60,6 +60,7 @@ fn ls_without_sessions_says_where_it_looked() {
     assert_eq!(list(base.path(), true, false).stdout, ["[]"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn ls_json_matches_python_json_dumps() {
     let base = tempfile::tempdir().unwrap();

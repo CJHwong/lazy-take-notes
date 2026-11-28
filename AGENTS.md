@@ -40,6 +40,8 @@ docker run --rm ltn-linux-smoke
 ```
 Runs the Rust binary on Linux (Debian bookworm) with PulseAudio. It records the null sink's monitor while a LibriVox sentence plays, then checks the transcript and the exit code.
 
+- **Windows** (CI: `Rust (Windows x86_64)`): `cargo test --locked` on `windows-2022` with ffmpeg installed. `rust/scripts/package.ps1` builds `rust/dist/lazy-take-notes-x86_64-windows.zip`. File transcription needs ffmpeg (`winget install Gyan.FFmpeg`). The Windows release builds whisper.cpp's Vulkan backend, so `package.ps1` needs the Vulkan SDK (`winget install KhronosGroup.VulkanSDK`) and the installed app needs a GPU driver with Vulkan support. A plain `cargo build --release` stays CPU only; the GPU build is `cargo build --release --features vulkan`. Plugins and the window app are not available on Windows. Known difference 91: a session folder cannot be renamed or removed while recording; rename it after the session.
+
 
 ## Code Style
 

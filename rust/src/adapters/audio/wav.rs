@@ -1,9 +1,8 @@
 //! The session WAV: processed 16 kHz int16 mono, kept going through a failing disk.
 
 use std::collections::VecDeque;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender};
@@ -39,7 +38,7 @@ struct StreamingWav {
 
 impl StreamingWav {
     fn create(path: PathBuf, sample_rate: u32) -> Result<Self, OsError> {
-        let mut file = File::create(&path).map_err(|e| OsError::from_io(&e, Some(&path), None))?;
+        let mut file = create_wav(&path).map_err(|e| OsError::from_io(&e, Some(&path), None))?;
         let mut header = Vec::with_capacity(44);
         header.extend_from_slice(b"RIFF");
         header.extend_from_slice(&36u32.to_le_bytes());
@@ -89,17 +88,31 @@ impl StreamingWav {
     }
 
     fn still_at_path(&self) -> Result<bool, OsError> {
-        let on_disk = match std::fs::metadata(&self.path) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
-            Err(e) => return Err(OsError::from_io(&e, Some(&self.path), None)),
-        };
-        let opened = self
-            .file
-            .metadata()
+        if let Err(e) = std::fs::metadata(&self.path) {
+            if e.kind() == io::ErrorKind::NotFound {
+                return Ok(false);
+            }
+            return Err(OsError::from_io(&e, Some(&self.path), None));
+        }
+        let on_disk = crate::adapters::fs_meta::file_key(&self.path)
+            .map_err(|e| OsError::from_io(&e, Some(&self.path), None))?;
+        let opened = crate::adapters::fs_meta::file_key_of(&self.file)
             .map_err(|e| OsError::from_io(&e, None, None))?;
-        Ok((on_disk.dev(), on_disk.ino()) == (opened.dev(), opened.ino()))
+        Ok(on_disk == opened)
     }
+}
+
+/// Open the recording WAV. On Windows the handle shares delete, so the session
+/// folder can be renamed or removed while the file is still open.
+fn create_wav(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(0x7);
+    }
+    options.open(path)
 }
 
 pub type Notice = Box<dyn Fn(String) + Send>;

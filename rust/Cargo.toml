@@ -19,6 +19,8 @@ required-features = ["gui"]
 gui = ["dep:gpui-kit", "dep:cocoa", "dep:objc"]
 # The GPUI Kit test helpers for the window's tests.
 gui-test = ["gui", "gpui-kit/test-support"]
+# whisper.cpp's Vulkan backend. Off by default: the build needs the Vulkan SDK.
+vulkan = ["whisper-rs/vulkan"]
 
 [dependencies]
 async-trait = "0.1.92"
@@ -54,6 +56,7 @@ tracing-subscriber = { version = "0.3.23", default-features = false, features = 
 unicode-width = "0.2.3"
 whisper-rs = "0.16.0"
 yaml_serde = "0.10.7"
+fs4 = "1.1.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # whisper.cpp's Metal backend builds only on macOS.
@@ -63,6 +66,10 @@ whisper-rs = { version = "0.16.0", features = ["metal"] }
 # The pure Rust PulseAudio client: no libpulse, and the monitor sources cpal's
 # ALSA host cannot see. Linux still builds ALSA too, so libasound2-dev is needed.
 cpal = { version = "0.18.2", features = ["pulseaudio"] }
+
+[target."cfg(windows)".dependencies]
+wasapi = "0.27.0"
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem", "Win32_System_Power", "Win32_System_Threading", "Win32_System_Console", "Win32_Foundation"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
