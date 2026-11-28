@@ -19,6 +19,8 @@ required-features = ["gui"]
 gui = ["dep:gpui-kit", "dep:cocoa", "dep:objc"]
 # The GPUI Kit test helpers for the window's tests.
 gui-test = ["gui", "gpui-kit/test-support"]
+# whisper.cpp's Vulkan backend. Off by default: the build needs the Vulkan SDK.
+vulkan = ["whisper-rs/vulkan"]
 
 [dependencies]
 async-trait = "0.1.92"
