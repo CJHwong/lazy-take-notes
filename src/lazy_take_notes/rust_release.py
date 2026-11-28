@@ -3,24 +3,24 @@
 TAG None means no release is pinned: the launcher runs the Python app.
 """
 
-TAG: str | None = 'v0.5.0'
+TAG: str | None = 'v0.5.1'
 
 # (platform.system(), platform.machine()) -> (release asset name, SHA-256 of the asset)
 ASSETS: dict[tuple[str, str], tuple[str, str]] = {
     ('Darwin', 'arm64'): (
         'lazy-take-notes-arm64-macos.tar.gz',
-        '0b4dc4413a3a95025bb392c85b779a3a4bb90593bdc910242c793936ffc45505',
+        '5fcdfe05bd62e99914795b0180daa8e7e8491dd3d40d0d3aba98d6d8066898c2',
     ),
     ('Linux', 'aarch64'): (
         'lazy-take-notes-arm64-linux.tar.gz',
-        '50f7ad08cd8a658b3126dfde469d59cf1bfbc7966bd2bd739ca585a3095faeb3',
+        '9dceeea45ee1d7b6d85d11b1f4a7b8503cae68cf6c148ef84acfb75d50b97b4b',
     ),
     ('Linux', 'x86_64'): (
         'lazy-take-notes-x86_64-linux.tar.gz',
-        'de7ff2c6d0f041c4b87f74f9d40096cc971ac04a382ab95321e996d49f480a80',
+        '8b830a754fc41eb175684701b90dfc0ed73df543b63a526a8b77625080cc063f',
     ),
     ('Windows', 'AMD64'): (
         'lazy-take-notes-x86_64-windows.zip',
-        'f9b53f5d8e23a97507a2f47fed3d9ce9006cce573c81e75840b219e59d0acb17',
+        '4c061d6ea79cd09d3e5c3029865c222889d5d0232cff11ed46d85542dbe20b68',
     ),
 }
