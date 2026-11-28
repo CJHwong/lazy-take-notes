@@ -94,7 +94,7 @@ Existing installs keep their command: setup.sh's `take-note` wrapper runs `uvx -
 
 ### Platforms and Python removal (decided 2026-11-27, reviewed against the code 2026-11-27)
 
-This replaces "Two tracks" (2026-11-24). The Rust app covers Intel Macs, Linux and Windows, terminal app on all three; the window app on macOS and Linux. Then the Python app goes. A small Python package stays, for the launcher that existing installs run and for the plugin host.
+This replaces "Two tracks" (2026-11-24). The Rust app covers macOS arm64, Linux and Windows, terminal app on all of them; the window app on macOS and Linux. The Intel Mac was dropped on 2026-11-29. Then the Python app goes. A small Python package stays, for the launcher that existing installs run and for the plugin host.
 
 On 2026-11-27 the owner moved the Windows terminal app ahead of the Linux window app (Phase 2w below).
 
@@ -102,7 +102,7 @@ Paths in this section are relative to `rust/`, except paths that start with `../
 
 Decisions:
 
-- Platforms: macOS arm64 (done), macOS x86_64, Linux x86_64, Linux arm64 (done, Phase 1), Windows x86_64 (terminal app only).
+- Platforms: macOS arm64 (done), Linux x86_64, Linux arm64 (done, Phase 1), Windows x86_64 (terminal app only). macOS x86_64 was dropped on 2026-11-29.
 - The window app ships on macOS and Linux. Windows gets no window app.
 - Install: `setup.sh` downloads the release tarball for the machine and checks its SHA-256; Homebrew stays for the Mac window app. Windows gets a zip and `setup.ps1`.
 - Plugin subcommands and `llm_providers` keep working, through the Python plugin host.
@@ -125,7 +125,6 @@ Non-goals:
 Limits of the proofs, stated so nobody reads more into them:
 
 - Linux audio is proven in Docker with a PulseAudio null sink, and once on the owner's real desktop (Phase 3). No proof covers every distribution.
-- Intel is proven under Rosetta on Apple silicon and by `--version` and a transcription on GitHub's Intel runner. Rosetta does not prove Metal on an Intel GPU; the Intel runner does.
 
 #### Rules for every phase
 
@@ -159,7 +158,6 @@ Limits of the proofs, stated so nobody reads more into them:
 8. Run `brew update && brew upgrade --cask lazy-take-notes` on the owner's Mac, but only when no session records (`pgrep -fl __whisper-worker` prints nothing). Open the app: no permission prompt.
 9. Pin: on a branch `pin-vX.Y.Z`, run `uv run scripts/pin_rust_release.py vX.Y.Z`, commit `../src/lazy_take_notes/rust_release.py`, and push the branch (uvx installs from GitHub). Check that `ASSETS` has one entry for each platform the release built. Then run, each printing `X.Y.Z`:
    - on the Mac: `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@pin-vX.Y.Z take-note --version`;
-   - Intel, under Rosetta: the same with `--python cpython-3.12-macos-x86_64-none` added, so Python reports `x86_64` (a native uvx would pick the arm64 build);
    - Linux: the same in `docker run --rm ghcr.io/astral-sh/uv:bookworm`, for `--platform linux/amd64` and `linux/arm64`.
 
    Merge the branch: every old wrapper gets the release on its next start.
@@ -326,7 +324,7 @@ Branch: `linux-terminal`.
 - The step 5 preflight run, with its outcome in the PR.
 - The macOS arm64 build still records a 20 s call with system audio, and the test tone still verifies the tap.
 
-#### Phase 2: Intel Mac terminal app (done 2026-11-28; ships in the next release)
+#### Phase 2: Intel Mac terminal app (skipped 2026-11-29)
 
 Branch: `linux-terminal`, or `intel-mac` from `main` if Phase 1 has merged.
 
@@ -351,7 +349,7 @@ Branch: `linux-terminal`, or `intel-mac` from `main` if Phase 1 has merged.
 - `arch -x86_64 ./lazy-take-notes record --headless --mute-mic --template default_en --config <config> --output-dir <temp>` for 20 s while `afplay scripts/linux-smoke/speech.wav` plays: `words_check.py` passes on `transcript.txt`. Use a temp config at mode 0600 and a temp output folder, and do not run it while the owner records or plays audio.
 - The `macos-intel` job passes.
 
-**Done 2026-11-28:** the x86_64 tarball built on the arm64 Mac and transcribed `speech.wav` under Rosetta in 12.3 s, with 22 of 22 words found. The live record run is not done. The `macos-intel` job runs at the next release.
+**Skipped 2026-11-29:** the owner dropped Intel Mac support. The cross-build, the release asset and the `macos-intel` job were reverted. The steps stay as the record.
 
 #### Phase 2w: Windows terminal app (x86_64), release 0.5.0 (done 2026-11-28)
 
@@ -406,7 +404,9 @@ Expected assets for 0.5.0: the 0.4.0 set, plus `lazy-take-notes-x86_64-windows.z
 
 **Done 2026-11-28:** the record with mic and system audio, the test tone, a file transcribe, the Vulkan GPU path, and AI notes passed. The viewer, Settings and the template builder are not run. The release zip was checked on the owner's machine: SHA-256, `--version`, preflight, and 86 s of audio in 14.8 s at 84% GPU.
 
-#### Phase 3: window app on Intel Mac and Linux, release 0.6.0
+#### Phase 3: window app on Linux, release 0.6.0
+
+**Intel dropped 2026-11-29:** step 2 (the Intel `.app`) and the two-arch part of step 3 are out. The Linux window app remains.
 
 Branch: `gui-everywhere`.
 
@@ -457,10 +457,9 @@ Branch: `gui-everywhere`.
 8. **CI.** Job `rust-linux` installs the window packages line too, and also runs `cargo clippy --features gui --all-targets --locked -- -D warnings` and `cargo test --features gui --locked`.
 9. **setup-smoke for the window tarball.** Run the Phase 4 setup-smoke again against a 0.6.0 dry-run artifact: the GUI link, the `.desktop` file and the icon land in place.
 
-Expected assets for 0.6.0: the 0.4.0 set, plus `Lazy-Take-Notes-x86_64-macos.zip`, `lazy-take-notes-gui-x86_64-linux.tar.gz`, `lazy-take-notes-gui-arm64-linux.tar.gz`, each with `.sha256`.
+Expected assets for 0.6.0: the current set, plus `lazy-take-notes-gui-x86_64-linux.tar.gz` and `lazy-take-notes-gui-arm64-linux.tar.gz`, each with `.sha256`.
 
 **Proof:**
-- Intel `.app`, under Rosetta, opened from Finder: the window, a 20 s recording with system audio, Settings, the viewer, the template builder.
 - Linux under Xvfb in the spike image: `xvfb-run` the app, then `import -window root` (ImageMagick, in that image only) captures the sidebar, a saved session, Settings and preflight into `/tmp/shots/`. Attach the four PNGs to the PR. The owner compares them with the macOS screens: same layout, no clipped text.
 - **A real Linux desktop** (Wayland and X11, a real GPU) before the 0.6.0 tag. The owner provides the machine and runs this checklist, and writes the result in the PR:
   1. `setup.sh` installs the window app, and it opens from the app menu.
@@ -500,7 +499,7 @@ On macOS, run `setup.sh` with `HOME` set to a temp folder and answer `y` to the 
 
 #### Phase 5: remove the Python app, release 0.7.0
 
-Start only after 0.6.0 has run on the real Linux desktop, and after `main` pins a release with all five terminal assets (release procedure, step 9). Old wrappers fetch `main` on every start, so the merge of this PR changes every old install at once.
+Start only after 0.6.0 has run on the real Linux desktop, and after `main` pins a release with all four terminal assets (macOS arm64, Linux x86_64 and arm64, Windows x86_64; release procedure, step 9). Old wrappers fetch `main` on every start, so the merge of this PR changes every old install at once.
 
 Branch: `remove-python-app`.
 
@@ -566,7 +565,7 @@ Steps:
 9. **Release** 0.7.0 with the release procedure. Its pin (step 9) points every old wrapper at 0.7.0.
 
 **Proof:**
-- `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@remove-python-app take-note --version` prints the Rust version on macOS arm64, on macOS x86_64 under Rosetta, and on Linux in Docker.
+- `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@remove-python-app take-note --version` prints the Rust version on macOS arm64 and on Linux in Docker.
 - The same command with `LTN_PYTHON=1` prints the `setup.sh` line and exits 1.
 - `uvx --from git+https://github.com/CJHwong/lazy-take-notes.git@remove-python-app lazy-take-notes-plugin-host` starts and answers a JSON-RPC request.
 - The owner runs this one, because only the owner has the plugin source: with `ltn-claude-code` in `plugins.txt` and `LTN_PLUGIN_HOST_FROM` pointing at the branch, the plugin's subcommand runs, and a session that uses its LLM provider writes a digest.
@@ -577,10 +576,10 @@ Steps:
 |---|---|---|
 | 0.3.3, 0.3.4 | Phase 0 | done |
 | (pin only) | Phase 0b: pin v0.5.1 | the uvx run on the Mac |
-| 0.4.0 | skipped: Phase 1 shipped in 0.5.0, Phases 2 and 4 in the next release | the Linux Docker smoke, the Rosetta run, the `macos-intel` job, setup-smoke |
+| 0.4.0 | skipped: Phase 1 shipped in 0.5.0, Phase 4 in the next release | the Linux Docker smoke, setup-smoke |
 | 0.5.0 | Phase 2w: Windows terminal app, zip and `setup.ps1` | the `windows-2022` job, the owner's Windows checklist |
 | 0.5.1 | A terminal start of the app opens the TUI | the PTY run |
-| 0.6.0 | Phase 3: window app on Intel and Linux, plus the Intel terminal tarball and the new `setup.sh` | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
+| 0.6.0 | Phase 3: window app on Linux, the Linux window tarballs and the new `setup.sh` | the Xvfb screenshots, the real Linux desktop checklist |
 | 0.7.0 | Phase 5: Python app removed | the uvx wrapper runs, the plugin host run, the owner's plugin run |
 
 #### What the owner provides
@@ -607,7 +606,7 @@ Scope: every TUI screen. That is the menu, the pickers, preflight, record, trans
 
 Non-goals:
 - No Python change.
-- No Intel, Linux or Windows GUI. Superseded on 2026-11-27: "Platforms and Python removal" ships the window app on Intel Macs and Linux.
+- No Intel, Linux or Windows GUI. Superseded on 2026-11-27: "Platforms and Python removal" ships the window app on Linux. The Intel Mac was dropped on 2026-11-29.
 - No TUI behavior change.
 - No feature the TUI does not have.
 

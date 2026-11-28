@@ -9,7 +9,7 @@ lazy-take-notes exists twice: the original Python app, and a native rewrite in R
 | Mac with Apple silicon | The native app: terminal and window |
 | Linux x86_64 and arm64 | The native app: terminal |
 | Windows x86_64 | The native app: terminal; no window app, no plugins |
-| Intel Mac | The Python app until the Intel build lands |
+| Intel Mac | The Python app; the native build supports Apple silicon only |
 
 The Python package decides. Every install runs its `take-note` command, which is a small launcher:
 
@@ -25,7 +25,7 @@ One executable. On macOS it also ships `coreaudio-tap`, the small helper that ca
 
 ## System audio on each platform
 
-The native app captures system audio through Core Audio on macOS, a PulseAudio monitor source on Linux, and WASAPI loopback on Windows. The Intel Mac build is next.
+The native app captures system audio through Core Audio on macOS, a PulseAudio monitor source on Linux, and WASAPI loopback on Windows.
 
 ## How updates reach you
 
