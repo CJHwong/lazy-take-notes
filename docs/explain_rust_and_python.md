@@ -29,7 +29,7 @@ The native app captures system audio through Core Audio on macOS, a PulseAudio m
 
 ## How updates reach you
 
-The `take-note` command from setup.sh runs the package from `main` through uvx, so it follows the pin on `main`.
+The `take-note` command from setup.sh links the installed release binary. Run setup.sh again, or upgrade the Homebrew cask, to move to a newer release.
 
 An install with `uv tool install` is a fixed copy. It never updates. To update it:
 

@@ -99,7 +99,7 @@ take-note my-source /path/to/input
 
 `plugin add` writes the spec to `plugins.txt` in your config folder. The first start after an install takes longer, because uv installs the plugin's Python packages.
 
-The native build reads `plugins.txt` itself. The Python version reads it only through the `take-note` command that setup.sh installs. With another install of the Python version, pass the plugin to uv:
+The native build reads `plugins.txt` itself. The Python version reads it only through the old uvx wrapper; the current `setup.sh` links the native binary as `take-note`. With another install of the Python version, pass the plugin to uv:
 
 ```bash
 uvx --from "lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git" \

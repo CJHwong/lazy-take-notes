@@ -60,36 +60,117 @@ EOF
 # Pass -y (above), then set LTN_PROVIDER=ollama or LTN_PROVIDER=openai to skip prompts.
 # For openai, also set LTN_OPENAI_KEY=sk-...
 # Set LTN_SKIP_SIGNIN=1 to skip the ollama signin step.
+# LTN_VERSION=vX.Y.Z selects a release; LTN_RELEASE_URL serves a local folder.
 
 PROVIDER="${LTN_PROVIDER:-}"
 
 # ── Platform detection ───────────────────────────────────────────────────────
 
-if [[ "$(uname)" == "Darwin" ]]; then
-  PLATFORM="macos"
-  CONFIG_DIR="$HOME/Library/Application Support/lazy-take-notes"
-else
-  PLATFORM="linux"
-  CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lazy-take-notes"
-fi
+case "$(uname -s)" in
+  Darwin)
+    PLATFORM="macos"
+    CONFIG_DIR="$HOME/Library/Application Support/lazy-take-notes"
+    ;;
+  Linux)
+    PLATFORM="linux"
+    CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lazy-take-notes"
+    ;;
+  *)
+    fail "Unsupported system: $(uname -s). Supported: macOS and Linux."
+    exit 1
+    ;;
+esac
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Step 1: uv (package manager)
-# ═════════════════════════════════════════════════════════════════════════════
+case "$(uname -m)" in
+  x86_64) ARCH="x86_64" ;;
+  arm64 | aarch64) ARCH="arm64" ;;
+  *)
+    fail "Unsupported machine: $(uname -m). Supported: x86_64 and arm64."
+    exit 1
+    ;;
+esac
 
-section "1 / 5  uv (package manager)"
-if command -v uv &>/dev/null; then
-  ok "Already installed"
-else
-  info "Installing uv via standalone installer..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-  if ! command -v uv &>/dev/null; then
-    fail "Could not install uv. Install it manually: https://docs.astral.sh/uv/"
+ASSET="lazy-take-notes-$ARCH-$PLATFORM.tar.gz"
+BIN_ROOT=""
+URL_BASE=""
+TMP_DIR=""
+
+# Download a release file and its .sha256, then check the hash.
+fetch() {
+  local name="$1" expected actual
+  curl -fL "$URL_BASE/$name" -o "$TMP_DIR/$name"
+  curl -fL "$URL_BASE/$name.sha256" -o "$TMP_DIR/$name.sha256"
+  expected="$(cut -d' ' -f1 "$TMP_DIR/$name.sha256")"
+  if command -v shasum &>/dev/null; then
+    actual="$(shasum -a 256 "$TMP_DIR/$name" | cut -d' ' -f1)"
+  else
+    actual="$(sha256sum "$TMP_DIR/$name" | cut -d' ' -f1)"
+  fi
+  if [[ "$expected" != "$actual" ]]; then
+    fail "SHA-256 mismatch for $name"
     exit 1
   fi
-  ok "Installed uv"
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Step 1: Terminal app
+# ═════════════════════════════════════════════════════════════════════════════
+
+section "1 / 5  Terminal app"
+
+# Homebrew is the recommended way on a Mac. With no terminal, use the tarball.
+if [[ "$PLATFORM" == macos ]] && command -v brew &>/dev/null; then
+  info "The recommended install on macOS is:"
+  echo -e "    ${BOLD}brew install --cask CJHwong/tap/lazy-take-notes${RESET}"
+  ANSWER=""
+  if (: </dev/tty) 2>/dev/null; then
+    printf '  Install the terminal app from the tarball instead? (y/N) ' >&2
+    read -r ANSWER </dev/tty || ANSWER=""
+  fi
+  case "$ANSWER" in
+    n|N|no|No|NO)
+      echo ""
+      info "Run: brew install --cask CJHwong/tap/lazy-take-notes"
+      exit 0
+      ;;
+  esac
 fi
+
+TAG="${LTN_VERSION:-}"
+if [[ -z "$TAG" ]]; then
+  TAG="$(curl -fsSL https://api.github.com/repos/CJHwong/lazy-take-notes/releases/latest 2>/dev/null \
+    | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)" || TAG=""
+fi
+if [[ -z "$TAG" ]]; then
+  fail "Cannot read the newest release. Set LTN_VERSION=vX.Y.Z and run again."
+  exit 1
+fi
+
+URL_BASE="${LTN_RELEASE_URL:-https://github.com/CJHwong/lazy-take-notes/releases/download}/$TAG"
+BIN_ROOT="$HOME/.local/share/lazy-take-notes/$TAG"
+BIN_LINK="$HOME/.local/bin/lazy-take-notes"
+NOTE_LINK="$HOME/.local/bin/take-note"
+
+if [[ -d "$BIN_ROOT" ]] && [[ -x "$BIN_ROOT/lazy-take-notes" ]] \
+  && [[ "$(readlink "$BIN_LINK" 2>/dev/null)" == "$BIN_ROOT/lazy-take-notes" ]] \
+  && [[ "$(readlink "$NOTE_LINK" 2>/dev/null)" == "$BIN_ROOT/lazy-take-notes" ]]; then
+  ok "lazy-take-notes $TAG is already installed"
+  exit 0
+fi
+
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
+
+info "Downloading lazy-take-notes $TAG ($ASSET)"
+fetch "$ASSET"
+tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR"
+mkdir -p "$BIN_ROOT"
+cp -R "$TMP_DIR/lazy-take-notes-$ARCH-$PLATFORM/." "$BIN_ROOT/"
+chmod +x "$BIN_ROOT/lazy-take-notes"
+if [[ -f "$BIN_ROOT/coreaudio-tap" ]]; then
+  chmod +x "$BIN_ROOT/coreaudio-tap"
+fi
+ok "Installed $TAG in $BIN_ROOT"
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Step 2: Choose AI provider
@@ -180,88 +261,75 @@ else
 fi
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Step 4: take-note command
+# Step 4: Commands
 # ═════════════════════════════════════════════════════════════════════════════
 
-section "4 / 5  take-note command"
+section "4 / 5  Commands"
 
-# ── Determine install directory ──────────────────────────────────────────────
-if [[ "$PLATFORM" == "macos" ]]; then
-  INSTALL_DIR="/usr/local/bin"
-  if ! touch "$INSTALL_DIR/.ltn-write-test" 2>/dev/null; then
-    INSTALL_DIR="$HOME/.local/bin"
-  else
-    rm -f "$INSTALL_DIR/.ltn-write-test"
-  fi
-else
-  INSTALL_DIR="$HOME/.local/bin"
-fi
+mkdir -p "$HOME/.local/bin"
 
-mkdir -p "$INSTALL_DIR"
-TAKE_NOTE_BIN="$INSTALL_DIR/take-note"
-
-# ── Migrate: remove old brew-based wrapper if it exists ──────────────────────
+# An old wrapper is a regular file that runs the git checkout. The Rust binary
+# also contains the text "uvx", so match the repository URL, not uvx.
+OLD_WRAPPERS=("/usr/local/bin/take-note" "$HOME/.local/bin/take-note")
 if command -v brew &>/dev/null; then
-  OLD_BREW_BIN="$(brew --prefix)/bin/take-note"
-  if [[ -f "$OLD_BREW_BIN" ]] && [[ "$OLD_BREW_BIN" != "$TAKE_NOTE_BIN" ]]; then
-    rm -f "$OLD_BREW_BIN"
-    info "Removed old wrapper at $OLD_BREW_BIN"
+  OLD_WRAPPERS+=("$(brew --prefix)/bin/take-note")
+fi
+for wrapper in "${OLD_WRAPPERS[@]}"; do
+  [[ -f "$wrapper" ]] || continue
+  if [[ -L "$wrapper" ]]; then
+    continue
+  fi
+  if ! grep -q "lazy-take-notes.git" "$wrapper" 2>/dev/null; then
+    continue
+  fi
+  if rm -f "$wrapper" 2>/dev/null; then
+    info "Removed the old wrapper at $wrapper"
+  elif (: </dev/tty) 2>/dev/null; then
+    printf '  Remove the old wrapper at %s with sudo? (y/N) ' "$wrapper" >&2
+    read -r answer </dev/tty || answer=""
+    case "$answer" in
+      y|Y|yes|Yes|YES)
+        sudo rm -f "$wrapper"
+        info "Removed the old wrapper at $wrapper"
+        ;;
+    esac
+  fi
+done
+
+ln -sfn "$BIN_ROOT/lazy-take-notes" "$BIN_LINK"
+ln -sfn "$BIN_ROOT/lazy-take-notes" "$NOTE_LINK"
+ok "Linked lazy-take-notes and take-note in $HOME/.local/bin"
+
+# The window app ships from 0.6.0 on Linux. Its absence is not an error.
+if [[ "$PLATFORM" == linux ]]; then
+  GUI_ASSET="lazy-take-notes-gui-$ARCH-linux.tar.gz"
+  if curl -fsIL "$URL_BASE/$GUI_ASSET.sha256" >/dev/null 2>&1; then
+    info "Downloading the window app ($GUI_ASSET)"
+    fetch "$GUI_ASSET"
+    tar -xzf "$TMP_DIR/$GUI_ASSET" -C "$TMP_DIR"
+    GUI_ROOT="$TMP_DIR/lazy-take-notes-gui-$ARCH-linux"
+    mkdir -p "$BIN_ROOT/gui" "$HOME/.local/share/applications" \
+      "$HOME/.local/share/icons/hicolor/512x512/apps"
+    cp "$GUI_ROOT/lazy-take-notes-gui" "$BIN_ROOT/gui/"
+    chmod +x "$BIN_ROOT/gui/lazy-take-notes-gui"
+    ln -sfn "$BIN_ROOT/gui/lazy-take-notes-gui" "$HOME/.local/bin/lazy-take-notes-gui"
+    if [[ -f "$GUI_ROOT/lazy-take-notes.desktop" ]]; then
+      cp "$GUI_ROOT/lazy-take-notes.desktop" "$HOME/.local/share/applications/"
+    fi
+    if [[ -f "$GUI_ROOT/lazy-take-notes.png" ]]; then
+      cp "$GUI_ROOT/lazy-take-notes.png" "$HOME/.local/share/icons/hicolor/512x512/apps/"
+    fi
+    ok "Installed the window app"
   fi
 fi
 
-# ── Clean up stale alias from previous setup versions ────────────────────────
-SHELL_RC="$HOME/.zshrc"
-if grep -q "alias take-note=" "$SHELL_RC" 2>/dev/null; then
-  sed -i '' '/# lazy-take-notes/d;/alias take-note=/d' "$SHELL_RC" 2>/dev/null || true
-  info "Removed old alias from $SHELL_RC"
-fi
-
-# ── Ensure ~/.local/bin is on PATH if we're installing there ─────────────────
-if [[ "$INSTALL_DIR" == "$HOME/.local/bin" ]]; then
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*) ;;
-    *)
-      # Detect shell rc file
-      if [[ -n "${ZSH_VERSION:-}" ]] || [[ "$(basename "$SHELL")" == "zsh" ]]; then
-        RC_FILE="$HOME/.zshrc"
-      else
-        RC_FILE="$HOME/.bashrc"
-      fi
-      EXPORT_LINE='export PATH="$HOME/.local/bin:$PATH"'
-      if ! grep -qF '.local/bin' "$RC_FILE" 2>/dev/null; then
-        echo "" >> "$RC_FILE"
-        echo "# Added by lazy-take-notes setup" >> "$RC_FILE"
-        echo "$EXPORT_LINE" >> "$RC_FILE"
-        info "Added ~/.local/bin to PATH in $RC_FILE"
-      fi
-      export PATH="$HOME/.local/bin:$PATH"
-      warn "Restart your shell or run: source $RC_FILE"
-      ;;
-  esac
-fi
-
-# ── Create wrapper script ───────────────────────────────────────────────────
-UVX_PATH="$(command -v uvx 2>/dev/null)"
-if [[ -z "$UVX_PATH" ]]; then
-  warn "uvx not found in PATH — install uv first"
-  exit 1
-fi
-
-cat > "$TAKE_NOTE_BIN" << WRAPPER
-#!/bin/bash
-# Auto-generated by lazy-take-notes setup — plugins managed via 'take-note plugin add/remove'
-ARGS=()
-PLUGIN_FILE="$CONFIG_DIR/plugins.txt"
-if [[ -f "\$PLUGIN_FILE" ]]; then
-  while IFS= read -r line; do
-    [[ -n "\$line" ]] && ARGS+=(--with "\$line")
-  done < "\$PLUGIN_FILE"
-fi
-export LTN_PLUGIN_WRAPPER=1  # tells 'plugin add' that plugins.txt is read
-exec "$UVX_PATH" --from git+https://github.com/CJHwong/lazy-take-notes.git "\${ARGS[@]}" lazy-take-notes "\$@"
-WRAPPER
-chmod +x "$TAKE_NOTE_BIN"
-ok "Created 'take-note' command at $TAKE_NOTE_BIN"
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *)
+    warn "Add this line to your shell profile for the new commands:"
+    echo -e "    ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${RESET}"
+    ;;
+esac
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Step 5: config.yaml
@@ -313,18 +381,18 @@ fi
 echo ""
 section "Validating installation..."
 
-if "$TAKE_NOTE_BIN" --version &>/dev/null; then
-  VERSION="$("$TAKE_NOTE_BIN" --version 2>&1)"
+if "$NOTE_LINK" --version &>/dev/null; then
+  VERSION="$("$NOTE_LINK" --version 2>&1)"
   ok "take-note works! ($VERSION)"
 else
   fail "take-note command failed — check the output above for errors"
-  echo -e "  ${DIM}Try running manually: $TAKE_NOTE_BIN --version${RESET}"
+  echo -e "  ${DIM}Try running manually: $NOTE_LINK --version${RESET}"
   exit 1
 fi
 
 echo -e "\n${GREEN}${BOLD}Setup complete!${RESET}"
 echo -e "Run:\n"
-echo -e "  ${BOLD}take-note${RESET}          ${DIM}— interactive mode selector${RESET}"
-echo -e "  ${BOLD}take-note record${RESET}   ${DIM}— start a live recording session${RESET}"
-echo -e "  ${BOLD}take-note config${RESET}   ${DIM}— change settings anytime${RESET}"
+echo -e "  ${BOLD}lazy-take-notes${RESET}          ${DIM}— interactive mode selector${RESET}"
+echo -e "  ${BOLD}lazy-take-notes record${RESET}   ${DIM}— start a live recording session${RESET}"
+echo -e "  ${BOLD}lazy-take-notes config${RESET}   ${DIM}— change settings anytime${RESET}"
 echo ""
