@@ -192,7 +192,7 @@ fn a_writable_output_folder_passes_with_its_free_space() {
 }
 
 #[test]
-fn speaker_labels_off_skip_and_without_audio_fail() {
+fn speaker_labels_off_is_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let runtime = runtime();
     let off = plan(dir.path(), "{}", Provider::Answers, &runtime);
@@ -202,6 +202,13 @@ fn speaker_labels_off_skip_and_without_audio_fail() {
             .status,
         Status::Skip
     );
+}
+
+#[cfg(not(windows))]
+#[test]
+fn speaker_labels_without_audio_or_a_binary_fail() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = runtime();
     let no_audio = plan(
         dir.path(),
         "{diarization: {enabled: true}, output: {save_audio: false}}",
@@ -223,6 +230,30 @@ fn speaker_labels_off_skip_and_without_audio_fail() {
             .detail
             .starts_with("nemo-speech binary not found at /nowhere/nemo.")
     );
+}
+
+#[cfg(windows)]
+#[test]
+fn speaker_labels_are_not_available_on_windows() {
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = runtime();
+    let enabled = plan(
+        dir.path(),
+        "{diarization: {enabled: true, binary: /nowhere/nemo}, output: {save_audio: true}}",
+        Provider::Answers,
+        &runtime,
+    );
+    let (check, _) = run_one(check_diarization, &enabled, &mut NoTranscriber);
+    assert_eq!(check.status, Status::Skip);
+    assert_eq!(check.detail, "Not available on Windows");
+    let no_audio = plan(
+        dir.path(),
+        "{diarization: {enabled: true}, output: {save_audio: false}}",
+        Provider::Answers,
+        &runtime,
+    );
+    let (check, _) = run_one(check_diarization, &no_audio, &mut NoTranscriber);
+    assert_eq!(check.status, Status::Skip);
 }
 
 fn ai(provider: Provider) -> Check {

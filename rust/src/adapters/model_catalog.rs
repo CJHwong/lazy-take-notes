@@ -234,6 +234,16 @@ pub fn platform_key_for(os: &str, arch: &str) -> String {
     }
 }
 
+/// The OS name a person reads.
+pub fn platform_label() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    }
+}
+
 /// The diarization runtime for a platform, or None where there is none.
 pub fn runtime_asset(platform: &str) -> Option<ModelAsset> {
     RUNTIME_ASSETS

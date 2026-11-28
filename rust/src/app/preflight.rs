@@ -16,6 +16,7 @@ use crate::adapters::assets::store::CachedModelStore;
 use crate::adapters::audio::microphone::MicrophoneSource;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use crate::adapters::audio::microphone::play_test_tone;
+use crate::adapters::model_catalog;
 use crate::adapters::nemo_diarizer::NemoSpeechDiarizer;
 use crate::app::container::system_audio_source;
 use crate::app::download_progress;
@@ -676,6 +677,14 @@ fn check_diarization(
     let check = &mut *running.check;
     if !config.enabled {
         check.set(Status::Skip, "Off", "");
+        return Ok(());
+    }
+    if model_catalog::runtime_asset(&model_catalog::platform_key()).is_none() {
+        check.set(
+            Status::Skip,
+            format!("Not available on {}", model_catalog::platform_label()),
+            "",
+        );
         return Ok(());
     }
     if !plan.config.output.save_audio {
