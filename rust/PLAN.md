@@ -201,10 +201,10 @@ Limits of the proofs, stated so nobody reads more into them:
 
 Released 2026-11-27, then 0.3.4 the same day. The certificate-signed upgrade asked for no permission.
 
-#### Phase 0b: pin the newest release (open decision 2)
+#### Phase 0b: pin the newest release (done; v0.5.1)
 
-1. Run the release procedure, step 9, for `v0.3.5`. Only the Mac line applies: 0.3.5 has only the arm64 macOS asset.
-2. **Proof:** the Mac line prints `0.3.5`. Merge.
+1. Run the release procedure, step 9, for `v0.5.1`. The pin writes the macOS arm64, Linux x86_64 and arm64, and Windows x86_64 entries.
+2. **Proof:** the Mac line prints `0.5.1`. Merge.
 
 #### Phase 1: Linux terminal app (x86_64 and arm64), part of 0.4.0
 
@@ -326,7 +326,7 @@ Branch: `linux-terminal`.
 - The step 5 preflight run, with its outcome in the PR.
 - The macOS arm64 build still records a 20 s call with system audio, and the test tone still verifies the tap.
 
-#### Phase 2: Intel Mac terminal app, part of 0.4.0
+#### Phase 2: Intel Mac terminal app (done 2026-11-28; ships in the next release)
 
 Branch: `linux-terminal`, or `intel-mac` from `main` if Phase 1 has merged.
 
@@ -351,7 +351,9 @@ Branch: `linux-terminal`, or `intel-mac` from `main` if Phase 1 has merged.
 - `arch -x86_64 ./lazy-take-notes record --headless --mute-mic --template default_en --config <config> --output-dir <temp>` for 20 s while `afplay scripts/linux-smoke/speech.wav` plays: `words_check.py` passes on `transcript.txt`. Use a temp config at mode 0600 and a temp output folder, and do not run it while the owner records or plays audio.
 - The `macos-intel` job passes.
 
-#### Phase 2w: Windows terminal app (x86_64), release 0.5.0
+**Done 2026-11-28:** the x86_64 tarball built on the arm64 Mac and transcribed `speech.wav` under Rosetta in 12.3 s, with 22 of 22 words found. The live record run is not done. The `macos-intel` job runs at the next release.
+
+#### Phase 2w: Windows terminal app (x86_64), release 0.5.0 (done 2026-11-28)
 
 Decided 2026-11-27: Windows comes before the Linux window app. Terminal app only. The window app stays macOS and Linux.
 
@@ -401,6 +403,8 @@ Steps:
 Expected assets for 0.5.0: the 0.4.0 set, plus `lazy-take-notes-x86_64-windows.zip` and its `.sha256`.
 
 **Proof:** the `windows-2022` job passes, and the owner's Windows checklist passes.
+
+**Done 2026-11-28:** the record with mic and system audio, the test tone, a file transcribe, the Vulkan GPU path, and AI notes passed. The viewer, Settings and the template builder are not run. The release zip was checked on the owner's machine: SHA-256, `--version`, preflight, and 86 s of audio in 14.8 s at 84% GPU.
 
 #### Phase 3: window app on Intel Mac and Linux, release 0.6.0
 
@@ -466,7 +470,7 @@ Expected assets for 0.6.0: the 0.4.0 set, plus `Lazy-Take-Notes-x86_64-macos.zip
   5. Ctrl+N starts a session, and the theme follows the desktop's dark mode.
   6. On GNOME under Wayland (no server-side decorations), the window has a title bar that moves and closes it. If not, record it and give the window gpui's client-side decorations in a follow-up.
 
-#### Phase 4: `setup.sh` installs the binary, part of 0.4.0
+#### Phase 4: setup.sh installs the binary (done 2026-11-29; the setup-smoke rewrite is open)
 
 Branch: `linux-terminal`. The file is `../setup.sh`. Today its "Step 1: uv" (`setup.sh:77-91`) installs uv, and the steps below replace that flow.
 
@@ -572,10 +576,11 @@ Steps:
 | Version | Content | Gate before the tag |
 |---|---|---|
 | 0.3.3, 0.3.4 | Phase 0 | done |
-| (pin only) | Phase 0b: pin v0.3.5 | the uvx run on the Mac |
-| 0.4.0 | Phases 1, 2, 4: Linux and Intel terminal app, new `setup.sh`, pin for macOS arm64, macOS x86_64 and Linux | the Linux Docker smoke on both arches, the Rosetta runs, the `macos-intel` job, setup-smoke |
+| (pin only) | Phase 0b: pin v0.5.1 | the uvx run on the Mac |
+| 0.4.0 | skipped: Phase 1 shipped in 0.5.0, Phases 2 and 4 in the next release | the Linux Docker smoke, the Rosetta run, the `macos-intel` job, setup-smoke |
 | 0.5.0 | Phase 2w: Windows terminal app, zip and `setup.ps1` | the `windows-2022` job, the owner's Windows checklist |
-| 0.6.0 | Phase 3: window app on Intel and Linux, two-arch cask | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
+| 0.5.1 | A terminal start of the app opens the TUI | the PTY run |
+| 0.6.0 | Phase 3: window app on Intel and Linux, plus the Intel terminal tarball and the new `setup.sh` | the Rosetta `.app` run, the Xvfb screenshots, the real Linux desktop checklist |
 | 0.7.0 | Phase 5: Python app removed | the uvx wrapper runs, the plugin host run, the owner's plugin run |
 
 #### What the owner provides
