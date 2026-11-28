@@ -23,6 +23,11 @@ jobs:
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust
+          key: macos-arm64-gui # gitleaks:allow
+          save-if: false
       - name: Build the package
         run: bash rust/scripts/package.sh
       - name: Check that the package starts
@@ -117,6 +122,11 @@ jobs:
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust
+          key: linux-${{ matrix.arch }} # gitleaks:allow
+          save-if: false
       - name: Build the package
         run: bash rust/scripts/package.sh
       - name: Check that the package starts
@@ -139,6 +149,11 @@ jobs:
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: rust
+          key: windows-x86_64 # gitleaks:allow
+          save-if: false
       - name: Install the Vulkan SDK
         run: choco install vulkan-sdk -y --no-progress
       - name: Build the package
