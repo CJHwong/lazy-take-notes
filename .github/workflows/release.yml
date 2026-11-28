@@ -109,15 +109,18 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
+    # A binary links the builder's glibc. Build in bookworm (glibc 2.36), so the
+    # tarball runs on Debian 12 and Ubuntu 22.04 and later, not only 24.04.
+    container: rust:1-bookworm
     steps:
       - uses: actions/checkout@v4
       - name: Install system deps
         run: |
           if [ -f /etc/apt/apt-mirrors.txt ]; then
-            sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+            sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
           fi
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+          apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+          apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
             cmake clang libclang-dev libasound2-dev ffmpeg
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust

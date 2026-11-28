@@ -1,32 +1,40 @@
 FROM debian:bookworm
 
-# Base system deps for Homebrew + building Python packages
+ARG LTN_TAG=v0.5.1
+ARG LTN_ARCH=arm64
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    file \
-    git \
-    procps \
     ca-certificates \
+    curl \
+    ffmpeg \
+    libasound2 \
+    pulseaudio \
+    pulseaudio-utils \
+    python3 \
+    tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Homebrew requires a non-root user, but needs /home/linuxbrew owned correctly
-RUN useradd -m -s /bin/bash testuser \
-    && mkdir -p /home/linuxbrew/.linuxbrew \
-    && chown -R testuser:testuser /home/linuxbrew
+# setup.sh installs from a served release, so the tarball path runs against a
+# real asset. Pass a dry-run tag and arch with --build-arg to test another one.
+RUN mkdir -p /artifacts \
+    && curl -fL -o /artifacts/lazy-take-notes-$LTN_ARCH-linux.tar.gz \
+        https://github.com/CJHwong/lazy-take-notes/releases/download/$LTN_TAG/lazy-take-notes-$LTN_ARCH-linux.tar.gz \
+    && curl -fL -o /artifacts/lazy-take-notes-$LTN_ARCH-linux.tar.gz.sha256 \
+        https://github.com/CJHwong/lazy-take-notes/releases/download/$LTN_TAG/lazy-take-notes-$LTN_ARCH-linux.tar.gz.sha256
+
+RUN mkdir -p /models \
+    && curl -fL -o /models/ggml-base.en.bin \
+        https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+
+COPY setup.sh /src/setup.sh
+COPY scripts/setup-smoke/run_tests.sh /src/run_tests.sh
+COPY scripts/linux-smoke/speech.wav /src/speech.wav
+COPY scripts/linux-smoke/speech.txt /src/speech.txt
+COPY scripts/linux-smoke/words_check.py /src/words_check.py
+
+RUN useradd -m testuser && mkdir -p /srv && chown testuser:testuser /srv
 
 USER testuser
 WORKDIR /home/testuser
-
-# Install Homebrew (linuxbrew)
-RUN NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-ENV PATH="/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:$PATH"
-
-# Pre-install uv via brew (saves time in the actual setup.sh run)
-RUN brew install uv
-
-# Copy just the setup script and test runner
-COPY --chown=testuser:testuser setup.sh /home/testuser/setup.sh
-COPY --chown=testuser:testuser scripts/setup-smoke/run_tests.sh /home/testuser/run_tests.sh
-
-CMD ["bash", "/home/testuser/run_tests.sh"]
+ENV LTN_TAG=${LTN_TAG}
+CMD ["bash", "/src/run_tests.sh"]
