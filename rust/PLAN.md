@@ -408,6 +408,8 @@ Expected assets for 0.5.0: the 0.4.0 set, plus `lazy-take-notes-x86_64-windows.z
 
 **Intel dropped 2026-11-29:** step 2 (the Intel `.app`) and the two-arch part of step 3 are out. The Linux window app remains.
 
+**Progress 2026-11-29:** the window builds on Debian and stays up under Xvfb for 10 s. `package_gui.sh` makes the per-arch tarball with the `.desktop` file and icon. The setup smoke installs that tarball and checks the link, the desktop file and the icon. CI and the release build the window on both Linux arches. Shipping waits for the owner's real Linux desktop run and the Xvfb screenshots.
+
 Branch: `gui-everywhere`.
 
 1. **gpui on Linux, first a spike.** In Docker, `FROM rust:1-bookworm`, with the Phase 1 apt line plus `libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libfontconfig-dev libssl-dev mesa-vulkan-drivers xvfb fonts-dejavu-core`. Run `cargo build --release --locked --features gui --bin lazy-take-notes-gui` in `rust/`, then `xvfb-run -s "-screen 0 1280x800x24" ./target/release/lazy-take-notes-gui` for 10 s.
