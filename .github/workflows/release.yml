@@ -144,6 +144,9 @@ jobs:
   windows:
     name: Build (Windows x86_64)
     runs-on: windows-2022
+    env:
+      # The nested Vulkan shader build exceeds MAX_PATH under the workspace.
+      CARGO_TARGET_DIR: D:\target
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
@@ -153,6 +156,7 @@ jobs:
         with:
           workspaces: rust
           key: windows-x86_64 # gitleaks:allow
+          cache-directories: D:\target
           save-if: false
       - name: Install the Vulkan SDK
         run: choco install vulkan-sdk -y --no-progress

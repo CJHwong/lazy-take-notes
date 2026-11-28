@@ -29,6 +29,11 @@ $env:PATH = "$($sdk.FullName)\Bin;$env:PATH"
 # vulkan-shaders-gen project. Ninja builds the same tree without MSBuild.
 $env:CMAKE_GENERATOR = 'Ninja'
 
+# The release runner's workspace path pushes the nested shader build past
+# MAX_PATH, and cl.exe cannot create its object file there. D:\target keeps it
+# short; a local run keeps rust/target.
+$target = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $rustDir 'target' }
+
 # rustup picks the toolchain from rust/ (rust-toolchain.toml).
 Push-Location $rustDir
 try {
@@ -40,7 +45,7 @@ try {
 
 if (Test-Path $stage) { Remove-Item -Path $stage -Recurse -Force }
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-Copy-Item (Join-Path $rustDir 'target\release\lazy-take-notes.exe') $stage
+Copy-Item (Join-Path $target 'release\lazy-take-notes.exe') $stage
 
 @'
 lazy-take-notes for Windows
