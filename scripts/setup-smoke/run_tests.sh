@@ -21,7 +21,7 @@ fail() { echo -e "${RED}${BOLD}FAIL${RESET}: $1"; exit 1; }
 # Serve the release the way the setup-smoke plan describes: a local folder,
 # not GitHub. setup.sh only needs LTN_RELEASE_URL.
 mkdir -p "/srv/$TAG"
-cp /artifacts/lazy-take-notes-$ARCH-linux.tar.gz* "/srv/$TAG/"
+cp /artifacts/*.tar.gz /artifacts/*.sha256 "/srv/$TAG/"
 python3 -m http.server 8000 --directory /srv >/tmp/http.log 2>&1 &
 HTTP_PID=$!
 trap 'kill "$HTTP_PID" 2>/dev/null || true' EXIT
