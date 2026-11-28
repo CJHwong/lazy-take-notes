@@ -132,7 +132,8 @@ jobs:
           fi
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
-            cmake clang libclang-dev libasound2-dev ffmpeg
+            cmake clang libclang-dev libasound2-dev ffmpeg \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libfontconfig-dev libssl-dev
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -142,6 +143,8 @@ jobs:
           cache-on-failure: false
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
+      - run: cargo clippy --features gui --all-targets --locked -- -D warnings
+      - run: cargo test --features gui --locked
       - run: uv run --script scripts/check_layers.py
 
   rust-windows:

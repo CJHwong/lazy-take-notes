@@ -121,7 +121,8 @@ jobs:
           fi
           apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
           apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
-            cmake clang libclang-dev libasound2-dev ffmpeg
+            cmake clang libclang-dev libasound2-dev ffmpeg \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libvulkan-dev libfontconfig-dev libssl-dev
       - name: Install the pinned toolchain (rust/rust-toolchain.toml)
         working-directory: rust
         run: rustup toolchain install
@@ -132,6 +133,8 @@ jobs:
           save-if: false
       - name: Build the package
         run: bash rust/scripts/package.sh
+      - name: Build the window package
+        run: bash rust/scripts/package_gui.sh
       - name: Check that the package starts
         run: |
           tar -xzf "rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz" -C "$RUNNER_TEMP"
@@ -143,6 +146,8 @@ jobs:
           path: |
             rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz
             rust/dist/lazy-take-notes-${{ matrix.arch }}-linux.tar.gz.sha256
+            rust/dist/lazy-take-notes-gui-${{ matrix.arch }}-linux.tar.gz
+            rust/dist/lazy-take-notes-gui-${{ matrix.arch }}-linux.tar.gz.sha256
 
   windows:
     name: Build (Windows x86_64)
@@ -195,11 +200,13 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
             --title "lazy-take-notes $GITHUB_REF_NAME" \
-            --notes "The Rust build for macOS on Apple silicon and Linux (x86_64 and arm64) and Windows (x86_64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, setup.sh on Linux, or unzip and run lazy-take-notes.exe on Windows. Windows needs ffmpeg for file transcription: winget install Gyan.FFmpeg." \
+            --notes "The Rust build for macOS (Apple silicon) and Linux (x86_64 and arm64) and Windows (x86_64): the terminal app, the window app as Lazy Take Notes.app on macOS, and the Linux window app. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, setup.sh on Linux, or unzip and run lazy-take-notes.exe on Windows. Windows needs ffmpeg for file transcription: winget install Gyan.FFmpeg." \
             dist/lazy-take-notes-arm64-macos.tar.gz dist/lazy-take-notes-arm64-macos.tar.gz.sha256 \
             dist/Lazy-Take-Notes-arm64-macos.zip dist/Lazy-Take-Notes-arm64-macos.zip.sha256 \
             dist/lazy-take-notes-x86_64-linux.tar.gz dist/lazy-take-notes-x86_64-linux.tar.gz.sha256 \
+            dist/lazy-take-notes-gui-x86_64-linux.tar.gz dist/lazy-take-notes-gui-x86_64-linux.tar.gz.sha256 \
             dist/lazy-take-notes-arm64-linux.tar.gz dist/lazy-take-notes-arm64-linux.tar.gz.sha256 \
+            dist/lazy-take-notes-gui-arm64-linux.tar.gz dist/lazy-take-notes-gui-arm64-linux.tar.gz.sha256 \
             dist/lazy-take-notes-x86_64-windows.zip dist/lazy-take-notes-x86_64-windows.zip.sha256
 
   homebrew:

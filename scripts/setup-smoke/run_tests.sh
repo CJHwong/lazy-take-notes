@@ -59,6 +59,15 @@ NOTE="$FRESH/.local/bin/take-note"
 "$NOTE" --version | grep -q "${TAG#v}" || fail "take-note --version does not print $TAG"
 pass "clean install places both links and runs $TAG"
 
+# A release from 0.6.0 on carries the window package. setup.sh installs it when
+# its .sha256 exists in the served folder.
+if [[ -f "/artifacts/lazy-take-notes-gui-$ARCH-linux.tar.gz" ]]; then
+  [[ -L "$FRESH/.local/bin/lazy-take-notes-gui" ]] || fail "window link not created"
+  [[ -f "$FRESH/.local/share/applications/lazy-take-notes.desktop" ]] || fail "desktop file not installed"
+  [[ -f "$FRESH/.local/share/icons/hicolor/512x512/apps/lazy-take-notes.png" ]] || fail "icon not installed"
+  pass "window package installed"
+fi
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Test 2: second run changes nothing
 # ═════════════════════════════════════════════════════════════════════════════
