@@ -36,8 +36,9 @@ pub const LLM_PROBE_TIMEOUT: Duration = Duration::from_secs(120);
 const LLM_PROBE_PROMPT: &str = "Reply with the single word OK.";
 const MIC_READ: Duration = Duration::from_millis(1500);
 const SYSTEM_FIRST_BUFFER: Duration = Duration::from_secs(5);
+#[cfg(not(target_os = "windows"))]
 const SYSTEM_PERMISSION_WAIT: Duration = Duration::from_secs(45);
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 const SYSTEM_TONE_WAIT: Duration = Duration::from_millis(1500);
 const READ_STEP: Duration = Duration::from_millis(100);
 
@@ -412,11 +413,9 @@ fn check_whisper(
     transcriber
         .load_model(&path)
         .map_err(|e| format!("RuntimeError: {e}"))?;
-    running.update(format!("Testing {name}"));
-    let language = locale.split('-').next().unwrap_or("").to_lowercase();
-    transcriber
-        .transcribe(&vec![0.0; SAMPLE_RATE], &language, &[])
-        .map_err(|e| format!("RuntimeError: {e}"))?;
+    // The load proves the child process, the model file, and the load path. A
+    // transcribe probe on silence costs the whole timeout on a CPU, because
+    // whisper retries it across temperature levels.
     running.check.pass(name);
     Ok(())
 }
@@ -533,6 +532,51 @@ fn verify_system_capture(
     running: &mut Running<'_>,
     system: &dyn AudioSource,
 ) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    return verify_windows_capture(running, system, SYSTEM_FIRST_BUFFER, play_test_tone);
+    #[cfg(target_os = "macos")]
+    return verify_macos_capture(running, system);
+    #[cfg(target_os = "linux")]
+    verify_linux_capture(running, system)
+}
+
+/// WASAPI loopback is event driven and idle endpoints deliver nothing, so the
+/// tone comes first. It wakes the audio engine, and the read window proves the
+/// tone arrived.
+#[cfg(any(target_os = "windows", test))]
+fn verify_windows_capture(
+    running: &mut Running<'_>,
+    system: &dyn AudioSource,
+    window: Duration,
+    play_tone: impl Fn() -> bool,
+) -> Result<(), String> {
+    running.update("Playing an inaudible test tone");
+    if !play_tone() {
+        running.check.set(
+            Status::Warn,
+            "No output device to play the test tone; system audio is not verified",
+            "",
+        );
+        return Ok(());
+    }
+    let (frames, nonzero) = listen(system, window)?;
+    let fix = running.check.fix.clone();
+    let check = &mut *running.check;
+    if nonzero > 0 {
+        check.pass("Test tone captured");
+    } else if frames == 0 {
+        check.fail("System audio capture did not start", fix);
+    } else {
+        check.fail(
+            "System audio is silent: the capture permission is missing",
+            SYSTEM_PERMISSION_FIX,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn verify_macos_capture(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
     if !system.continuous_capture() {
         // A loopback that delivers only while audio plays cannot be proven idle.
         running
@@ -548,38 +592,52 @@ fn verify_system_capture(
         return Ok(());
     }
     system.drain();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        running.update("Playing an inaudible test tone");
-        if !play_test_tone() {
-            running.check.set(
-                Status::Warn,
-                "No output device to play the test tone; system audio is not verified",
-                "",
-            );
-            return Ok(());
-        }
-        let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
-        if nonzero == 0 {
-            running.check.fail(
-                "System audio is silent: the capture permission is missing",
-                SYSTEM_PERMISSION_FIX,
-            );
-            return Ok(());
-        }
-        running.check.pass("Test tone captured");
+    running.update("Playing an inaudible test tone");
+    if !play_test_tone() {
+        running.check.set(
+            Status::Warn,
+            "No output device to play the test tone; system audio is not verified",
+            "",
+        );
+        return Ok(());
     }
-    #[cfg(target_os = "linux")]
-    {
-        // A monitor records the output, but a 0.2 s tone played through the
-        // PulseAudio sink does not reach it inside this check's wait, so the
-        // first buffer is the proof. SYS LOST then comes from a failed read or
-        // 3 s without delivery.
-        running.check.pass("Monitor opened");
+    let (_frames, nonzero) = listen(system, SYSTEM_TONE_WAIT)?;
+    if nonzero == 0 {
+        running.check.fail(
+            "System audio is silent: the capture permission is missing",
+            SYSTEM_PERMISSION_FIX,
+        );
+        return Ok(());
     }
+    running.check.pass("Test tone captured");
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn verify_linux_capture(running: &mut Running<'_>, system: &dyn AudioSource) -> Result<(), String> {
+    if !system.continuous_capture() {
+        running
+            .check
+            .pass("Loopback opened; verified when audio plays");
+        return Ok(());
+    }
+    if !wait_for_first_buffer(running, system)? {
+        let fix = running.check.fix.clone();
+        running
+            .check
+            .fail("System audio capture did not start", fix);
+        return Ok(());
+    }
+    system.drain();
+    // A monitor records the output, but a 0.2 s tone played through the
+    // PulseAudio sink does not reach it inside this check's wait, so the
+    // first buffer is the proof. SYS LOST then comes from a failed read or
+    // 3 s without delivery.
+    running.check.pass("Monitor opened");
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
 fn wait_for_first_buffer(
     running: &mut Running<'_>,
     source: &dyn AudioSource,

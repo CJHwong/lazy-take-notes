@@ -8,7 +8,6 @@ use super::*;
 use crate::adapters::assets::store::LegacyDirs;
 use crate::domain::chat::ChatMessage;
 use crate::domain::transcript::TranscriptSegment;
-#[cfg(target_os = "macos")]
 use crate::ports::audio_source::AudioError;
 use crate::ports::llm::{ChatResponse, LlmError};
 use crate::ports::transcriber::TranscribeError;
@@ -259,15 +258,19 @@ fn the_ai_check_names_the_failure_and_its_fix() {
     assert_eq!(answers.status, Status::Pass);
 }
 
-/// Loads any path; fails the test transcription when asked to.
+/// Loads any path; fails the load when asked to; counts transcribe calls.
 #[derive(Default)]
 pub(crate) struct Whisper {
     loaded: Option<String>,
-    fail: bool,
+    fail_load: bool,
+    transcripts: usize,
 }
 
 impl Transcriber for Whisper {
     fn load_model(&mut self, path: &str) -> Result<(), TranscribeError> {
+        if self.fail_load {
+            return Err(TranscribeError("model load failed".into()));
+        }
         self.loaded = Some(path.into());
         Ok(())
     }
@@ -278,17 +281,13 @@ impl Transcriber for Whisper {
         _l: &str,
         _h: &[String],
     ) -> Result<Vec<TranscriptSegment>, TranscribeError> {
-        if self.fail {
-            return Err(TranscribeError(
-                "Timeout waiting for transcription result".into(),
-            ));
-        }
+        self.transcripts += 1;
         Ok(Vec::new())
     }
 }
 
 #[test]
-fn the_speech_model_check_loads_the_model_into_the_session_transcriber() {
+fn the_speech_model_check_loads_the_model_and_does_not_transcribe() {
     let dir = tempfile::tempdir().unwrap();
     let model = dir.path().join("model.bin");
     std::fs::write(&model, "m").unwrap();
@@ -302,13 +301,11 @@ fn the_speech_model_check_loads_the_model_into_the_session_transcriber() {
     let (check, details) = run_one(check_whisper, &plan, &mut whisper);
     assert_eq!(check.status, Status::Pass, "{}", check.detail);
     assert_eq!(whisper.loaded.as_deref(), model.to_str());
-    assert!(details.iter().any(|d| d.starts_with("Testing ")));
-    whisper.fail = true;
+    assert_eq!(whisper.transcripts, 0, "the check loads only");
+    assert!(details.iter().any(|d| d.starts_with("Loading ")));
+    whisper.fail_load = true;
     let (check, _) = run_one(check_whisper, &plan, &mut whisper);
-    assert_eq!(
-        check.detail,
-        "RuntimeError: Timeout waiting for transcription result"
-    );
+    assert_eq!(check.detail, "RuntimeError: model load failed");
     assert!(
         check
             .fix
@@ -375,4 +372,101 @@ fn the_linux_hints_name_no_macos_settings_or_helper() {
         assert!(!text.contains("System Settings"), "{text}");
         assert!(!text.contains("coreaudio-tap"), "{text}");
     }
+}
+
+/// A fixed system source: every read returns `block`, and the tests count reads.
+struct FixedSource {
+    block: Option<Vec<f32>>,
+    reads: std::sync::atomic::AtomicUsize,
+    continuous: bool,
+}
+
+impl AudioSource for FixedSource {
+    fn open(&self, _sample_rate: u32, _channels: u16) -> Result<(), AudioError> {
+        Ok(())
+    }
+
+    fn read(&self, _timeout: Duration) -> Result<Option<Vec<f32>>, AudioError> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(self.block.clone())
+    }
+
+    fn close(&self) -> Result<(), AudioError> {
+        Ok(())
+    }
+
+    fn continuous_capture(&self) -> bool {
+        self.continuous
+    }
+}
+
+const TONE_WINDOW: Duration = Duration::from_millis(30);
+
+/// Run the Windows check against a fake source and return the final check.
+fn windows_check(source: &FixedSource, play_tone: impl Fn() -> bool) -> Check {
+    let mut check = Check::new("system", "System audio", false);
+    check.fix = SYSTEM_PERMISSION_FIX.into();
+    let notify: Notify<'_> = &|_: &Check| {};
+    let mut running = Running {
+        check: &mut check,
+        notify,
+    };
+    verify_windows_capture(&mut running, source, TONE_WINDOW, play_tone).unwrap();
+    running.check.clone()
+}
+
+#[test]
+fn the_windows_check_plays_the_tone_before_it_reads_the_loopback() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let source = FixedSource {
+        block: Some(vec![0.5; 160]),
+        reads: AtomicUsize::new(0),
+        continuous: true,
+    };
+    let reads_at_tone = AtomicUsize::new(usize::MAX);
+    let check = windows_check(&source, || {
+        reads_at_tone.store(source.reads.load(Ordering::SeqCst), Ordering::SeqCst);
+        true
+    });
+    assert_eq!(
+        reads_at_tone.load(Ordering::SeqCst),
+        0,
+        "the tone must play before the first read"
+    );
+    assert_eq!(check.status, Status::Pass);
+    assert_eq!(check.detail, "Test tone captured");
+}
+
+#[test]
+fn a_windows_tone_that_never_arrives_names_its_cause() {
+    let no_device = FixedSource {
+        block: Some(vec![0.5; 160]),
+        reads: Default::default(),
+        continuous: true,
+    };
+    let check = windows_check(&no_device, || false);
+    assert_eq!(check.status, Status::Warn);
+    assert!(check.detail.starts_with("No output device"));
+
+    let none = FixedSource {
+        block: None,
+        reads: Default::default(),
+        continuous: true,
+    };
+    let check = windows_check(&none, || true);
+    assert_eq!(check.status, Status::Fail);
+    assert_eq!(check.detail, "System audio capture did not start");
+    assert_eq!(check.fix, SYSTEM_PERMISSION_FIX);
+
+    let zeros = FixedSource {
+        block: Some(vec![0.0; 160]),
+        reads: Default::default(),
+        continuous: true,
+    };
+    let check = windows_check(&zeros, || true);
+    assert_eq!(check.status, Status::Fail);
+    assert_eq!(
+        check.detail,
+        "System audio is silent: the capture permission is missing"
+    );
 }

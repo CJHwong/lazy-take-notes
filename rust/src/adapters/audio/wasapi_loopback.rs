@@ -88,8 +88,10 @@ impl AudioSource for WasapiLoopbackSource {
         self.run().exhausted()
     }
 
+    /// An idle loopback endpoint delivers nothing, so silence is not a stall.
+    /// The preflight plays a tone to prove the capture still works.
     fn continuous_capture(&self) -> bool {
-        true
+        false
     }
 }
 
