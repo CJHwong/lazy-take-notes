@@ -140,12 +140,7 @@ jobs:
         working-directory: rust
         run: rustup toolchain install
       - name: Install the Vulkan SDK
-        shell: pwsh
-        run: |
-          $installer = "$env:RUNNER_TEMP\vulkan-sdk.exe"
-          Invoke-WebRequest 'https://sdk.lunarg.com/sdk/download/1.4.363.0/windows/vulkansdk-windows-X64-1.4.363.0.exe' -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList '/S' -Wait
-          if (-not (Test-Path 'C:\VulkanSDK')) { throw 'Vulkan SDK install failed' }
+        run: choco install vulkan-sdk -y --no-progress
       - name: Build the package
         run: pwsh rust/scripts/package.ps1
       - name: Check that the package starts
