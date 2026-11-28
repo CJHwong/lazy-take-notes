@@ -30,6 +30,8 @@ jobs:
           save-if: false
       - name: Build the package
         run: bash rust/scripts/package.sh
+      - name: Build the Intel package
+        run: bash rust/scripts/package.sh --target x86_64-apple-darwin
       - name: Check that the package starts
         run: |
           tar -xzf rust/dist/lazy-take-notes-arm64-macos.tar.gz -C "$RUNNER_TEMP"
@@ -95,8 +97,44 @@ jobs:
           path: |
             rust/dist/lazy-take-notes-arm64-macos.tar.gz
             rust/dist/lazy-take-notes-arm64-macos.tar.gz.sha256
+            rust/dist/lazy-take-notes-x86_64-macos.tar.gz
+            rust/dist/lazy-take-notes-x86_64-macos.tar.gz.sha256
             rust/dist/Lazy-Take-Notes-arm64-macos.zip
             rust/dist/Lazy-Take-Notes-arm64-macos.zip.sha256
+
+  macos-intel:
+    name: Run (macOS x86_64)
+    runs-on: macos-15-intel
+    needs: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lazy-take-notes-arm64-macos
+          path: rust/dist
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+      - name: Download the speech model
+        run: curl -fL -o "$RUNNER_TEMP/ggml-base.en.bin" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
+      - name: Write the config
+        run: |
+          cat > "$RUNNER_TEMP/ltn.yaml" <<EOF
+          transcription:
+            model: $RUNNER_TEMP/ggml-base.en.bin
+          llm_provider: ollama
+          ollama:
+            host: http://127.0.0.1:9
+          EOF
+          chmod 600 "$RUNNER_TEMP/ltn.yaml"
+      - name: Transcribe on Intel
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          tar -xzf rust/dist/lazy-take-notes-x86_64-macos.tar.gz -C "$RUNNER_TEMP"
+          bin="$RUNNER_TEMP/lazy-take-notes-x86_64-macos/lazy-take-notes"
+          "$bin" --version
+          "$bin" --help
+          "$bin" transcribe --headless --template default_en --config "$RUNNER_TEMP/ltn.yaml" --output-dir "$RUNNER_TEMP/out" scripts/linux-smoke/speech.wav
+          python3 scripts/linux-smoke/words_check.py scripts/linux-smoke/speech.txt "$RUNNER_TEMP"/out/*/transcript.txt
 
   linux:
     name: Build (Linux ${{ matrix.arch }})
@@ -176,7 +214,7 @@ jobs:
 
   publish:
     name: Publish the release
-    needs: [macos-arm64, linux, windows]
+    needs: [macos-arm64, macos-intel, linux, windows]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     env:
@@ -192,8 +230,9 @@ jobs:
           [[ "$GITHUB_REF_NAME" == *-* ]] && prerelease=(--prerelease)
           gh release create "$GITHUB_REF_NAME" "${prerelease[@]}" \
             --title "lazy-take-notes $GITHUB_REF_NAME" \
-            --notes "The Rust build for macOS on Apple silicon and Linux (x86_64 and arm64) and Windows (x86_64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, setup.sh on Linux, or unzip and run lazy-take-notes.exe on Windows. Windows needs ffmpeg for file transcription: winget install Gyan.FFmpeg." \
+            --notes "The Rust build for macOS (Apple silicon and Intel) and Linux (x86_64 and arm64) and Windows (x86_64): the terminal app, and the window app as Lazy Take Notes.app on macOS. Install: brew install --cask CJHwong/tap/lazy-take-notes on macOS, setup.sh on Linux, or unzip and run lazy-take-notes.exe on Windows. Windows needs ffmpeg for file transcription: winget install Gyan.FFmpeg." \
             dist/lazy-take-notes-arm64-macos.tar.gz dist/lazy-take-notes-arm64-macos.tar.gz.sha256 \
+            dist/lazy-take-notes-x86_64-macos.tar.gz dist/lazy-take-notes-x86_64-macos.tar.gz.sha256 \
             dist/Lazy-Take-Notes-arm64-macos.zip dist/Lazy-Take-Notes-arm64-macos.zip.sha256 \
             dist/lazy-take-notes-x86_64-linux.tar.gz dist/lazy-take-notes-x86_64-linux.tar.gz.sha256 \
             dist/lazy-take-notes-arm64-linux.tar.gz dist/lazy-take-notes-arm64-linux.tar.gz.sha256 \
