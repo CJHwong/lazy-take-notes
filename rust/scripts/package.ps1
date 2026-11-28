@@ -25,6 +25,10 @@ if (-not $sdk) {
 $env:VULKAN_SDK = $sdk.FullName
 $env:PATH = "$($sdk.FullName)\Bin;$env:PATH"
 
+# The Visual Studio generator's file tracker fails in the nested
+# vulkan-shaders-gen project. Ninja builds the same tree without MSBuild.
+$env:CMAKE_GENERATOR = 'Ninja'
+
 # rustup picks the toolchain from rust/ (rust-toolchain.toml).
 Push-Location $rustDir
 try {
